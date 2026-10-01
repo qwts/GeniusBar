@@ -23,6 +23,18 @@ struct SoulTreeTests {
         #expect(forest.map(\.soul.agentId) == ["agent_c"])
     }
 
+    @Test("A parent cycle or a self-parent still renders every soul once")
+    func cyclesRender() {
+        func ids(_ nodes: [SoulNode]) -> [String] {
+            nodes.flatMap { [$0.soul.agentId] + ids($0.children) }
+        }
+        let cycle = buildSoulForest([soul("agent_a", parent: "agent_b"), soul("agent_b", parent: "agent_a")])
+        #expect(ids(cycle) == ["agent_a", "agent_b"])
+        #expect(cycle.count == 1)
+        let selfParent = buildSoulForest([soul("agent_x", parent: "agent_x"), soul("agent_r")])
+        #expect(ids(selfParent).sorted() == ["agent_r", "agent_x"])
+    }
+
     @Test("Every census soul renders, including left presence")
     func leftSoulsRender() {
         let forest = buildSoulForest([soul("agent_p"), soul("agent_c", parent: "agent_p", presence: .left)])
