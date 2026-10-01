@@ -41,12 +41,16 @@ notarization, and qwts/overlook, with Azure Trusted Signing for Windows.
 3. **Bundled Node as a sidecar.** The app ships an official Node binary
    through Tauri's `externalBin`, signed with the app and given the
    hardened-runtime entitlements its JavaScript engine needs. With Node it
-   bundles pinned agent-comms and agent-bot release tags, and it never uses
-   a Node the user installed.
+   bundles pinned release tags of agent-comms and of agent-bot (the
+   qwts/agent-bot-identity repository), and it never uses a Node the user
+   installed.
 4. **Services outlive the app.** First-run setup registers the broker and
-   daemon to start at login. Quitting GeniusBar never stops them, and the
-   app reconnects when it starts. Removing the services is an explicit
-   action in the app.
+   daemon to start at login. They run the Node and components inside the
+   installed app. Quitting GeniusBar never stops them, and the app
+   reconnects when it starts. After an update, GeniusBar restarts them on
+   the new version. If the app is moved or deleted while they are
+   registered, they fail to start, and the next launch registers them
+   again. Removing the services is an explicit action in the app.
 5. **Signing reuses what exists.**
    - **macOS:** cartograph's universal build, Developer ID signing, and
      notarization, from the same five secrets.
@@ -57,13 +61,15 @@ notarization, and qwts/overlook, with Azure Trusted Signing for Windows.
    the build.
 6. **Updates come from GitHub releases.** The Tauri updater reads this
    repository's releases, and update artifacts are signed with the updater
-   key. Bundled component versions change only through a GeniusBar release.
+   key. Unsigned builds are never published as updates. Bundled component
+   versions change only through a GeniusBar release.
 7. **The Swift app is the specification, then it goes.** The R1 Swift tests
    define the behaviour to port: census nesting, cycle handling, Dudle
    derivation, wire framing, custody, and launch options. The Swift package
    is removed once the Tauri app passes the equivalent tests.
 8. **No org is named.** Bundle identifiers, the service label, and the
    stored-credential name are this app's own, set through ADR-0059's host
+   configuration. The updater URL and signing identities are release
    configuration. The repository can move to another organization without
    code changes.
 
