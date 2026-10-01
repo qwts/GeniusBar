@@ -139,13 +139,22 @@ public func buildSoulForest(_ souls: [Soul]) -> [SoulNode] {
         let group = byAccount[account]!
         let byParent = Dictionary(grouping: group, by: { $0.parent ?? "" })
         let knownIDs = Set(group.map(\.agentId))
+        // Parents are claims, so a census can hold a parent cycle or a soul
+        // naming itself. Each soul is placed exactly once; a cycle no root
+        // reaches is entered at its first soul in census order.
+        var placed = Set<String>()
         func node(for soul: Soul) -> SoulNode {
+            placed.insert(soul.agentId)
             let kids = (byParent[soul.agentId] ?? [])
+                .filter { !placed.contains($0.agentId) }
                 .sorted { $0.agentId < $1.agentId }
                 .map(node(for:))
             return SoulNode(soul: soul, children: kids)
         }
         for soul in group where soul.parent == nil || !knownIDs.contains(soul.parent!) {
+            forest.append(node(for: soul))
+        }
+        for soul in group where !placed.contains(soul.agentId) {
             forest.append(node(for: soul))
         }
     }
