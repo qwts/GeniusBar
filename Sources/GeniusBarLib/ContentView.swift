@@ -1,16 +1,24 @@
-import GeniusBarLib
 import SwiftUI
 
 /// Menubar content: broker health header above the nested soul listing.
 /// The roster is the whole census, keyed by account/agent ID. While the
 /// broker is unreachable the last successful census stays on screen under
 /// a "Last known" label. Dudle blink timers stop while the menu is hidden.
-struct ContentView: View {
+public struct ContentView: View {
     @ObservedObject var state: AppState
     @State private var selected: Soul?
     @State private var menuVisible = true
+    /// Static rendering for `--snapshot` and `--window` probes: Dudle blink
+    /// timers stay stopped (eyes open, stable frame) and appearing never
+    /// starts the poll loop. Interactive use keeps the default false.
+    public var isStatic: Bool = false
 
-    var body: some View {
+    public init(state: AppState, isStatic: Bool = false) {
+        self.state = state
+        self.isStatic = isStatic
+    }
+
+    public var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             healthHeader
             if state.isLoadingCredential {
@@ -27,6 +35,14 @@ struct ContentView: View {
                 Text(state.brokerUnreachable ? "No successful census yet." : "No souls on this machine.")
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 8)
+            } else if isStatic {
+                // A PNG cannot scroll, and a ScrollView measures empty
+                // offscreen; list the same rows directly.
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(state.forest) { node in
+                        SoulRowView(node: node, depth: 0, isPaused: true) { selected = $0 }
+                    }
+                }
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 6) {
@@ -49,18 +65,26 @@ struct ContentView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Refresh") { state.refreshNow() }
-                    .buttonStyle(.link)
+                if isStatic {
+                    // Static snapshots cannot be clicked, and the link
+                    // bezel draws a broken placeholder with no window, so
+                    // show the same label as inert text.
+                    Text("Refresh")
+                        .foregroundStyle(.blue)
+                } else {
+                    Button("Refresh") { state.refreshNow() }
+                        .buttonStyle(.link)
+                }
             }
         }
         .padding(12)
         .frame(width: 360)
         .sheet(item: $selected) { soul in
-            SoulDetailView(soul: soul)
+            SoulDetailView(soul: soul, roster: allSouls(in: state.forest))
         }
         .onAppear {
             menuVisible = true
-            state.start()
+            if !isStatic { state.start() }
         }
         .onDisappear { menuVisible = false }
     }

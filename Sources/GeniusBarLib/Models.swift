@@ -92,9 +92,22 @@ public struct BrokerHealth: Codable, Sendable {
     public let pairings: PairingCounts
     public let watches: Int
 
+    public init(ok: Bool, uptimeMs: Int, eventLogBytes: Int, pairings: PairingCounts, watches: Int) {
+        self.ok = ok
+        self.uptimeMs = uptimeMs
+        self.eventLogBytes = eventLogBytes
+        self.pairings = pairings
+        self.watches = watches
+    }
+
     public struct PairingCounts: Codable, Sendable {
         public let accounts: Int
         public let principals: Int
+
+        public init(accounts: Int, principals: Int) {
+            self.accounts = accounts
+            self.principals = principals
+        }
     }
 }
 
@@ -113,6 +126,21 @@ public struct SoulNode: Sendable, Hashable, Identifiable {
         self.soul = soul
         self.children = children
     }
+}
+
+/// Display name of a soul's parent when the parent is in the roster,
+/// nil when the soul is a root or the parent ID is unknown. Matching is
+/// scoped to the soul's account so identical agent IDs under different
+/// accounts never resolve across accounts.
+public func parentDisplayName(for soul: Soul, in roster: [Soul]) -> String? {
+    guard let parentId = soul.parent else { return nil }
+    return roster.first { $0.account == soul.account && $0.agentId == parentId }?.displayName
+}
+
+/// Every soul in a forest in one flat list (pre-order), for detail panels
+/// that resolve a parent name from the roster.
+public func allSouls(in forest: [SoulNode]) -> [Soul] {
+    forest.flatMap { [$0.soul] + allSouls(in: $0.children) }
 }
 
 /// Nest subagent souls under their parent soul, preserving census order.

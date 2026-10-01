@@ -1,4 +1,3 @@
-import GeniusBarLib
 import SwiftUI
 
 /// One soul row: a select button (Dudle, display name, harness, presence,
@@ -7,14 +6,21 @@ import SwiftUI
 /// and explanation. Presence and last wake are always text, never color
 /// or motion alone; the button is keyboard-focusable with a VoiceOver
 /// label.
-struct SoulRowView: View {
-    let node: SoulNode
-    let depth: Int
+public struct SoulRowView: View {
+    public let node: SoulNode
+    public let depth: Int
     /// Set while the menu is hidden so Dudle blink timers stop.
-    var isPaused: Bool = false
-    var onSelect: (Soul) -> Void
+    public var isPaused: Bool = false
+    public var onSelect: (Soul) -> Void
 
-    var body: some View {
+    public init(node: SoulNode, depth: Int, isPaused: Bool = false, onSelect: @escaping (Soul) -> Void) {
+        self.node = node
+        self.depth = depth
+        self.isPaused = isPaused
+        self.onSelect = onSelect
+    }
+
+    public var body: some View {
         let soul = node.soul
         VStack(alignment: .leading, spacing: 2) {
             Button { onSelect(soul) } label: {

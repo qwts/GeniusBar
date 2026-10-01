@@ -291,6 +291,28 @@ struct RosterTests {
     }
 }
 
+@Suite("Parent name")
+struct ParentNameTests {
+    @Test("Known parent resolves to the parent soul's name")
+    func knownParent() {
+        let parent = Soul(account: "user", agentId: "agent_p", name: "claude-main", presence: .joined)
+        let child = Soul(account: "user", agentId: "agent_c", parent: "agent_p", presence: .joined)
+        #expect(parentDisplayName(for: child, in: [parent, child]) == "claude-main")
+    }
+
+    @Test("Unknown parent falls back to nil (caller shows the raw ID)")
+    func unknownParent() {
+        let child = Soul(account: "user", agentId: "agent_c", parent: "agent_gone", presence: .joined)
+        #expect(parentDisplayName(for: child, in: [child]) == nil)
+    }
+
+    @Test("Root soul has no parent name")
+    func nilParent() {
+        let root = Soul(account: "user", agentId: "agent_p", name: "claude-main", presence: .joined)
+        #expect(parentDisplayName(for: root, in: [root]) == nil)
+    }
+}
+
 @Suite("Blink")
 struct BlinkTests {
     @Test("Eyes are open outside the blink window")
@@ -374,5 +396,19 @@ struct PathsTests {
         #expect(bp.admin == "/tmp/t/bstate/admin.sock")
         let cp = clientPaths(env: ["AGENT_COMMS_CLIENT_STATE_DIR": "/tmp/t/cstate"])
         #expect(cp.credential == "/tmp/t/cstate/credential.json")
+    }
+}
+
+@Suite("Custody")
+struct CustodyTests {
+    @Test("Ancestors under /private/tmp pass, as with realpath in lib/custody.mjs")
+    func privateTmpAncestors() throws {
+        // /tmp is a symlink to /private/tmp; resolvingSymlinksInPath() would
+        // hand back the /tmp spelling and fail the not-a-symlink-dir check.
+        let dir = "/private/tmp/geniusbar-custody-\(getpid())/shared"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: "/private/tmp/geniusbar-custody-\(getpid())") }
+        try assertAncestors(of: dir, ownerUid: getuid())
+        try assertAncestors(of: "/tmp/geniusbar-custody-\(getpid())/shared", ownerUid: getuid())
     }
 }

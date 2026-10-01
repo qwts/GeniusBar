@@ -1,26 +1,25 @@
-import GeniusBarLib
 import SwiftUI
 
 /// Polling state for the menubar listing. All broker I/O runs off the main
 /// actor; published snapshots drive the views.
 @MainActor
-final class AppState: ObservableObject {
-    @Published var forest: [SoulNode] = []
-    @Published var health: BrokerHealth?
-    @Published var lastError: String?
-    @Published var lastRefresh: Date?
+public final class AppState: ObservableObject {
+    @Published public var forest: [SoulNode] = []
+    @Published public var health: BrokerHealth?
+    @Published public var lastError: String?
+    @Published public var lastRefresh: Date?
     /// Set while the broker is unreachable. The last successful census
     /// stays on screen as "Last known" until the next success reconciles it.
-    @Published var brokerUnreachable = false
-    @Published var isLoadingCredential = true
-    @Published var isUnpaired = false
+    @Published public var brokerUnreachable = false
+    @Published public var isLoadingCredential = true
+    @Published public var isUnpaired = false
 
     private var credential: PrincipalCredential?
     private let paths: BrokerPaths
     private let store: any CredentialStore
     private var running = false
 
-    init(paths: BrokerPaths = brokerPaths(), store: any CredentialStore) {
+    public init(paths: BrokerPaths = brokerPaths(), store: any CredentialStore) {
         self.paths = paths
         self.store = store
         Task { await loadCredential() }
@@ -51,14 +50,21 @@ final class AppState: ObservableObject {
         }
     }
 
-    func start() {
+    public func start() {
         guard !running else { return }
         running = true
         Task { await pollLoop() }
     }
 
-    func refreshNow() {
+    public func refreshNow() {
         Task { await refresh() }
+    }
+
+    /// One census+health fetch through the exact path the poll loop uses.
+    /// `--snapshot` drives this once instead of starting the loop, so the
+    /// same BrokerClient custody and auth checks are exercised.
+    public func refreshOnce() async {
+        await refresh()
     }
 
     private func pollLoop() async {
