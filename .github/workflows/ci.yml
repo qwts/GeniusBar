@@ -1,0 +1,39 @@
+# GeniusBar CI: build and test the Swift package on a macOS runner.
+#
+# Every action is pinned to a 40-hex commit, never a branch or tag (ENG-0355,
+# ENG-0282). The governed lifecycle lanes from qwts-agent-ci (ci-policy,
+# docs-gov, merge-evidence) are not adopted yet; the stable gate is named CI so
+# they can be added without renaming the required check.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.sha }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
+
+jobs:
+  build-test:
+    name: CI
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test
