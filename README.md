@@ -53,11 +53,55 @@ Environment overrides (tests, isolated brokers):
 CI (`.github/workflows/ci.yml`) runs `swift build` and `swift test` on
 `macos-latest`.
 
+## Testing the UI
+
+The menubar itself is invisible to computer-use agents and CI (status
+items are not capturable without Screen Recording permission), so two
+launch flags expose the same menu content. A launch with neither flag is
+an unchanged menubar launch.
+
+```sh
+# Render the menu content offscreen to a PNG and exit 0.
+swift run GeniusBar -- --snapshot /tmp/geniusbar.png
+
+# Render the menu content with one soul's detail panel beneath it.
+swift run GeniusBar -- --snapshot /tmp/geniusbar.png --snapshot-detail agent_abc123
+
+# Show the menu content in a regular titled window for desktop automation.
+swift run GeniusBar -- --window
+```
+
+`--snapshot` loads the keychain credential and fetches census+health
+once through the same `AppState`/`BrokerClient` path as the menubar (so
+custody and auth are exercised), renders the menu content view offscreen
+with SwiftUI `ImageRenderer` at scale 2, writes the PNG, prints
+`{"snapshot":"<path>","souls":N}` on stdout, and exits 0. Dudle blink
+animations render paused (eyes open) for a stable frame, and the app
+stays `.accessory` with no visible window. The PNG uses a fixed light
+scheme on an opaque white backdrop (the menu's material comes from its
+window, which does not exist offscreen). On any failure (unpaired,
+broker unreachable, unknown detail ID, unwritable path) the PNG still
+shows what the UI would show — e.g. the unpaired or unreachable header
+— the error goes to stderr, and the exit code is 1 (the JSON line is
+still printed so automation can locate the rendering).
+
+`--window` uses activation policy `.regular` and a titled `NSWindow`
+hosting the same `ContentView`; clicking a row opens the read-only
+detail sheet exactly as in the menu.
+
+`swift test` covers the flag parsing as a pure function
+(`parseLaunchOptions`) and renders a fixed fake forest + health through
+the same view to a PNG in a temp dir, asserting a nonzero file. The
+render test skips gracefully (and says so) when `ImageRenderer` cannot
+produce an image in the test environment.
+
 ## Layout
 
 - `Sources/GeniusBarLib/` — protocol client, models, custody, principal
-  credential store, Dudle derivation.
-- `Sources/GeniusBar/` — SwiftUI `MenuBarExtra` app, soul rows, Dudle
-  renderer, read-only detail panel.
+  credential store, Dudle derivation, `AppState`, menu/detail/Dudle
+  views, launch-flag parsing, offscreen snapshot renderer.
+- `Sources/GeniusBar/` — SwiftUI `MenuBarExtra` app wiring (`--snapshot`
+  / `--window` modes).
 - `Tests/GeniusBarTests/` — Dudle derivation, soul nesting, wire framing,
-  client decoding, credential store, paths suite.
+  client decoding, credential store, paths, launch options, snapshot
+  rendering suite.

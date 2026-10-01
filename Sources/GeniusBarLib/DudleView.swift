@@ -1,4 +1,3 @@
-import GeniusBarLib
 import SwiftUI
 
 /// The Dudle: a round, spongy character with big solid-black eyes. All
@@ -6,20 +5,27 @@ import SwiftUI
 /// animation is a periodic blink; with Reduce Motion on — or while the
 /// menu is hidden (isPaused) — the timeline stops and the eyes stay open
 /// and still.
-struct DudleView: View {
-    let spec: DudleSpec
-    var diameter: CGFloat = 28
+public struct DudleView: View {
+    public let spec: DudleSpec
+    public var diameter: CGFloat = 28
     /// Set while the menu is hidden so the blink timer stops.
-    var isPaused: Bool = false
+    public var isPaused: Bool = false
     /// VoiceOver label for the avatar; nil keeps it decorative (hidden)
     /// inside an already-labelled row.
-    var label: String? = nil
+    public var label: String? = nil
+
+    public init(spec: DudleSpec, diameter: CGFloat = 28, isPaused: Bool = false, label: String? = nil) {
+        self.spec = spec
+        self.diameter = diameter
+        self.isPaused = isPaused
+        self.label = label
+    }
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var animates: Bool { !reduceMotion && !isPaused }
 
-    var body: some View {
+    public var body: some View {
         Group {
             if let label {
                 avatar.accessibilityLabel(label).accessibilityAddTraits(.isImage)

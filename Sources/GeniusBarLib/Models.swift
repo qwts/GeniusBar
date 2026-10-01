@@ -92,9 +92,22 @@ public struct BrokerHealth: Codable, Sendable {
     public let pairings: PairingCounts
     public let watches: Int
 
+    public init(ok: Bool, uptimeMs: Int, eventLogBytes: Int, pairings: PairingCounts, watches: Int) {
+        self.ok = ok
+        self.uptimeMs = uptimeMs
+        self.eventLogBytes = eventLogBytes
+        self.pairings = pairings
+        self.watches = watches
+    }
+
     public struct PairingCounts: Codable, Sendable {
         public let accounts: Int
         public let principals: Int
+
+        public init(accounts: Int, principals: Int) {
+            self.accounts = accounts
+            self.principals = principals
+        }
     }
 }
 

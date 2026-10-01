@@ -105,24 +105,21 @@ private func unixRoundTrip(socketPath: String, requestLine: Data, timeoutSeconds
         _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
     }
 
-    var addr = sockaddr_un()
-    addr.sun_family = sa_family_t(AF_UNIX)
-    let pathCount = MemoryLayout.size(ofValue: addr.sun_path)
-    guard socketPath.utf8.count + 1 <= pathCount else {
+    // XNU accepts an AF_UNIX address up to SOCK_MAXADDRLEN (255) bytes when
+    // sun_len covers it, so a socket path past sun_path's nominal 104 bytes
+    // (deep temp dirs) still connects, as it does for Node's client.
+    let pathOffset = MemoryLayout<sockaddr_un>.offset(of: \sockaddr_un.sun_path)!
+    let pathBytes = Array(socketPath.utf8)
+    let addrLen = pathOffset + pathBytes.count + 1
+    guard addrLen <= Int(SOCK_MAXADDRLEN) else {
         throw BrokerError.unreachable("socket path too long")
     }
-    socketPath.withCString { cstr in
-        withUnsafeMutableBytes(of: &addr.sun_path) { buf in
-            if let base = buf.baseAddress {
-                strncpy(base.assumingMemoryBound(to: CChar.self), cstr, buf.count - 1)
-            }
-        }
-    }
-    let addrLen = socklen_t(MemoryLayout<sockaddr_un>.size)
-    let connected = withUnsafePointer(to: &addr) {
-        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-            connect(fd, $0, addrLen)
-        }
+    var addr = [UInt8](repeating: 0, count: max(addrLen, MemoryLayout<sockaddr_un>.size))
+    addr[0] = UInt8(addrLen)
+    addr[1] = UInt8(AF_UNIX)
+    addr.replaceSubrange(pathOffset..<(pathOffset + pathBytes.count), with: pathBytes)
+    let connected = addr.withUnsafeBytes {
+        connect(fd, $0.baseAddress!.assumingMemoryBound(to: sockaddr.self), socklen_t(addrLen))
     }
     if connected != 0 {
         let err = errno

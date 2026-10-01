@@ -40,8 +40,14 @@ private func facts(at path: String, code: CustodyError) throws -> FileFacts {
 
 /// Check every ancestor of `dir` (starting at its real parent, up to /).
 public func assertAncestors(of dir: String, ownerUid: uid_t) throws {
-    var current = URL(fileURLWithPath: dir).resolvingSymlinksInPath()
-        .deletingLastPathComponent().path
+    // realpath(3), like lib/custody.mjs's realpathSync: Foundation's
+    // resolvingSymlinksInPath() rewrites /private/tmp to the /tmp symlink.
+    let parentDir = URL(fileURLWithPath: dir).deletingLastPathComponent().path
+    guard let real = realpath(parentDir, nil) else {
+        throw CustodyError.untrusted("\(parentDir) does not exist")
+    }
+    var current = String(cString: real)
+    free(real)
     while true {
         let info = try facts(at: current, code: .untrusted(""))
         guard info.isDir else {

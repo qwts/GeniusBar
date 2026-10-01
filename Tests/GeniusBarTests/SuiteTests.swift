@@ -376,3 +376,17 @@ struct PathsTests {
         #expect(cp.credential == "/tmp/t/cstate/credential.json")
     }
 }
+
+@Suite("Custody")
+struct CustodyTests {
+    @Test("Ancestors under /private/tmp pass, as with realpath in lib/custody.mjs")
+    func privateTmpAncestors() throws {
+        // /tmp is a symlink to /private/tmp; resolvingSymlinksInPath() would
+        // hand back the /tmp spelling and fail the not-a-symlink-dir check.
+        let dir = "/private/tmp/geniusbar-custody-\(getpid())/shared"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: "/private/tmp/geniusbar-custody-\(getpid())") }
+        try assertAncestors(of: dir, ownerUid: getuid())
+        try assertAncestors(of: "/tmp/geniusbar-custody-\(getpid())/shared", ownerUid: getuid())
+    }
+}
