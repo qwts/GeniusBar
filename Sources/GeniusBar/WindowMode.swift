@@ -40,7 +40,13 @@ final class WindowModeController {
                 backing: .buffered,
                 defer: false)
             window.title = "GeniusBar"
-            window.contentView = NSHostingView(rootView: ContentView(state: state))
+            let hosting = NSHostingView(rootView: ContentView(state: state))
+            // Only the minimum size constrains the window: by default the
+            // hosting view re-fits the window to the content's ideal size
+            // (e.g. after the detail sheet closes), and a ScrollView's ideal
+            // height is near zero, collapsing the roster to one row.
+            hosting.sizingOptions = [.minSize]
+            window.contentView = hosting
             window.center()
             self.window = window
             state.start()
