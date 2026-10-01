@@ -291,6 +291,28 @@ struct RosterTests {
     }
 }
 
+@Suite("Parent name")
+struct ParentNameTests {
+    @Test("Known parent resolves to the parent soul's name")
+    func knownParent() {
+        let parent = Soul(account: "user", agentId: "agent_p", name: "claude-main", presence: .joined)
+        let child = Soul(account: "user", agentId: "agent_c", parent: "agent_p", presence: .joined)
+        #expect(parentDisplayName(for: child, in: [parent, child]) == "claude-main")
+    }
+
+    @Test("Unknown parent falls back to nil (caller shows the raw ID)")
+    func unknownParent() {
+        let child = Soul(account: "user", agentId: "agent_c", parent: "agent_gone", presence: .joined)
+        #expect(parentDisplayName(for: child, in: [child]) == nil)
+    }
+
+    @Test("Root soul has no parent name")
+    func nilParent() {
+        let root = Soul(account: "user", agentId: "agent_p", name: "claude-main", presence: .joined)
+        #expect(parentDisplayName(for: root, in: [root]) == nil)
+    }
+}
+
 @Suite("Blink")
 struct BlinkTests {
     @Test("Eyes are open outside the blink window")

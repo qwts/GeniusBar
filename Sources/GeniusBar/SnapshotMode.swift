@@ -53,7 +53,9 @@ func runSnapshotMode(snapshotPath: String, detailAgentId: String?) async {
     let content = ContentView(state: state, isStatic: true)
     let png: Data?
     if let detailSoul {
-        png = renderSnapshotPNG(of: snapshotBackdrop(content: snapshotComposite(content: content, detail: detailSoul)))
+        let roster = allSouls(in: state.forest)
+        png = renderSnapshotPNG(
+            of: snapshotBackdrop(content: snapshotComposite(content: content, detail: detailSoul, roster: roster)))
     } else {
         png = renderSnapshotPNG(of: snapshotBackdrop(content: content))
     }
@@ -89,11 +91,11 @@ func runSnapshotMode(snapshotPath: String, detailAgentId: String?) async {
 #if canImport(AppKit)
 /// Menu content on top, requested detail panel below: one PNG showing both
 /// what the menu lists and what the row's sheet would open.
-private func snapshotComposite(content: ContentView, detail soul: Soul) -> some View {
+private func snapshotComposite(content: ContentView, detail soul: Soul, roster: [Soul]) -> some View {
     VStack(alignment: .leading, spacing: 8) {
         content
         Divider()
-        SoulDetailView(soul: soul, isPaused: true)
+        SoulDetailView(soul: soul, isPaused: true, roster: roster, isStatic: true)
     }
     .padding(12)
     .frame(width: 360)

@@ -80,7 +80,7 @@ public struct ContentView: View {
         .padding(12)
         .frame(width: 360)
         .sheet(item: $selected) { soul in
-            SoulDetailView(soul: soul)
+            SoulDetailView(soul: soul, roster: allSouls(in: state.forest))
         }
         .onAppear {
             menuVisible = true
