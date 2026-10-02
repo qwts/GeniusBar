@@ -147,7 +147,8 @@ pub fn run() {
             bridge::bridge,
             bridge::setup,
             bridge::remove_services,
-            starter::starter_soul
+            starter::starter_soul,
+            bridge::harness_auth
         ])
         .setup(move |app| {
             bridge::start(app.handle().clone());

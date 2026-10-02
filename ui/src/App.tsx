@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FirstLaunch, type Starter } from './components/FirstLaunch';
+import { FirstLaunch, type HarnessAuth, type Starter } from './components/FirstLaunch';
 import { HealthHeader } from './components/HealthHeader';
 import { LaunchForm } from './components/LaunchForm';
 import { RemoveServices } from './components/RemoveServices';
@@ -31,6 +31,8 @@ interface AppProps {
   onRemoveServices?: () => Promise<void>;
   /** The bundled starter soul (R4), offered while the roster is empty. */
   starter?: Starter;
+  /** Harness sign-in after the starter launches (ADR-0276). */
+  harnessAuth?: HarnessAuth;
 }
 
 // Dudles stop blinking while the popup is hidden, as R1's did while the
@@ -50,7 +52,7 @@ const NO_CENSUS: readonly CensusRow[] = [];
 
 // The popup's root: health header, the census nested under parents, and
 // the read-only detail for a selected soul.
-export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, setup, onSetup, chat, launcher, onRemoveServices, starter }: AppProps) {
+export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, setup, onSetup, chat, launcher, onRemoveServices, starter, harnessAuth }: AppProps) {
   const forest = useMemo(() => buildSoulForest(census), [census]);
   const roster = useMemo(() => allSouls(forest), [forest]);
   // Selection holds the roster key and resolves against each census, so
@@ -71,6 +73,11 @@ export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, 
   const footer = footerStatus(connection);
   const showSetup = Boolean(setup && onSetup && (setup.running || needsSetup(connection)));
   const [launchingPackage, setLaunchingPackage] = useState(false);
+  // The first launch stays open from the click until closed, so its result
+  // and sign-in remain after the new soul fills the roster.
+  const [starterOpen, setStarterOpen] = useState(false);
+  const canOfferStarter = Boolean(starter && launcher && connection.bridgeConnected && !connection.brokerUnreachable && !showSetup);
+  const showStarter = canOfferStarter && (starterOpen || forest.length === 0);
   const launch = useMemo(() => launcher && {
     launcher,
     accounts: [...new Set(roster.map((s) => s.account))].sort(),
@@ -80,15 +87,23 @@ export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, 
   return (
     <main className="popup">
       <HealthHeader connection={connection} />
+      {showStarter && starter && launcher && (
+        <section className="detail" aria-label="Your first soul">
+          <FirstLaunch starter={starter} launcher={launcher} auth={harnessAuth} onStart={() => setStarterOpen(true)} />
+          {starterOpen && launcher.state.phase !== 'requesting' && launcher.state.phase !== 'pending' && (
+            <div className="detail-actions">
+              <button type="button" onClick={() => setStarterOpen(false)}>Close</button>
+            </div>
+          )}
+        </section>
+      )}
       {/* The setup panel replaces the roster, which has nothing true to say yet. */}
       {showSetup && setup && onSetup ? (
         <SetupPanel setup={setup} onSetup={onSetup} />
       ) : (
         <section className="roster" aria-label="Souls">
           {forest.length === 0
-            ? (starter && launcher && connection.bridgeConnected && !connection.brokerUnreachable
-              ? <FirstLaunch starter={starter} launcher={launcher} />
-              : empty && <p className="muted empty">{empty}</p>)
+            ? !showStarter && empty && <p className="muted empty">{empty}</p>
             : forest.map((node) => (
                 <SoulRow
                   key={soulKey(node.soul)}

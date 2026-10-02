@@ -33,7 +33,18 @@ pub const HOST_ENV: &[(&str, &str)] = &[
     ("AGENT_COMMS_SERVICE_LABEL", "app.geniusbar.broker"),
     ("AGENT_COMMS_CREDENTIAL_NAME", "app.geniusbar.principal"),
     ("AGENT_BOT_SERVICE_LABEL", "app.geniusbar.agent-bot"),
+    // GeniusBar's daemon runs the souls it launches (ADR-0276).
+    ("AGENT_BOT_EXECUTOR", "1"),
 ];
+
+/// The bundled npm, which the daemon uses to install soul harnesses.
+pub fn npm_cli(resources: &std::path::Path) -> std::path::PathBuf {
+    resources
+        .join("components")
+        .join("npm")
+        .join("bin")
+        .join("npm-cli.js")
+}
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const RESTART_MIN: Duration = Duration::from_secs(1);
@@ -263,6 +274,7 @@ async fn run_setup<R: Runtime>(app: &AppHandle<R>) -> Result<(), BridgeError> {
         .sidecar("node")
         .map_err(|e| unavailable(e.to_string()))?
         .envs(HOST_ENV.iter().copied())
+        .env("AGENT_BOT_NPM", npm_cli(&resources))
         .args([
             resources.join("bridge").join("setup.mjs"),
             resources.join("components").join("agent-comms"),
@@ -327,6 +339,7 @@ async fn run_services<R: Runtime>(app: &AppHandle<R>, action: &str) -> Result<Va
         .sidecar("node")
         .map_err(|e| unavailable(e.to_string()))?
         .envs(HOST_ENV.iter().copied())
+        .env("AGENT_BOT_NPM", npm_cli(&resources))
         .args([
             resources
                 .join("bridge")
@@ -383,6 +396,18 @@ pub fn refresh_services<R: Runtime>(app: AppHandle<R>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn harness_auth_reads_sign_in_state_or_error() {
+        let ok = parse_harness_auth(b"{\"harness\":\"claude\",\"loggedIn\":false}\n").unwrap();
+        assert_eq!(ok["loggedIn"], false);
+        let err =
+            parse_harness_auth(b"{\"error\":{\"message\":\"claude sign-in did not finish\"}}\n")
+                .unwrap_err();
+        assert_eq!(err.message, "claude sign-in did not finish");
+        assert!(parse_harness_auth(b"").is_err());
+        assert!(parse_harness_auth(b"{\"harness\":\"claude\"}").is_err());
+    }
 
     #[test]
     fn parses_results_and_errors() {
@@ -462,4 +487,73 @@ mod tests {
             ))
         );
     }
+}
+
+/// A harness's sign-in for a soul (ADR-0276): `status` reports
+/// `{harness, loggedIn}`; `login` runs the harness's own browser sign-in
+/// first. Credentials stay in the harness's store.
+#[tauri::command]
+pub async fn harness_auth<R: Runtime>(
+    app: AppHandle<R>,
+    action: String,
+    harness: String,
+    soul: String,
+) -> Result<Value, BridgeError> {
+    let unavailable = |e: String| BridgeError::new("harness-auth-unavailable", &e);
+    if !matches!(action.as_str(), "status" | "login") {
+        return Err(BridgeError::new(
+            "harness-auth-invalid",
+            "action must be status or login",
+        ));
+    }
+    let resources = app
+        .path()
+        .resource_dir()
+        .map_err(|e| unavailable(e.to_string()))?;
+    let output = app
+        .shell()
+        .sidecar("node")
+        .map_err(|e| unavailable(e.to_string()))?
+        .envs(HOST_ENV.iter().copied())
+        .args([
+            resources
+                .join("components")
+                .join("agent-bot")
+                .join("agent-bot.mjs")
+                .into_os_string(),
+            "harness".into(),
+            "auth".into(),
+            action.into(),
+            harness.into(),
+            "--soul".into(),
+            soul.into(),
+        ])
+        .output()
+        .await
+        .map_err(|e| unavailable(e.to_string()))?;
+    parse_harness_auth(&output.stdout)
+}
+
+/// agent-bot's `harness auth` line: `{harness, loggedIn}` or `{error}`.
+fn parse_harness_auth(stdout: &[u8]) -> Result<Value, BridgeError> {
+    let failed = |message: &str| BridgeError::new("harness-auth-failed", message);
+    let line = stdout
+        .split(|b| *b == b'\n')
+        .rev()
+        .find(|line| !line.iter().all(u8::is_ascii_whitespace))
+        .unwrap_or_default();
+    let value: Value =
+        serde_json::from_slice(line).map_err(|_| failed("agent-bot gave no result"))?;
+    if let Some(error) = value.get("error") {
+        return Err(failed(
+            error
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("sign-in failed"),
+        ));
+    }
+    if value.get("loggedIn").and_then(Value::as_bool).is_none() {
+        return Err(failed("agent-bot gave no sign-in state"));
+    }
+    Ok(value)
 }
