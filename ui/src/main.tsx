@@ -2,6 +2,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import { inApp } from './bridge';
+import { SnapshotApp } from './SnapshotApp';
+import { deliverSnapshot, snapshotOptions, type SnapshotOptions } from './snapshot';
 import { useCensus } from './useCensus';
 import { useChat } from './useChat';
 import { useLaunch } from './useLaunch';
@@ -21,8 +24,16 @@ function Live() {
   );
 }
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <Live />
-  </StrictMode>,
-);
+async function start() {
+  const root = document.getElementById('root')!;
+  const snapshot: SnapshotOptions | null = inApp() ? await snapshotOptions() : null;
+  if (snapshot) document.documentElement.classList.add('snapshot');
+  const deliver = (souls: number, error: string | null) => { void deliverSnapshot(root, souls, error); };
+  createRoot(root).render(
+    <StrictMode>
+      {snapshot ? <SnapshotApp options={snapshot} deliver={deliver} /> : <Live />}
+    </StrictMode>,
+  );
+}
+
+void start();

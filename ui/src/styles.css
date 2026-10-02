@@ -80,3 +80,5 @@ body { background: var(--bg); color: var(--fg); }
 .confirm { flex-basis: 100%; display: grid; gap: 6px; }
 .confirm p { margin: 0; }
 .status { flex-wrap: wrap; }
+/* Snapshot mode (#6): a fixed light scheme, as R1's PNGs were. */
+:root.snapshot { color-scheme: light; --bg: #ffffff; --fg: #1d1d1f; --muted: #6e6e73; --line: #e5e5ea; }
