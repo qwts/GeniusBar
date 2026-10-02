@@ -142,9 +142,14 @@ pub fn run() {
         .manage(bridge::Bridge::default())
         .manage(Dismissed::default())
         .manage(updates::Updates::default())
-        .invoke_handler(tauri::generate_handler![bridge::bridge, bridge::setup])
+        .invoke_handler(tauri::generate_handler![
+            bridge::bridge,
+            bridge::setup,
+            bridge::remove_services
+        ])
         .setup(move |app| {
             bridge::start(app.handle().clone());
+            bridge::refresh_services(app.handle().clone());
             updates::init(app.handle())?;
             let window = app
                 .get_webview_window("main")

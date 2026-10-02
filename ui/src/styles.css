@@ -77,3 +77,6 @@ body { background: var(--bg); color: var(--fg); }
 .launch input[readonly] { border-color: transparent; padding-left: 0; }
 .launch p { margin: 0; }
 .detail-actions { gap: 8px; }
+.confirm { flex-basis: 100%; display: grid; gap: 6px; }
+.confirm p { margin: 0; }
+.status { flex-wrap: wrap; }

@@ -46,7 +46,8 @@
     "resources": {
       "resources/components/": "components/",
       "../bridge/bridge.mjs": "bridge/bridge.mjs",
-      "../bridge/setup.mjs": "bridge/setup.mjs"
+      "../bridge/setup.mjs": "bridge/setup.mjs",
+      "../bridge/services.mjs": "bridge/services.mjs"
     }
   }
 }

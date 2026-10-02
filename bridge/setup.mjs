@@ -2,13 +2,15 @@
 // First-run setup (#9, ADR-0004 decision 4), run only when the owner asks.
 // It uses the bundled agent-comms CLI to make sure a broker is answering,
 // pair and approve this account, and pair and approve GeniusBar as a
-// principal. Approval is the owner's authority, used here on the owner's
-// click; the long-lived bridge never approves anything.
+// principal, then the bundled agent-bot to make sure an identity daemon is
+// running and paired with the broker. Approval is the owner's authority,
+// used here on the owner's click; the long-lived bridge never approves
+// anything.
 //
 // Progress goes to stdout as JSON lines: {step, state, detail?}, then
 // {done: true} or {done: false, code, message}.
 //
-// usage: node setup.mjs AGENT_COMMS_DIR
+// usage: node setup.mjs AGENT_COMMS_DIR AGENT_BOT_DIR
 
 import { execFile } from 'node:child_process';
 import path from 'node:path';
@@ -16,6 +18,7 @@ import { pathToFileURL } from 'node:url';
 
 export const PRINCIPAL_NAME = 'GeniusBar';
 const BROKER_WAIT_MS = 15_000;
+const DAEMON_WAIT_MS = 15_000;
 
 /** The CLI prints an optional hint line, then one JSON document. */
 export function parseOutput(text) {
@@ -40,7 +43,7 @@ function failed(result, fallback) {
   return new SetupError(error?.code ?? fallback, error?.message ?? `${fallback}`);
 }
 
-export async function runSetup({ cli, report, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now }) {
+export async function runSetup({ cli, bot, report, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now }) {
   // 1. A broker. Use whichever one already answers on the shared socket;
   // install ours only when none does, so two brokers never compete. A
   // socket file proves nothing (a crashed broker leaves one), so ask the
@@ -91,22 +94,49 @@ export async function runSetup({ cli, report, sleep = (ms) => new Promise((r) =>
     if (approved?.state !== 'approved') throw failed(approved, 'principal-approve-failed');
   }
   report({ step: 'principal', state: 'done' });
+
+  // 4. An identity daemon, paired with the broker so it can carry out
+  // launches. A daemon that already runs (say, from a Homebrew agent-bot) is
+  // used as it is; GeniusBar registers its own only when none runs. Pairing
+  // comes first: a running daemon picks the credential up on its next retry.
+  report({ step: 'daemon', state: 'running' });
+  let daemon = await bot(['daemon', 'status', '--json']);
+  if (!daemon?.comms?.paired) {
+    const paired = await bot(['daemon', 'pair-comms', '--json']);
+    if (!paired?.code && paired?.state !== 'approved') throw failed(paired, 'daemon-pair-failed');
+    if (paired.state !== 'approved') {
+      const approved = await cli(['broker', 'approve', paired.code]);
+      if (approved?.state !== 'approved') throw failed(approved, 'daemon-approve-failed');
+    }
+  }
+  if (!daemon?.running) {
+    const installed = await bot(['daemon', 'install', '--json']);
+    if (!installed?.label) throw failed(installed, 'daemon-install-failed');
+    const deadline = now() + DAEMON_WAIT_MS;
+    do {
+      if (now() > deadline) throw new SetupError('daemon-not-ready', 'the identity daemon did not start');
+      await sleep(250);
+      daemon = await bot(['daemon', 'status', '--json']);
+    } while (!daemon?.running);
+  }
+  report({ step: 'daemon', state: 'done' });
 }
 
 async function main() {
-  const [commsDir] = process.argv.slice(2);
-  if (!commsDir) {
-    process.stderr.write('usage: setup.mjs AGENT_COMMS_DIR\n');
+  const [commsDir, botDir] = process.argv.slice(2);
+  if (!commsDir || !botDir) {
+    process.stderr.write('usage: setup.mjs AGENT_COMMS_DIR AGENT_BOT_DIR\n');
     process.exit(2);
   }
-  const bin = path.join(commsDir, 'bin', 'agent-comms.mjs');
-  // The CLI exits non-zero on errors but still prints its JSON.
-  const cli = (args) => new Promise((resolve) => {
+  // The CLIs exit non-zero on errors but still print their JSON.
+  const runner = (bin) => (args) => new Promise((resolve) => {
     execFile(process.execPath, [bin, ...args], { timeout: 30_000 }, (_error, stdout) => resolve(parseOutput(String(stdout))));
   });
+  const cli = runner(path.join(commsDir, 'bin', 'agent-comms.mjs'));
+  const bot = runner(path.join(botDir, 'agent-bot.mjs'));
   const write = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
   try {
-    await runSetup({ cli, report: write });
+    await runSetup({ cli, bot, report: write });
     write({ done: true });
   } catch (error) {
     write({ done: false, code: error.code ?? 'setup-failed', message: String(error.message ?? error) });

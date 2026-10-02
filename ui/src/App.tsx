@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { HealthHeader } from './components/HealthHeader';
 import { LaunchForm } from './components/LaunchForm';
+import { RemoveServices } from './components/RemoveServices';
 import { SetupPanel } from './components/SetupPanel';
 import { SoulDetail } from './components/SoulDetail';
 import { SoulRow } from './components/SoulRow';
@@ -25,6 +26,8 @@ interface AppProps {
   chat?: ChatApi;
   /** Launching souls and packages (#18); without it there is no Launch. */
   launcher?: LaunchApi;
+  /** Removes GeniusBar's login services (#9); without it there is no action. */
+  onRemoveServices?: () => Promise<void>;
 }
 
 // Dudles stop blinking while the popup is hidden, as R1's did while the
@@ -44,7 +47,7 @@ const NO_CENSUS: readonly CensusRow[] = [];
 
 // The popup's root: health header, the census nested under parents, and
 // the read-only detail for a selected soul.
-export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, setup, onSetup, chat, launcher }: AppProps) {
+export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, setup, onSetup, chat, launcher, onRemoveServices }: AppProps) {
   const forest = useMemo(() => buildSoulForest(census), [census]);
   const roster = useMemo(() => allSouls(forest), [forest]);
   // Selection holds the roster key and resolves against each census, so
@@ -119,7 +122,7 @@ export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, 
           </div>
         </section>
       )}
-      {(footer || onRefresh || (launch && !showSetup)) && (
+      {(footer || onRefresh || onRemoveServices || (launch && !showSetup)) && (
         <footer className="status">
           {footer && <span className={footer.isError ? 'error small' : 'muted small'}>{footer.text}</span>}
           {launch && !showSetup && !launchingPackage && (
@@ -127,6 +130,7 @@ export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, 
               Launch package…
             </button>
           )}
+          {onRemoveServices && !setup?.running && <RemoveServices onRemove={onRemoveServices} />}
           {onRefresh && (
             <button type="button" className="link" onClick={onRefresh}>
               Refresh

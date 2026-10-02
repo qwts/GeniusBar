@@ -118,4 +118,20 @@ describe('App setup', () => {
     render(<App census={sampleCensus} connection={sampleConnection} isStatic />);
     expect(screen.queryByRole('button', { name: 'Launch package…' })).toBeNull();
   });
+
+  it('removes services only after the owner confirms, and shows a failure inline', async () => {
+    const onRemove = vi.fn<() => Promise<void>>(async () => { throw new Error('launchctl would not unload'); });
+    render(<App connection={sampleConnection} onRemoveServices={onRemove} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove services…' }));
+    expect(onRemove).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('group', { name: 'Remove services' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove services…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'launchctl would not unload');
+    onRemove.mockResolvedValueOnce(undefined);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    expect(await screen.findByText('Services removed.')).toBeTruthy();
+    expect(onRemove).toHaveBeenCalledTimes(2);
+  });
 });

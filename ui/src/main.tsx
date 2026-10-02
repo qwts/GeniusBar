@@ -1,3 +1,4 @@
+import { invoke } from '@tauri-apps/api/core';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
@@ -15,7 +16,8 @@ function Live() {
   const launcher = useLaunch();
   return (
     <App census={census} connection={connection} onRefresh={refresh} setup={setup}
-      onSetup={() => { void runSetup(); }} chat={chat} launcher={launcher} />
+      onSetup={() => { void runSetup(); }} chat={chat} launcher={launcher}
+      onRemoveServices={async () => { await invoke('remove_services'); void refresh?.(); }} />
   );
 }
 
