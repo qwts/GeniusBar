@@ -27,11 +27,12 @@ function fakeCli(script) {
   return { cli, calls };
 }
 
-const present = { socket: { present: true } };
+const live = { ok: true, pairings: [] };
+const down = { ok: false, error: { code: 'broker-unreachable' } };
 
 test('fresh machine: installs the broker, pairs and approves both', async () => {
   const { cli, calls } = fakeCli({
-    'broker status': [{ socket: { present: false } }, { socket: { present: false } }, present],
+    'broker pairings': [down, down, live],
     'broker install': [{ ok: true }],
     'account status': [{ ok: false, error: { code: 'unpaired' } }],
     'account pair': [{ ok: true, account: 'me', code: 'AC1', state: 'pending' }],
@@ -48,17 +49,16 @@ test('fresh machine: installs the broker, pairs and approves both', async () => 
 
 test('an existing broker is reused, never replaced', async () => {
   const { cli, calls } = fakeCli({
-    'broker status': [present],
+    'broker pairings': [live],
     'account status': [{ ok: true, account: 'me', state: 'approved' }],
     census: [{ ok: true, souls: [] }],
   });
   await runSetup({ cli, report: () => {} });
-  assert.deepEqual(calls, ['broker status', 'account status', 'census']);
+  assert.deepEqual(calls, ['broker pairings', 'account status', 'census']);
 });
 
 test('a pending account is approved with its listed code', async () => {
   const { cli, calls } = fakeCli({
-    'broker status': [present],
     'account status': [{ ok: true, account: 'me', state: 'pending' }],
     'broker pairings': [{ ok: true, pairings: [{ account: 'other', state: 'pending', code: 'X' }, { account: 'me', state: 'pending', code: 'ME1' }] }],
     'broker approve ME1': [{ ok: true, state: 'approved' }],
@@ -69,15 +69,21 @@ test('a pending account is approved with its listed code', async () => {
 });
 
 test('a revoked account stops setup with its state', async () => {
-  const { cli } = fakeCli({ 'broker status': [present], 'account status': [{ ok: true, account: 'me', state: 'revoked' }] });
+  const { cli } = fakeCli({ 'broker pairings': [live], 'account status': [{ ok: true, account: 'me', state: 'revoked' }] });
   await assert.rejects(runSetup({ cli, report: () => {} }), { code: 'account-not-approved' });
 });
 
 test('a broker that never comes up times out', async () => {
   let t = 0;
-  const { cli } = fakeCli({ 'broker status': [{ socket: { present: false } }], 'broker install': [{ ok: true }] });
+  const { cli } = fakeCli({ 'broker pairings': [down], 'broker install': [{ ok: true }] });
   await assert.rejects(runSetup({ cli, report: () => {}, sleep: async () => { t += 1000; }, now: () => t }),
     { code: 'broker-not-ready' });
+});
+
+test('a broker that answers with any other error is never reinstalled', async () => {
+  const { cli, calls } = fakeCli({ 'broker pairings': [{ ok: false, error: { code: 'broker-untrusted', message: 'custody' } }] });
+  await assert.rejects(runSetup({ cli, report: () => {} }), { code: 'broker-untrusted' });
+  assert.deepEqual(calls, ['broker pairings']);
 });
 
 // End to end with the bundled agent-comms against a throwaway broker, when
