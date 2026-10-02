@@ -99,6 +99,11 @@ export function healthHeader(s: ConnectionSnapshot): HeaderState {
       `watches ${h.watches}`;
     return { tone: 'ok', title: 'Broker healthy', detail, label: `Broker healthy. ${detail}` };
   }
+  // The principal client has no health op; a census proves the broker is up.
+  if (s.lastRefresh) {
+    const title = 'Connected to agent-comms';
+    return { tone: 'ok', title, detail: null, label: title };
+  }
   const title = 'Broker status unknown';
   return { tone: 'unknown', title, detail: null, label: title };
 }
