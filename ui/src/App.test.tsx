@@ -2,6 +2,8 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { sampleCensus, sampleConnection } from './model/fixtures';
+import { idleSetup } from './model/setup';
+import { disconnected } from './model/status';
 
 afterEach(cleanup);
 
@@ -51,5 +53,15 @@ describe('App', () => {
     expect(screen.getAllByRole('button', { name: /presence/ })).toHaveLength(3);
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     expect(onRefresh).toHaveBeenCalledOnce();
+  });
+});
+
+describe('App setup', () => {
+  it('replaces the roster with the setup panel while setup is needed', () => {
+    const unpaired = { ...disconnected, bridgeConnected: true, unpaired: true };
+    render(<App connection={unpaired} setup={idleSetup} onSetup={() => {}} />);
+    expect(screen.getByRole('region', { name: 'Setup' })).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Souls' })).toBeNull();
+    expect(screen.queryByText('No souls on this machine.')).toBeNull();
   });
 });
