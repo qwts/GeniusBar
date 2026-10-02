@@ -50,7 +50,8 @@
       "../bridge/services.mjs": "bridge/services.mjs",
       "../souls/starter.soul/": "souls/starter.soul/",
       "../bin/agent-comms": "bin/agent-comms",
-      "../bin/agent-bot": "bin/agent-bot"
+      "../bin/agent-bot": "bin/agent-bot",
+      "../bin/node": "bin/node"
     }
   }
 }
