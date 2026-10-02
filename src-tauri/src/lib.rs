@@ -3,6 +3,7 @@
 //! reaches agent-comms through the Node bridge (#7).
 
 mod bridge;
+mod soul_package;
 mod starter;
 mod updates;
 
@@ -14,12 +15,12 @@ use std::{
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    App, Manager, RunEvent, WebviewWindow, WindowEvent,
+    App, Emitter, Manager, RunEvent, WebviewWindow, WindowEvent,
 };
 use tauri_plugin_positioner::{Position, WindowExt};
 
 /// How the app presents itself, chosen from the command line as in R1.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Mode {
     /// The normal menubar/tray item with a popup.
     Tray,
@@ -137,10 +138,12 @@ fn install_tray(app: &mut App, window: &WebviewWindow) -> tauri::Result<()> {
 
 pub fn run() {
     let mode = parse_mode(std::env::args().skip(1));
+    let tray_mode = mode == Mode::Tray;
     tauri::Builder::default()
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_shell::init())
         .manage(bridge::Bridge::default())
+        .manage(soul_package::PendingSoulPackages::default())
         .manage(Dismissed::default())
         .manage(updates::Updates::default())
         .invoke_handler(tauri::generate_handler![
@@ -148,6 +151,8 @@ pub fn run() {
             bridge::setup,
             bridge::remove_services,
             starter::starter_soul,
+            soul_package::take_opened_soul_packages,
+            soul_package::validate_soul_package,
             starter::install_dev_tools,
             bridge::harness_auth
         ])
@@ -166,7 +171,23 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("GeniusBar failed to start")
-        .run(|app, event| {
+        .run(move |app, event| {
+            #[cfg(target_os = "macos")]
+            if let RunEvent::Opened { urls } = &event {
+                let opened = app
+                    .state::<soul_package::PendingSoulPackages>()
+                    .enqueue_urls(urls);
+                if !opened.is_empty() {
+                    let _ = app.emit("soul-package-opened", ());
+                    if let Some(window) = app.get_webview_window("main") {
+                        if tray_mode {
+                            let _ = window.move_window(Position::TrayCenter);
+                        }
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                }
+            }
             if let RunEvent::Exit = event {
                 bridge::stop(app);
             }

@@ -14,7 +14,7 @@ describe('applyCensus', () => {
   it('an unreachable broker keeps the last refresh time', () => {
     const ok = applyCensus(disconnected, { ok: true, souls: [] }, now);
     const s = applyCensus(ok, { ok: false, code: 'broker-unreachable', message: 'no broker socket' }, later);
-    expect(s).toMatchObject({ brokerUnreachable: true, lastRefresh: now, lastError: 'no broker socket (broker-unreachable)' });
+    expect(s).toMatchObject({ brokerUnreachable: true, lastRefresh: now, lastError: 'GeniusBar can’t reach its background service yet.' });
   });
 
   it('credential errors mean unpaired, with the pairing hint', () => {
@@ -25,10 +25,11 @@ describe('applyCensus', () => {
   it('bridge errors mean not connected yet', () => {
     const s = applyCensus(disconnected, { ok: false, code: 'bridge-unavailable', message: 'starting' }, now);
     expect(s.bridgeConnected).toBe(false);
+    expect(s.lastError).toBe('GeniusBar had trouble starting its background service. Try reopening GeniusBar.');
   });
 
   it('other errors are reported without claiming an outage', () => {
     const s = applyCensus(disconnected, { ok: false, code: 'rate-limited', message: 'slow down' }, now);
-    expect(s).toMatchObject({ bridgeConnected: true, brokerUnreachable: false, lastError: 'slow down (rate-limited)' });
+    expect(s).toMatchObject({ bridgeConnected: true, brokerUnreachable: false, lastError: 'slow down' });
   });
 });

@@ -9,10 +9,11 @@ afterEach(cleanup);
 describe('SoulRow', () => {
   const [luna, child, left] = sampleCensus;
 
-  it('labels a row in text: name, harness, presence, unacked, last wake', () => {
-    expect(soulRowLabel(luna)).toBe('luna, codex, presence joined, unacked 0, last wake 2026-01-01T00:00:01Z');
-    expect(soulRowLabel(child)).toBe('agent_c, unknown harness, presence watching, unacked 3, last wake none');
-    expect(soulRowLabel(left)).toMatch(/presence left.*Left — no longer available/);
+  it('uses friendly state text and avoids technical counters', () => {
+    expect(soulRowLabel(luna)).toBe('luna, codex, Ready');
+    expect(soulRowLabel(child)).toBe('agent_c, unknown harness, Starting');
+    expect(soulRowLabel(child, 2)).toBe('agent_c, unknown harness, Starting, 2 unread messages');
+    expect(soulRowLabel(left)).toMatch(/Unavailable.*Left — no longer available/);
   });
 
   it('renders subagents indented beneath their parent and selects any row', () => {

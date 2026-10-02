@@ -32,7 +32,7 @@ describe('useLaunch', () => {
     }) as never;
     const { result } = renderHook(() => useLaunch({ callImpl, pollMs: 5 }));
     await act(() => result.current.launch(request));
-    expect(result.current.state).toMatchObject({ phase: 'error', text: expect.stringMatching(/No agent-bot daemon is watching account user/) });
+    expect(result.current.state).toMatchObject({ phase: 'error', text: expect.stringMatching(/can’t reach the agents on account user/i) });
     await new Promise((r) => setTimeout(r, 30));
     expect(calls).toEqual(['launch']);
   });

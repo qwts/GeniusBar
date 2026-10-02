@@ -109,7 +109,7 @@ describe('composer keys', () => {
 
     const failed = sendFailed(first.composer, 'broker-timeout', 'late');
     expect(failed.draft).toBe('hello');
-    expect(failed.error).toMatch(/not be delivered twice/);
+    expect(failed.error).toMatch(/draft is safe here/);
     const retry = beginSend(failed, newKey);
     expect(retry.key).toBe('key-1');
     expect(retry.composer.error).toBeNull();
@@ -142,8 +142,8 @@ describe('composer keys', () => {
     expect(sendErrorText('unknown-recipient', '')).toMatch(/cannot receive/);
     expect(sendErrorText('rate-limited', '')).toMatch(/Too many/);
     expect(sendErrorText('mailbox-full', '')).toMatch(/mailbox is full/);
-    expect(sendErrorText('broker-unreachable', '')).toMatch(/Cannot reach the broker/);
-    expect(sendErrorText('weird', 'boom')).toBe('Could not send (weird): boom');
+    expect(sendErrorText('broker-unreachable', '')).toMatch(/can’t connect right now/i);
+    expect(sendErrorText('weird', 'boom')).toBe('GeniusBar couldn’t send your message. Try again, and ask for help if the problem continues.');
   });
 });
 

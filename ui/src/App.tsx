@@ -27,6 +27,8 @@ interface AppProps {
   chat?: ChatApi;
   /** Launching souls and packages (#18); without it there is no Launch. */
   launcher?: LaunchApi;
+  /** A `.soul` opened in Finder, validated by the Rust shell. */
+  openedPackage?: { id: number; path: string; checking: boolean; error: string | null };
   /** Removes GeniusBar's login services (#9); without it there is no action. */
   onRemoveServices?: () => Promise<void>;
   /** The bundled starter soul (R4), offered while the roster is empty. */
@@ -54,7 +56,7 @@ const NO_CENSUS: readonly CensusRow[] = [];
 
 // The popup's root: health header, the census nested under parents, and
 // the read-only detail for a selected soul.
-export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, setup, onSetup, chat, launcher, onRemoveServices, starter, harnessAuth, devTools }: AppProps) {
+export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, setup, onSetup, chat, launcher, openedPackage, onRemoveServices, starter, harnessAuth, devTools }: AppProps) {
   const forest = useMemo(() => buildSoulForest(census), [census]);
   const roster = useMemo(() => allSouls(forest), [forest]);
   // Selection holds the roster key and resolves against each census, so
@@ -75,6 +77,12 @@ export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, 
   const footer = footerStatus(connection);
   const showSetup = Boolean(setup && onSetup && (setup.running || needsSetup(connection)));
   const [launchingPackage, setLaunchingPackage] = useState(false);
+  useEffect(() => {
+    if (openedPackage) {
+      setSelectedKey(null);
+      setLaunchingPackage(true);
+    }
+  }, [openedPackage?.id]);
   // The first launch stays open from the click until closed, so its result
   // and sign-in remain after the new soul fills the roster.
   const [starterOpen, setStarterOpen] = useState(false);
@@ -136,7 +144,10 @@ export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, 
       {launch && launchingPackage && !showSetup && (
         <section className="detail" aria-label="Launch a soul package">
           <h2>Launch a soul package</h2>
-          <LaunchForm {...launch} />
+          <LaunchForm key={openedPackage?.id ?? 'manual'} {...launch}
+            initialPackagePath={openedPackage?.path}
+            checkingPackage={openedPackage?.checking}
+            packageError={openedPackage?.error} />
           <div className="detail-actions">
             <button type="button" onClick={() => setLaunchingPackage(false)}>
               Close

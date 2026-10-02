@@ -12,10 +12,10 @@ export interface SetupState {
 }
 
 export const SETUP_STEPS: readonly { step: SetupStep; label: string }[] = [
-  { step: 'broker', label: 'Start the agent-comms broker' },
-  { step: 'account', label: 'Pair this account' },
-  { step: 'principal', label: 'Pair GeniusBar as your principal' },
-  { step: 'daemon', label: 'Start the agent-bot daemon' },
+  { step: 'broker', label: 'Start GeniusBar’s background service' },
+  { step: 'account', label: 'Connect this account' },
+  { step: 'principal', label: 'Connect GeniusBar' },
+  { step: 'daemon', label: 'Start your agents' },
 ];
 
 export const idleSetup: SetupState = {

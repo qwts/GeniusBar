@@ -181,7 +181,7 @@ export function sendFailed(composer: Composer, code: string, message: string): C
   return { ...composer, sending: false, error: sendErrorText(code, message) };
 }
 
-export function sendErrorText(code: string, message: string): string {
+export function sendErrorText(code: string, _message: string): string {
   switch (code) {
     case 'unknown-recipient':
       return 'This soul cannot receive your messages: it may have left, or it does not accept messages from you.';
@@ -193,11 +193,11 @@ export function sendErrorText(code: string, message: string): string {
       return 'This message is too large to send. Shorten it and try again.';
     case 'broker-unreachable':
     case 'broker-timeout':
-      return 'Cannot reach the broker. Send again to retry; it will not be delivered twice.';
+      return 'GeniusBar can’t connect right now. Your draft is safe here; try sending again in a moment.';
     case 'not-saved':
       return 'Sent, but your history could not be saved. Send again to retry saving; it will not be delivered twice.';
     default:
-      return `Could not send (${code})${message ? `: ${message}` : '.'}`;
+      return 'GeniusBar couldn’t send your message. Try again, and ask for help if the problem continues.';
   }
 }
 

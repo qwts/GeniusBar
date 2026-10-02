@@ -10,6 +10,7 @@ describe('SetupPanel', () => {
     const onSetup = vi.fn();
     render(<SetupPanel setup={idleSetup} onSetup={onSetup} />);
     expect(screen.getAllByRole('listitem')).toHaveLength(4);
+    expect(screen.getByText('Let’s connect GeniusBar to your account.')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Set up' }));
     expect(onSetup).toHaveBeenCalledOnce();
   });
