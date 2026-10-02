@@ -30,6 +30,10 @@ describe('senderKey', () => {
     expect(senderKey({ ...inboxMessage('msg_1', 1), id: '' })).toBeNull();
     expect(senderKey({ ...inboxMessage('msg_1', 1), body: 3 })).toBeNull();
     expect(senderKey({ ...inboxMessage('msg_1', 1), from: { principal: 'principal_y' } })).toBeNull();
+    // The broker contract's required fields; anything less stays in the mailbox.
+    expect(senderKey({ ...inboxMessage('msg_1', 1), seq: undefined })).toBeNull();
+    expect(senderKey({ ...inboxMessage('msg_1', 1), kind: undefined })).toBeNull();
+    expect(senderKey({ ...inboxMessage('msg_1', 1), to: {} })).toBeNull();
   });
 });
 
@@ -158,6 +162,13 @@ describe('chat persistence', () => {
     const back = fromStored(toStored({ conversations: { k: { entries, unread: 0 } }, ids: new Set() }));
     expect(back.conversations.k.entries).toHaveLength(STORED_ENTRIES);
     expect(back.conversations.k.entries[0].id).toBe('m5');
+  });
+
+  it('keeps unacked entries however old', () => {
+    const entries = Array.from({ length: STORED_ENTRIES + 5 }, (_, i) => entry(`m${i}`, i));
+    const back = fromStored(toStored({ conversations: { k: { entries, unread: 0 } }, ids: new Set() }, new Set(['m1'])));
+    expect(back.conversations.k.entries).toHaveLength(STORED_ENTRIES + 1);
+    expect(back.conversations.k.entries[0].id).toBe('m1');
   });
 
   it('ignores malformed or foreign data', () => {
