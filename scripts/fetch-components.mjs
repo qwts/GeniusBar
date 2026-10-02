@@ -3,7 +3,8 @@
 // components.json: the official Node binary, verified by SHA-256, becomes the
 // Tauri sidecar; agent-comms and agent-bot, fetched by commit so git verifies
 // their content, become app resources. Nothing here uses a Node or a package
-// the user installed.
+// the user installed. Each component names its release tag and the commit
+// that tag must resolve to, so a moved tag fails the build.
 //
 // usage: node scripts/fetch-components.mjs [--target RUST_TRIPLE]
 // Tauri sets TAURI_ENV_TARGET_TRIPLE for its before-build commands.
@@ -84,8 +85,17 @@ export async function fetchNode(triple) {
   return out;
 }
 
-export function fetchComponent(name, { repo, ref }) {
+export function tagCommit(lsRemote, tag) {
+  // An annotated tag lists its commit as `tag^{}`; a lightweight tag is the commit.
+  const lines = lsRemote.split('\n').map((line) => line.split('\t'));
+  const peeled = lines.find(([, name]) => name === `refs/tags/${tag}^{}`);
+  const plain = lines.find(([, name]) => name === `refs/tags/${tag}`);
+  return (peeled ?? plain)?.[0] ?? null;
+}
+
+export function fetchComponent(name, { repo, tag, ref }) {
   if (!/^[0-9a-f]{40}$/.test(ref)) throw new Error(`${name} must be pinned to a full commit SHA`);
+  if (typeof tag !== 'string' || !/^v\d+\.\d+\.\d+$/.test(tag)) throw new Error(`${name} must name a release tag`);
   const dest = path.join(RESOURCES, name);
   const stamp = path.join(RESOURCES, `${name}.ref`);
   if (existsSync(dest) && existsSync(stamp) && readFileSync(stamp, 'utf8') === ref) return dest;
@@ -93,6 +103,8 @@ export function fetchComponent(name, { repo, ref }) {
   try {
     const git = (...args) => execFileSync('git', ['-C', work, ...args], { stdio: ['ignore', 'pipe', 'inherit'] });
     git('init', '-q');
+    const listed = tagCommit(git('ls-remote', `https://github.com/${repo}.git`, `refs/tags/${tag}*`).toString(), tag);
+    if (listed !== ref) throw new Error(`${name} ${tag} resolves to ${listed ?? 'nothing'}, expected ${ref}`);
     git('fetch', '-q', '--depth', '1', `https://github.com/${repo}.git`, ref);
     const tree = path.join(work, 'tree');
     mkdirSync(tree);
@@ -118,6 +130,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const triple = parseTarget(process.argv.slice(2), process.env);
   console.log(`node ${PINS.node.version} -> ${path.relative(ROOT, await fetchNode(triple))}`);
   for (const [name, pin] of Object.entries(PINS.components)) {
-    console.log(`${name} ${pin.ref.slice(0, 12)} -> ${path.relative(ROOT, fetchComponent(name, pin))}`);
+    console.log(`${name} ${pin.tag} (${pin.ref.slice(0, 12)}) -> ${path.relative(ROOT, fetchComponent(name, pin))}`);
   }
 }
