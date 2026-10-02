@@ -70,6 +70,10 @@ body { background: var(--bg); color: var(--fg); }
 .chat-composer textarea { flex: 1; min-width: 0; resize: vertical; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
 .chat .error { margin: 4px 0 0; }
 /* Launch (#18). */
+.first-launch { display: grid; gap: 6px; padding: 8px 0; }
+.first-launch p { margin: 0; }
+.first-launch label, .first-launch label > span { color: var(--muted); }
+.first-launch input { min-width: 0; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
 .launch { display: grid; gap: 6px; margin: 8px 0; border-top: 1px solid var(--line); padding-top: 8px; }
 .launch label { display: grid; grid-template-columns: 64px 1fr; gap: 8px; align-items: center; }
 .launch label > span { color: var(--muted); }

@@ -114,6 +114,24 @@ describe('App setup', () => {
     expect(screen.getByRole('alert').textContent).toMatch(/No agent-bot daemon/);
   });
 
+  it('offers the starter soul on an empty roster and launches it with its default harness', () => {
+    const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    const starter = { package: '/App/souls/starter.soul', account: 'friend', name: 'Starter', harnesses: ['claude', 'codex'] };
+    const { rerender } = render(<App census={[]} connection={sampleConnection} launcher={launcher} starter={starter} isStatic />);
+    expect((screen.getByLabelText('Harness') as HTMLInputElement).value).toBe('claude');
+    fireEvent.click(screen.getByRole('button', { name: 'Launch your first soul' }));
+    expect(launcher.launch).toHaveBeenCalledWith({ account: 'friend', target: { package: '/App/souls/starter.soul' }, harness: 'claude', name: 'Starter' });
+    const failed: LaunchApi = { ...launcher, state: { phase: 'failed', requestId: 'r1', agentId: null, detail: 'harness not installed' } };
+    rerender(<App census={[]} connection={sampleConnection} launcher={failed} starter={starter} isStatic />);
+    expect(screen.getByRole('alert').textContent).toMatch(/harness not installed/);
+  });
+
+  it('keeps the plain empty text when the starter soul is not offered', () => {
+    render(<App census={[]} connection={sampleConnection} isStatic />);
+    expect(screen.queryByRole('form', { name: 'Launch your first soul' })).toBeNull();
+    expect(screen.getByText('No souls on this machine.')).toBeTruthy();
+  });
+
   it('offers no launch without a launcher', () => {
     render(<App census={sampleCensus} connection={sampleConnection} isStatic />);
     expect(screen.queryByRole('button', { name: 'Launch package…' })).toBeNull();

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { FirstLaunch, type Starter } from './components/FirstLaunch';
 import { HealthHeader } from './components/HealthHeader';
 import { LaunchForm } from './components/LaunchForm';
 import { RemoveServices } from './components/RemoveServices';
@@ -28,6 +29,8 @@ interface AppProps {
   launcher?: LaunchApi;
   /** Removes GeniusBar's login services (#9); without it there is no action. */
   onRemoveServices?: () => Promise<void>;
+  /** The bundled starter soul (R4), offered while the roster is empty. */
+  starter?: Starter;
 }
 
 // Dudles stop blinking while the popup is hidden, as R1's did while the
@@ -47,7 +50,7 @@ const NO_CENSUS: readonly CensusRow[] = [];
 
 // The popup's root: health header, the census nested under parents, and
 // the read-only detail for a selected soul.
-export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, setup, onSetup, chat, launcher, onRemoveServices }: AppProps) {
+export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, setup, onSetup, chat, launcher, onRemoveServices, starter }: AppProps) {
   const forest = useMemo(() => buildSoulForest(census), [census]);
   const roster = useMemo(() => allSouls(forest), [forest]);
   // Selection holds the roster key and resolves against each census, so
@@ -83,7 +86,9 @@ export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, 
       ) : (
         <section className="roster" aria-label="Souls">
           {forest.length === 0
-            ? empty && <p className="muted empty">{empty}</p>
+            ? (starter && launcher && connection.bridgeConnected && !connection.brokerUnreachable
+              ? <FirstLaunch starter={starter} launcher={launcher} />
+              : empty && <p className="muted empty">{empty}</p>)
             : forest.map((node) => (
                 <SoulRow
                   key={soulKey(node.soul)}

@@ -1,0 +1,12 @@
+{
+  "formatVersion": 1,
+  "name": "Starter",
+  "description": "A friendly first soul: chats, answers questions and helps with everyday work.",
+  "displaySeed": "starter",
+  "preferredHarnesses": [
+    "claude",
+    "codex"
+  ],
+  "revision": "sha256:57e6503f6e1ccd0033a5093f1ef0e7d4bb849cb23dcb4c86283756ad1367b984",
+  "parentRevision": null
+}

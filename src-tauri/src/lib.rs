@@ -3,6 +3,7 @@
 //! reaches agent-comms through the Node bridge (#7).
 
 mod bridge;
+mod starter;
 mod updates;
 
 use std::{
@@ -145,7 +146,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             bridge::bridge,
             bridge::setup,
-            bridge::remove_services
+            bridge::remove_services,
+            starter::starter_soul
         ])
         .setup(move |app| {
             bridge::start(app.handle().clone());
