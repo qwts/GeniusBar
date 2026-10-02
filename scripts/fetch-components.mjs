@@ -76,16 +76,11 @@ async function download(url, file) {
   writeFileSync(file, Buffer.from(await response.arrayBuffer()));
 }
 
-export async function fetchNode(triple) {
-  if (UNIVERSAL_TARGETS[triple]) return fetchUniversalNode(triple);
-  const platform = NODE_PLATFORMS[triple];
-  if (!platform) throw new Error(`no bundled Node for target ${triple}`);
+// The official Node archive for a platform, downloaded once into .cache and
+// verified against its pinned SHA-256 every time it is used.
+async function nodeArchive(platform) {
   const { version, sha256: sums } = PINS.node;
-  const windows = platform.startsWith('win');
-  const archive = `node-v${version}-${platform}.${windows ? 'zip' : 'tar.gz'}`;
-  const out = path.join(BINARIES, sidecarName(triple));
-  const stamp = `${out}.version`;
-  if (existsSync(out) && existsSync(stamp) && readFileSync(stamp, 'utf8') === stampFor(triple)) return out;
+  const archive = `node-v${version}-${platform}.${platform.startsWith('win') ? 'zip' : 'tar.gz'}`;
   mkdirSync(CACHE, { recursive: true });
   const cached = path.join(CACHE, archive);
   if (!existsSync(cached) || sha256(cached) !== sums[platform]) {
@@ -96,12 +91,61 @@ export async function fetchNode(triple) {
     rmSync(cached, { force: true });
     throw new Error(`${archive} has SHA-256 ${actual}, expected ${sums[platform]}`);
   }
+  return cached;
+}
+
+/** Where `node` or `npm` sits inside a platform's Node archive. */
+export function nodeMember(platform, what, version = PINS.node.version) {
+  const windows = platform.startsWith('win');
+  const file = what === 'node' ? (windows ? 'node.exe' : 'bin/node') : `${windows ? '' : 'lib/'}node_modules/npm`;
+  return `node-v${version}-${platform}/${file}`;
+}
+
+function extract(cached, platform, member, work) {
+  // Windows' own tar (bsdtar) reads ZIPs; elsewhere GNU tar may not.
+  if (platform.startsWith('win') && process.platform !== 'win32') execFileSync('unzip', ['-q', cached, `${member}*`, '-d', work]);
+  else execFileSync('tar', ['-xf', cached, '-C', work, member]);
+}
+
+/**
+ * The npm that ships inside the pinned Node, as a resource next to the
+ * other components (#307): hosts install a soul's harnesses with it, so no
+ * npm the user installed is ever needed. npm is plain JavaScript, so a
+ * universal build takes it from its first slice.
+ */
+export async function fetchNpm(triple) {
+  const platform = NODE_PLATFORMS[(UNIVERSAL_TARGETS[triple] ?? [triple])[0]];
+  if (!platform) throw new Error(`no bundled Node for target ${triple}`);
+  const dest = path.join(RESOURCES, 'npm');
+  const stamp = path.join(RESOURCES, 'npm.version');
+  if (existsSync(dest) && existsSync(stamp) && readFileSync(stamp, 'utf8') === PINS.node.version) return dest;
+  const cached = await nodeArchive(platform);
+  const work = mkdtempSync(path.join(tmpdir(), 'geniusbar-npm-'));
+  try {
+    const member = nodeMember(platform, 'npm');
+    extract(cached, platform, member, work);
+    rmSync(dest, { recursive: true, force: true });
+    mkdirSync(RESOURCES, { recursive: true });
+    cpSync(path.join(work, member), dest, { recursive: true, verbatimSymlinks: true });
+    writeFileSync(stamp, PINS.node.version);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+  return dest;
+}
+
+export async function fetchNode(triple) {
+  if (UNIVERSAL_TARGETS[triple]) return fetchUniversalNode(triple);
+  const platform = NODE_PLATFORMS[triple];
+  if (!platform) throw new Error(`no bundled Node for target ${triple}`);
+  const out = path.join(BINARIES, sidecarName(triple));
+  const stamp = `${out}.version`;
+  if (existsSync(out) && existsSync(stamp) && readFileSync(stamp, 'utf8') === stampFor(triple)) return out;
+  const cached = await nodeArchive(platform);
   const work = mkdtempSync(path.join(tmpdir(), 'geniusbar-node-'));
   try {
-    const member = `node-v${version}-${platform}/${windows ? 'node.exe' : 'bin/node'}`;
-    // Windows' own tar (bsdtar) reads ZIPs; elsewhere GNU tar may not.
-    if (windows && process.platform !== 'win32') execFileSync('unzip', ['-q', cached, member, '-d', work]);
-    else execFileSync('tar', ['-xf', cached, '-C', work, member]);
+    const member = nodeMember(platform, 'node');
+    extract(cached, platform, member, work);
     mkdirSync(BINARIES, { recursive: true });
     cpSync(path.join(work, member), out);
     chmodSync(out, 0o755);
@@ -169,6 +213,7 @@ export function fetchComponent(name, { repo, tag, ref }) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const triple = parseTarget(process.argv.slice(2), process.env);
   console.log(`node ${PINS.node.version} -> ${path.relative(ROOT, await fetchNode(triple))}`);
+  console.log(`npm (node ${PINS.node.version}) -> ${path.relative(ROOT, await fetchNpm(triple))}`);
   for (const [name, pin] of Object.entries(PINS.components)) {
     console.log(`${name} ${pin.tag} (${pin.ref.slice(0, 12)}) -> ${path.relative(ROOT, fetchComponent(name, pin))}`);
   }
