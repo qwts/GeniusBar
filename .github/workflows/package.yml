@@ -1,0 +1,259 @@
+# Reusable macOS packaging for #10 (ADR-0004 decisions 5 and 6), after
+# cartograph's package.yml. All five Apple secrets produce a Developer ID
+# signed, notarized universal app and dmg; none produce an explicitly labeled
+# unsigned-dev (ad-hoc) build; a partial set fails. The updater key and
+# endpoint are repository variables (decision 8), and only a signed build
+# carries updater artifacts.
+#
+# Every action is pinned to a 40-hex commit (ENG-0355, ENG-0282).
+name: Package macOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Exact branch, tag, or SHA to package (defaults to the triggering ref)
+        required: false
+        type: string
+        default: ''
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact branch, tag, or SHA to package
+        required: false
+        type: string
+        default: ''
+    secrets:
+      CSC_LINK:
+        required: false
+      CSC_KEY_PASSWORD:
+        required: false
+      APPLE_API_KEY:
+        required: false
+      APPLE_API_KEY_ID:
+        required: false
+      APPLE_API_ISSUER:
+        required: false
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: false
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        required: false
+    outputs:
+      signing_mode:
+        description: signed or unsigned-dev
+        value: ${{ jobs.package.outputs.signing_mode }}
+      updater_artifacts:
+        description: true when the artifact holds a signed updater archive
+        value: ${{ jobs.package.outputs.updater_artifacts }}
+      version:
+        description: The app version from tauri.conf.json
+        value: ${{ jobs.package.outputs.version }}
+      artifact_name:
+        description: Uploaded macOS artifact name
+        value: ${{ jobs.package.outputs.artifact_name }}
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: macOS universal bundle
+    runs-on: macos-latest
+    timeout-minutes: 90
+    outputs:
+      signing_mode: ${{ steps.signing.outputs.mode }}
+      updater_artifacts: ${{ steps.updater.outputs.artifacts }}
+      version: ${{ steps.metadata.outputs.version }}
+      artifact_name: ${{ steps.metadata.outputs.artifact_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      # No build cache here: a release must not reuse artifacts a PR run
+      # could have written.
+      - name: Rust toolchain and universal targets
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - name: Install
+        run: npm ci && npm --prefix ui ci
+      # Both darwin Node binaries, each checksum-verified, joined with lipo
+      # into the universal sidecar.
+      - name: Fetch bundled components
+        run: node scripts/fetch-components.mjs --target universal-apple-darwin
+
+      - name: Select signing mode
+        id: signing
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: node scripts/signing-secrets.mjs >> "$GITHUB_OUTPUT"
+
+      # The updater key and endpoint reach the app as a generated config;
+      # without them the app is built with updates off.
+      - name: Generate updater configuration
+        id: updater
+        env:
+          SIGNED: ${{ steps.signing.outputs.signed }}
+          GENIUSBAR_UPDATER_PUBKEY: ${{ vars.GENIUSBAR_UPDATER_PUBKEY }}
+          GENIUSBAR_UPDATER_ENDPOINT: ${{ vars.GENIUSBAR_UPDATER_ENDPOINT }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: node scripts/updater.mjs config "$RUNNER_TEMP/updater.json" >> "$GITHUB_OUTPUT"
+
+      - name: Decode App Store Connect key
+        if: steps.signing.outputs.signed == 'true'
+        env:
+          APPLE_API_KEY_B64: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+        run: |
+          set -euo pipefail
+          umask 077
+          key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+          printf '%s' "$APPLE_API_KEY_B64" | openssl base64 -d -A -out "$key_path"
+          test -s "$key_path"
+          echo "APPLE_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+
+      - name: Build signed and notarized universal bundle
+        if: steps.signing.outputs.signed == 'true'
+        env:
+          # Map cartograph's secret names to Tauri's documented inputs.
+          APPLE_CERTIFICATE: ${{ secrets.CSC_LINK }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ steps.updater.outputs.artifacts == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ steps.updater.outputs.artifacts == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+        run: npm run package:macos -- --config "$RUNNER_TEMP/updater.json"
+
+      - name: Build ad-hoc signed unsigned-dev universal bundle
+        if: steps.signing.outputs.signed == 'false'
+        env:
+          # Apple Silicon requires a signature; '-' is Tauri's ad-hoc identity.
+          # It still re-signs the sidecar with our entitlements.
+          APPLE_SIGNING_IDENTITY: '-'
+        run: npm run package:macos -- --config "$RUNNER_TEMP/updater.json"
+
+      - name: Locate bundles
+        id: bundles
+        run: |
+          set -euo pipefail
+          bundle=src-tauri/target/universal-apple-darwin/release/bundle
+          app="$bundle/macos/GeniusBar.app"
+          dmg=$(find "$bundle/dmg" -maxdepth 1 -name '*.dmg' -print -quit)
+          test -d "$app"
+          test -n "$dmg" && test -f "$dmg"
+          echo "app=$app" >> "$GITHUB_OUTPUT"
+          echo "dmg=$dmg" >> "$GITHUB_OUTPUT"
+          echo "updater=$bundle/macos/GeniusBar.app.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Notarize and staple disk image
+        if: steps.signing.outputs.signed == 'true'
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          DMG: ${{ steps.bundles.outputs.dmg }}
+        run: |
+          set -euo pipefail
+          xcrun notarytool submit "$DMG" \
+            --key "$APPLE_API_KEY_PATH" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait
+          xcrun stapler staple "$DMG"
+
+      # ADR-0004 decision 3: the bundled Node is universal, signed with the
+      # app under the hardened runtime, and carries exactly our entitlements
+      # (the official binary ships with others, such as get-task-allow).
+      - name: Verify bundled Node
+        env:
+          APP: ${{ steps.bundles.outputs.app }}
+        run: |
+          set -euo pipefail
+          node_bin="$APP/Contents/MacOS/node"
+          lipo "$node_bin" -verify_arch arm64 x86_64
+          lipo "$APP/Contents/MacOS/geniusbar" -verify_arch arm64 x86_64
+          codesign --verify --strict --verbose=2 "$node_bin"
+          # Captured first: grep -q closing the pipe early would fail pipefail.
+          details=$(codesign --display --verbose=2 "$node_bin" 2>&1)
+          grep -Eq '^CodeDirectory .*flags=.*runtime' <<<"$details"
+          keys() { grep -o '<key>[^<]*</key>' | sort; }
+          actual=$(codesign --display --entitlements - --xml "$node_bin" 2>/dev/null | keys)
+          expected=$(plutil -convert xml1 -o - src-tauri/Entitlements.plist | tr -d '\n\t ' | keys)
+          if [ "$actual" != "$expected" ]; then
+            printf '::error::bundled Node entitlements differ from Entitlements.plist:\n%s\n' "$actual"
+            exit 1
+          fi
+          team() { codesign --display --verbose=2 "$1" 2>&1 | sed -n 's/^TeamIdentifier=//p'; }
+          test "$(team "$node_bin")" = "$(team "$APP")"
+          # V8 needs JIT, so this fails if the entitlements did not apply.
+          "$node_bin" -e 'process.exit(0)'
+
+      - name: Verify Developer ID signature, Gatekeeper, and notarization
+        if: steps.signing.outputs.signed == 'true'
+        env:
+          APP: ${{ steps.bundles.outputs.app }}
+          DMG: ${{ steps.bundles.outputs.dmg }}
+        run: |
+          set -euo pipefail
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign --verify --strict --verbose=2 "$DMG"
+          spctl --assess --type execute --verbose=2 "$APP"
+          spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
+          xcrun stapler validate "$APP"
+          xcrun stapler validate "$DMG"
+
+      - name: Verify unsigned-dev boundary
+        if: steps.signing.outputs.signed == 'false'
+        env:
+          APP: ${{ steps.bundles.outputs.app }}
+          UPDATER: ${{ steps.bundles.outputs.updater }}
+        run: |
+          set -euo pipefail
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          for binary in "$APP" "$APP/Contents/MacOS/node"; do
+            details=$(codesign --display --verbose=4 "$binary" 2>&1)
+            if grep -Eq '^Authority=|Developer ID Application' <<<"$details"; then
+              echo "::error::unsigned-dev $binary unexpectedly has a trusted signing authority"
+              exit 1
+            fi
+          done
+          # An unsigned build is never published as an update.
+          if [ -e "$UPDATER" ] || [ -e "$UPDATER.sig" ]; then
+            echo '::error::unsigned-dev build produced updater artifacts'
+            exit 1
+          fi
+
+      - name: Stage versioned artifacts
+        id: metadata
+        env:
+          SIGNING_MODE: ${{ steps.signing.outputs.mode }}
+          UPDATER_ARTIFACTS: ${{ steps.updater.outputs.artifacts }}
+          DMG: ${{ steps.bundles.outputs.dmg }}
+          UPDATER: ${{ steps.bundles.outputs.updater }}
+        run: |
+          set -euo pipefail
+          version=$(node -p 'require("./src-tauri/tauri.conf.json").version')
+          mkdir -p dist
+          cp "$DMG" "dist/GeniusBar_${version}_universal_${SIGNING_MODE}.dmg"
+          if [ "$UPDATER_ARTIFACTS" = true ]; then
+            test -s "$UPDATER" && test -s "$UPDATER.sig"
+            cp "$UPDATER" "dist/GeniusBar_${version}_universal.app.tar.gz"
+            cp "$UPDATER.sig" "dist/GeniusBar_${version}_universal.app.tar.gz.sig"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=geniusbar-${version}-macos-universal-${SIGNING_MODE}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload versioned artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.metadata.outputs.artifact_name }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14

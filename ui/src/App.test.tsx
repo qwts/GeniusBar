@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { emptyComposer, mergeIncoming, emptyChat } from './model/chat';
 import { inboxMessage, sampleCensus, sampleConnection } from './model/fixtures';
+import { idleSetup } from './model/setup';
+import { disconnected } from './model/status';
 import type { ChatApi } from './useChat';
 
 afterEach(() => { cleanup(); globalThis.localStorage?.clear(); });
@@ -74,5 +76,15 @@ describe('App', () => {
     expect(chat.composers['user/agent_c'] ?? emptyComposer).toEqual(emptyComposer);
     fireEvent.click(screen.getByRole('button', { name: 'Done' }));
     expect(chat.open).toHaveBeenLastCalledWith(null);
+  });
+});
+
+describe('App setup', () => {
+  it('replaces the roster with the setup panel while setup is needed', () => {
+    const unpaired = { ...disconnected, bridgeConnected: true, unpaired: true };
+    render(<App connection={unpaired} setup={idleSetup} onSetup={() => {}} />);
+    expect(screen.getByRole('region', { name: 'Setup' })).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Souls' })).toBeNull();
+    expect(screen.queryByText('No souls on this machine.')).toBeNull();
   });
 });

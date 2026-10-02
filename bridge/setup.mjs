@@ -42,19 +42,23 @@ function failed(result, fallback) {
 
 export async function runSetup({ cli, report, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now }) {
   // 1. A broker. Use whichever one already answers on the shared socket;
-  // install ours only when none does, so two brokers never compete.
+  // install ours only when none does, so two brokers never compete. A
+  // socket file proves nothing (a crashed broker leaves one), so ask the
+  // broker itself; any answer other than unreachable stops setup rather
+  // than reinstalling over a broker it cannot vouch for.
   report({ step: 'broker', state: 'running' });
-  let status = await cli(['broker', 'status']);
-  if (!status?.socket?.present) {
+  let probe = await cli(['broker', 'pairings']);
+  if (probe?.error?.code === 'broker-unreachable') {
     const installed = await cli(['broker', 'install']);
     if (installed?.ok === false) throw failed(installed, 'broker-install-failed');
     const deadline = now() + BROKER_WAIT_MS;
-    while (!status?.socket?.present) {
+    while (probe?.error?.code === 'broker-unreachable') {
       if (now() > deadline) throw new SetupError('broker-not-ready', 'the broker did not start');
       await sleep(250);
-      status = await cli(['broker', 'status']);
+      probe = await cli(['broker', 'pairings']);
     }
   }
+  if (!probe?.ok) throw failed(probe, 'broker-unavailable');
   report({ step: 'broker', state: 'done' });
 
   // 2. This account, paired and approved.

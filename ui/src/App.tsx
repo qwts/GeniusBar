@@ -59,25 +59,30 @@ export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, 
   const unread = chat ? (soul: CensusRow) => unreadOf(chat.chat, soulKey(soul)) : undefined;
   const empty = emptyRosterText(connection);
   const footer = footerStatus(connection);
+  const showSetup = Boolean(setup && onSetup && (setup.running || needsSetup(connection)));
 
   return (
     <main className="popup">
       <HealthHeader connection={connection} />
-      {setup && onSetup && (setup.running || needsSetup(connection)) && <SetupPanel setup={setup} onSetup={onSetup} />}
-      <section className="roster" aria-label="Souls">
-        {forest.length === 0
-          ? empty && <p className="muted empty">{empty}</p>
-          : forest.map((node) => (
-              <SoulRow
-                key={soulKey(node.soul)}
-                node={node}
-                depth={0}
-                paused={paused}
-                unreadOf={unread}
-                onSelect={(soul) => setSelectedKey(soulKey(soul))}
-              />
-            ))}
-      </section>
+      {/* The setup panel replaces the roster, which has nothing true to say yet. */}
+      {showSetup && setup && onSetup ? (
+        <SetupPanel setup={setup} onSetup={onSetup} />
+      ) : (
+        <section className="roster" aria-label="Souls">
+          {forest.length === 0
+            ? empty && <p className="muted empty">{empty}</p>
+            : forest.map((node) => (
+                <SoulRow
+                  key={soulKey(node.soul)}
+                  node={node}
+                  depth={0}
+                  paused={paused}
+                  unreadOf={unread}
+                  onSelect={(soul) => setSelectedKey(soulKey(soul))}
+                />
+              ))}
+        </section>
+      )}
       {selected && (
         <SoulDetail
           soul={selected}

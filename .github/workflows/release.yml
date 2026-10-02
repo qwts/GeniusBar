@@ -1,0 +1,186 @@
+# Tag-driven GitHub release for #10 (ADR-0004 decision 6), after cartograph's
+# release.yml. The tag is checked against the app version, package.yml builds
+# exactly that commit, and this workflow publishes only what it built.
+#
+# A signed build becomes the latest release with the dmg, the updater archive
+# and its signature, and latest.json, which the updater reads through
+# releases/latest. An unsigned build is published as a prerelease labeled
+# unsigned, with the dmg only: GitHub never serves a prerelease as
+# releases/latest, and no latest.json or updater archive is attached, so no
+# installed app can update to it.
+#
+# Every action is pinned to a 40-hex commit (ENG-0355, ENG-0282).
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing vX.Y.Z tag to build and publish (or republish)
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Tag matches the app version and is on main
+        id: release
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::$TAG is not a vX.Y.Z tag."
+            exit 1
+          fi
+          # The updater compares tauri.conf.json's version, so every version
+          # source must agree with the tag.
+          for version in \
+            "$(jq -r .version src-tauri/tauri.conf.json)" \
+            "$(jq -r .version package.json)" \
+            "$(sed -n 's/^version = "\(.*\)"$/\1/p' src-tauri/Cargo.toml | head -n 1)"; do
+            if [ "v$version" != "$TAG" ]; then
+              echo "::error::$TAG does not match version $version."
+              exit 1
+            fi
+          done
+          if [ "$(git rev-parse HEAD)" != "$(git rev-list -n 1 "refs/tags/$TAG")" ]; then
+            echo "::error::Checkout is not the commit $TAG references."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::$TAG does not resolve to a commit on main."
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build release tag
+    needs: validate
+    uses: ./.github/workflows/package.yml
+    with:
+      ref: refs/tags/${{ needs.validate.outputs.tag }}
+    # Named, not inherited: packaging sees only the signing secrets.
+    secrets:
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+  publish:
+    name: Publish GitHub release
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The only job that writes: it creates the release and uploads assets.
+    permissions:
+      contents: write
+    env:
+      GH_REPO: ${{ github.repository }}
+      SIGNING_MODE: ${{ needs.build.outputs.signing_mode }}
+      UPDATER_ARTIFACTS: ${{ needs.build.outputs.updater_artifacts }}
+      TAG: ${{ needs.validate.outputs.tag }}
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ needs.validate.outputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Download this run's package artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.build.outputs.artifact_name }}
+          path: dist
+
+      - name: Validate assets and write the update manifest
+        env:
+          ENDPOINT: ${{ vars.GENIUSBAR_UPDATER_ENDPOINT }}
+        run: |
+          set -euo pipefail
+          dmg="GeniusBar_${VERSION}_universal_${SIGNING_MODE}.dmg"
+          archive="GeniusBar_${VERSION}_universal.app.tar.gz"
+          if [ "$SIGNING_MODE" = signed ]; then
+            # A signed release is what installed apps update to, so it must
+            # carry updates (ADR-0004 decision 6).
+            if [ "$UPDATER_ARTIFACTS" != true ]; then
+              echo '::error::A signed release needs the updater: set GENIUSBAR_UPDATER_PUBKEY and GENIUSBAR_UPDATER_ENDPOINT.'
+              exit 1
+            fi
+            expected=$(printf '%s\n' "$archive" "$archive.sig" "$dmg" | sort)
+          else
+            expected="$dmg"
+          fi
+          actual=$(find dist -maxdepth 1 -type f -printf '%f\n' | sort)
+          if [ "$actual" != "$expected" ]; then
+            printf '::error::Expected only:\n%s\nfound:\n%s\n' "$expected" "$actual"
+            exit 1
+          fi
+          if [ "$SIGNING_MODE" = signed ]; then
+            url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$TAG/$archive"
+            node scripts/updater.mjs manifest "$VERSION" "$url" "dist/$archive.sig" > dist/latest.json
+            latest="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/latest/download/latest.json"
+            if [ "$ENDPOINT" != "$latest" ]; then
+              echo "::warning::GENIUSBAR_UPDATER_ENDPOINT is $ENDPOINT, not this repository's $latest."
+            fi
+          fi
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          existing=$(gh release view "$TAG" --json isPrerelease --jq .isPrerelease 2>/dev/null || true)
+          if [ "$SIGNING_MODE" = signed ]; then
+            title="GeniusBar $VERSION"
+            if [ -n "$existing" ]; then
+              # Replaces an earlier unsigned prerelease of the same tag.
+              stale="GeniusBar_${VERSION}_universal_unsigned-dev.dmg"
+              if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qxF "$stale"; then
+                gh release delete-asset "$TAG" "$stale" --yes
+              fi
+              gh release upload "$TAG" dist/* --clobber
+              gh release edit "$TAG" --verify-tag --draft=false --prerelease=false --latest --title "$title"
+            else
+              gh release create "$TAG" dist/* --verify-tag --latest --title "$title" --generate-notes
+            fi
+          else
+            title="GeniusBar $VERSION (unsigned)"
+            if [ "$existing" = false ]; then
+              echo "::error::$TAG already has a signed release; an unsigned build never replaces it."
+              exit 1
+            fi
+            if [ -n "$existing" ]; then
+              gh release upload "$TAG" dist/* --clobber
+            else
+              gh release create "$TAG" dist/* --verify-tag --prerelease --latest=false \
+                --title "$title" --generate-notes \
+                --notes '> [!WARNING]
+          > Unsigned development build: ad-hoc signed, not notarized, not trusted by Gatekeeper, and never offered as an update.'
+            fi
+          fi
