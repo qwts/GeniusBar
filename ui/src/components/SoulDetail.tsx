@@ -6,14 +6,25 @@ import {
   parentDisplayName,
   type CensusRow,
 } from '../model/census';
+import type { ChatEntry, Composer } from '../model/chat';
 import { deriveDudle } from '../model/dudle';
+import { Conversation } from './Conversation';
 import { Dudle } from './Dudle';
+
+/** The conversation with this soul, when chat is available (#17). */
+export interface SoulChat {
+  entries: readonly ChatEntry[];
+  composer: Composer;
+  onDraft: (draft: string) => void;
+  onSend: () => void;
+}
 
 interface SoulDetailProps {
   soul: CensusRow;
   /** Full roster for the parent's name; empty falls back to the raw ID. */
   roster?: readonly CensusRow[];
   paused?: boolean;
+  chat?: SoulChat;
   onDone: () => void;
 }
 
@@ -22,10 +33,11 @@ function yesNo(value: boolean | null | undefined): string {
 }
 
 /**
- * Read-only detail panel for one soul: no actions, no chat (R3). Done
- * takes focus on open so the keyboard lands inside, and Escape closes it.
+ * Detail panel for one soul, with the conversation when chat is given.
+ * Done takes focus on open so the keyboard lands inside, and Escape
+ * closes it (a draft survives, held by the chat store).
  */
-export function SoulDetail({ soul, roster = [], paused = false, onDone }: SoulDetailProps) {
+export function SoulDetail({ soul, roster = [], paused = false, chat, onDone }: SoulDetailProps) {
   const done = useRef<HTMLButtonElement>(null);
   useEffect(() => done.current?.focus(), []);
 
@@ -83,6 +95,9 @@ export function SoulDetail({ soul, roster = [], paused = false, onDone }: SoulDe
           </div>
         ))}
       </dl>
+      {chat && (
+        <Conversation name={name} entries={chat.entries} composer={chat.composer} onDraft={chat.onDraft} onSend={chat.onSend} />
+      )}
       <div className="detail-actions">
         <button type="button" ref={done} onClick={onDone}>
           Done

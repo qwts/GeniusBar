@@ -1,6 +1,7 @@
 // The fixed fake census and health from R1's snapshot test, for tests and
 // for previewing the popup before the bridge (#7) supplies real rows.
 import type { CensusRow } from './census';
+import type { InboxMessage } from './chat';
 import { disconnected, type ConnectionSnapshot } from './status';
 
 export const sampleCensus: readonly CensusRow[] = [
@@ -50,3 +51,12 @@ export const sampleConnection: ConnectionSnapshot = {
     watches: 3,
   },
 };
+
+/** A message as the broker's read returns it to a principal (#17). */
+export function inboxMessage(id: string, seq: number, body = `body ${id}`,
+  from = { account: 'user', agentId: 'agent_p' }): InboxMessage {
+  return {
+    id, seq, at: 1_000 + seq, from: { ...from, verification: 'verified' }, to: { principal: 'principal_x' },
+    kind: 'message', body, refs: [], correlation: null, replyTo: null, depth: 0, wake: 'waiting',
+  };
+}
