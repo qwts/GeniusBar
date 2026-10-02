@@ -6,7 +6,7 @@ const MARK = { pending: '○', running: '…', done: '✓' } as const;
 export function SetupPanel({ setup, onSetup }: { setup: SetupState; onSetup: () => void }) {
   return (
     <section className="setup" aria-label="Setup">
-      <p>GeniusBar needs to connect to agent-comms on this Mac.</p>
+      <p>Let’s connect GeniusBar to your account.</p>
       <ol>
         {SETUP_STEPS.map(({ step, label }) => (
           <li key={step} className={setup.steps[step]}>

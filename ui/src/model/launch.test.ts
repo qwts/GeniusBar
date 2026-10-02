@@ -54,12 +54,12 @@ describe('launch lifecycle', () => {
   });
 
   it('keeps polling through transient status errors and stops on final ones', () => {
-    expect(applyStatusError(pending, 'broker-unreachable', 'down')).toMatchObject({ phase: 'pending', note: expect.stringMatching(/still trying/) });
+    expect(applyStatusError(pending, 'broker-unreachable', 'down')).toMatchObject({ phase: 'pending', note: 'Still waiting for the launch to finish. GeniusBar will keep checking.' });
     expect(applyStatusError(pending, 'unknown-launch', '')).toMatchObject({ phase: 'error', requestId: 'launch_1' });
   });
 
   it('explains a missing daemon for the account', () => {
-    expect(launchErrorText('daemon-unavailable', '', 'persona')).toMatch(/daemon is watching account persona/);
-    expect(launchErrorText('weird', 'x')).toBe('Could not launch (weird): x');
+    expect(launchErrorText('daemon-unavailable', '', 'persona')).toMatch(/can’t reach the agents on account persona/);
+    expect(launchErrorText('weird', 'x')).toBe('GeniusBar couldn’t start this soul. Try again, and ask for help if the problem continues.');
   });
 });

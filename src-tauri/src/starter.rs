@@ -23,7 +23,16 @@ pub struct Starter {
     pub dev_tools: bool,
 }
 
-pub fn read_starter(package: &Path, account: &str, dev_tools: bool) -> Result<Starter, String> {
+/// Metadata read from the soul manifest. Launching a package uses the same
+/// manifest reader as the bundled Starter, so an opened package is checked
+/// by the format GeniusBar already accepts.
+#[derive(Debug, PartialEq)]
+pub struct SoulPackage {
+    pub name: String,
+    pub harnesses: Vec<String>,
+}
+
+pub fn read_soul_package(package: &Path) -> Result<SoulPackage, String> {
     let text = std::fs::read_to_string(package.join("soul.json")).map_err(|e| e.to_string())?;
     let manifest: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
     let name = manifest["name"].as_str().unwrap_or("Starter").to_owned();
@@ -35,14 +44,19 @@ pub fn read_starter(package: &Path, account: &str, dev_tools: bool) -> Result<St
                 .collect()
         })
         .unwrap_or_default();
+    Ok(SoulPackage { name, harnesses })
+}
+
+pub fn read_starter(package: &Path, account: &str, dev_tools: bool) -> Result<Starter, String> {
+    let metadata = read_soul_package(package)?;
     if account.is_empty() {
         return Err("the macOS user name is unknown".into());
     }
     Ok(Starter {
         package: package.to_string_lossy().into_owned(),
         account: account.to_owned(),
-        name,
-        harnesses,
+        name: metadata.name,
+        harnesses: metadata.harnesses,
         dev_tools,
     })
 }
@@ -104,5 +118,29 @@ mod tests {
     fn refuses_an_unknown_user() {
         let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("../souls/starter.soul");
         assert!(read_starter(&package, "", true).is_err());
+    }
+
+    #[test]
+    fn reads_an_opened_package_with_the_starter_manifest_reader() {
+        let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("../souls/starter.soul");
+        assert_eq!(
+            read_soul_package(&package).unwrap(),
+            SoulPackage {
+                name: "Starter".into(),
+                harnesses: vec!["claude".into(), "codex".into()]
+            }
+        );
+    }
+
+    #[test]
+    fn reports_a_missing_or_unreadable_soul_manifest() {
+        let package =
+            std::env::temp_dir().join(format!("geniusbar-missing-soul-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&package);
+        std::fs::create_dir(&package).unwrap();
+        assert!(read_soul_package(&package).is_err());
+        std::fs::write(package.join("soul.json"), "not json").unwrap();
+        assert!(read_soul_package(&package).is_err());
+        std::fs::remove_dir_all(package).unwrap();
     }
 }

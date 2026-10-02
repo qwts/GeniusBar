@@ -9,14 +9,14 @@ import {
 import { deriveDudle } from '../model/dudle';
 import { Dudle } from './Dudle';
 
-/** Spoken summary of a row; presence and last wake are always text. */
+const FRIENDLY_PRESENCE = { joined: 'Ready', watching: 'Starting', left: 'Unavailable' } as const;
+
+/** Spoken summary of a row, using the status and unread count a friend needs. */
 export function soulRowLabel(soul: CensusRow, unread = 0): string {
   const parts = [
     displayName(soul),
     displayHarness(soul),
-    `presence ${soul.presence}`,
-    `unacked ${soul.unacked}`,
-    `last wake ${soul.lastWake ?? 'none'}`,
+    FRIENDLY_PRESENCE[soul.presence],
   ];
   if (unread > 0) parts.push(`${unread} unread ${unread === 1 ? 'message' : 'messages'}`);
   const note = availabilityNote(soul);
@@ -62,9 +62,7 @@ export function SoulRow({ node, depth, paused = false, unreadOf, onSelect }: Sou
             {unread > 0 && <span className="unread-badge small">{unread} new</span>}
           </span>
           <span className="soul-line small">
-            <span className={`presence presence-${soul.presence}`}>{soul.presence}</span>
-            <span className={soul.unacked > 0 ? 'unacked' : 'muted'}>unacked {soul.unacked}</span>
-            <span className="muted">last wake {soul.lastWake ?? 'none'}</span>
+            <span className={`presence presence-${soul.presence}`}>{FRIENDLY_PRESENCE[soul.presence]}</span>
           </span>
           {note && <span className="muted small">{note}</span>}
         </span>

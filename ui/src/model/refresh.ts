@@ -17,7 +17,10 @@ export function applyCensus(prev: ConnectionSnapshot, outcome: CensusOutcome, no
   }
   const lastError = brokerErrorMessage(outcome.code, outcome.message);
   // The shell reports bridge-* codes while Node starts or restarts.
-  if (outcome.code.startsWith('bridge-')) return { ...prev, bridgeConnected: false, lastError };
+  if (outcome.code.startsWith('bridge-')) {
+    return { ...prev, bridgeConnected: false,
+      lastError: 'GeniusBar had trouble starting its background service. Try reopening GeniusBar.' };
+  }
   if (UNPAIRED.has(outcome.code)) {
     return { ...prev, bridgeConnected: true, loadingCredential: false, unpaired: true, lastError };
   }

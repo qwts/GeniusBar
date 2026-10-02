@@ -28,7 +28,7 @@ export function Conversation({ name, entries, composer, onDraft, onSend }: Conve
   return (
     <div className="chat">
       {entries.length === 0 ? (
-        <p className="muted small">No messages with {name} yet.</p>
+        <p className="muted small">Say hello to {name} to start chatting.</p>
       ) : (
         <ol className="chat-log" ref={list} aria-label={`Conversation with ${name}`}>
           {entries.map((entry) => (
@@ -51,6 +51,7 @@ export function Conversation({ name, entries, composer, onDraft, onSend }: Conve
         <textarea
           aria-label={`Message to ${name}`}
           aria-describedby={composer.error ? errorId : undefined}
+          placeholder="Write a message…"
           rows={2}
           value={composer.draft}
           onChange={(e) => onDraft(e.target.value)}

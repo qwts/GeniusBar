@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
-import { StrictMode, useEffect, useState } from 'react';
+import { listen } from '@tauri-apps/api/event';
+import { StrictMode, useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import type { DevTools, HarnessAuth, Starter } from './components/FirstLaunch';
@@ -17,6 +18,37 @@ function Live() {
   const chat = useChat();
   const launcher = useLaunch();
   const updates = useUpdates();
+  const [openedPackage, setOpenedPackage] = useState<{ id: number; path: string; checking: boolean; error: string | null }>();
+  const packageSequence = useRef(0);
+  const loadOpenedPackages = useCallback(async () => {
+    const paths = await invoke<string[]>('take_opened_soul_packages');
+    for (const path of paths) {
+      const id = ++packageSequence.current;
+      setOpenedPackage({ id, path, checking: true, error: null });
+      try {
+        await invoke('validate_soul_package', { package: path });
+        setOpenedPackage((current) => current?.id === id ? { ...current, checking: false } : current);
+      } catch {
+        setOpenedPackage((current) => current?.id === id ? {
+          ...current,
+          checking: false,
+          error: 'GeniusBar couldn’t read this soul package. Check that it’s accessible and contains a soul.json file, then try again.',
+        } : current);
+      }
+    }
+  }, []);
+  useEffect(() => {
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    void listen('soul-package-opened', () => { void loadOpenedPackages(); }).then((stop) => {
+      if (!active) stop();
+      else {
+        unlisten = stop;
+        void loadOpenedPackages();
+      }
+    });
+    return () => { active = false; unlisten?.(); };
+  }, [loadOpenedPackages]);
   // Without the starter soul the empty roster just says so.
   const [starter, setStarter] = useState<Starter>();
   const harnessAuth: HarnessAuth = (action, harness, soul) => invoke('harness_auth', { action, harness, soul });
@@ -26,7 +58,7 @@ function Live() {
   return (
     <App census={census} connection={connection} onRefresh={refresh} setup={setup}
       onSetup={() => { void runSetup(); }} chat={chat} launcher={launcher} starter={starter} harnessAuth={harnessAuth}
-      devTools={devTools} updates={updates}
+      devTools={devTools} openedPackage={openedPackage} updates={updates}
       onRemoveServices={async () => { await invoke('remove_services'); void refresh?.(); }} />
   );
 }

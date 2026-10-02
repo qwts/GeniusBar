@@ -14,7 +14,7 @@ describe('App', () => {
   it('shows the header and an empty roster before the bridge connects', () => {
     render(<App />);
     expect(screen.getByRole('heading', { name: 'GeniusBar' })).toBeTruthy();
-    expect(screen.getByRole('status').textContent).toMatch(/not connected/i);
+    expect(screen.getByRole('status').textContent).toMatch(/connecting/i);
     expect(screen.getByRole('region', { name: 'Souls' }).childElementCount).toBe(0);
   });
 
@@ -22,14 +22,12 @@ describe('App', () => {
     // SnapshotTests.rendersPNG: the populated roster must actually draw
     // rows that the same header with an empty roster does not.
     render(<App census={sampleCensus} connection={sampleConnection} isStatic />);
-    expect(screen.getByRole('status', { name: /Broker healthy/ }).textContent).toContain(
-      'uptime 12s · log 512 B · accounts 1 · principals 2 · watches 3',
-    );
+    expect(screen.getByRole('status', { name: 'Connected' }).textContent).toBe('Connected');
     const roster = screen.getByRole('region', { name: 'Souls' });
     expect(roster.querySelectorAll('button.soul-row')).toHaveLength(3);
     cleanup();
     render(<App connection={sampleConnection} isStatic />);
-    expect(screen.getByRole('region', { name: 'Souls' }).textContent).toBe('No souls on this machine.');
+    expect(screen.getByRole('region', { name: 'Souls' }).textContent).toBe('No souls yet. Your first soul will appear here.');
   });
 
   it('opens the detail for a selected row and closes it with Done', () => {
@@ -51,9 +49,9 @@ describe('App', () => {
         isStatic
       />,
     );
-    expect(screen.getByRole('status').textContent).toContain('Broker unreachable');
-    expect(screen.getAllByText(`Last known · ${lastRefresh.toLocaleTimeString()}`)).toHaveLength(2);
-    expect(screen.getAllByRole('button', { name: /presence/ })).toHaveLength(3);
+    expect(screen.getByRole('status').textContent).toContain('Can’t reach the background service');
+    expect(screen.getAllByText(`Last updated · ${lastRefresh.toLocaleTimeString()}`)).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: /Ready|Starting|Unavailable/ })).toHaveLength(3);
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     expect(onRefresh).toHaveBeenCalledOnce();
   });
@@ -109,9 +107,43 @@ describe('App setup', () => {
     fireEvent.change(screen.getByLabelText('Harness'), { target: { value: 'claude' } });
     fireEvent.submit(screen.getByRole('form', { name: 'Launch a soul package' }));
     expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { package: '/souls/helper' }, harness: 'claude', name: '' });
-    const refused: LaunchApi = { ...launcher, state: { phase: 'error', requestId: null, text: 'No agent-bot daemon is watching account user.' } };
+    const refused: LaunchApi = { ...launcher, state: { phase: 'error', requestId: null, text: 'GeniusBar can’t reach the agents on account user. Make sure setup has finished, then try again.' } };
     rerender(<App census={sampleCensus} connection={sampleConnection} launcher={refused} isStatic />);
-    expect(screen.getByRole('alert').textContent).toMatch(/No agent-bot daemon/);
+    expect(screen.getByRole('alert').textContent).toMatch(/can’t reach the agents/i);
+  });
+
+  it('shows a friendly error when an opened soul package cannot be read', () => {
+    const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher}
+      openedPackage={{ id: 1, path: '/Downloads/broken.soul', checking: false,
+        error: 'GeniusBar couldn’t read this soul package. Check that it’s accessible and contains a soul.json file, then try again.' }}
+      isStatic />);
+    expect((screen.getByLabelText('Package') as HTMLInputElement).value).toBe('/Downloads/broken.soul');
+    expect(screen.getByRole('alert').textContent).toMatch(/couldn’t read this soul package/i);
+  });
+
+  it('blocks launching an unreadable opened package until its path is edited', () => {
+    const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher}
+      openedPackage={{ id: 1, path: '/Downloads/broken.soul', checking: false, error: 'unreadable' }} isStatic />);
+    const form = screen.getByRole('form', { name: 'Launch a soul package' });
+    expect((screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.submit(form);
+    expect(launcher.launch).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('Package'), { target: { value: '/souls/helper' } });
+    expect((screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.submit(form);
+    expect(launcher.launch).toHaveBeenCalledOnce();
+  });
+
+  it('opens an empty manual form after an opened package is closed', () => {
+    const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher}
+      openedPackage={{ id: 1, path: '/Downloads/broken.soul', checking: false, error: 'unreadable' }} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Launch package…' }));
+    expect((screen.getByLabelText('Package') as HTMLInputElement).value).toBe('');
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('offers the starter soul on an empty roster and launches it with its default harness', () => {
@@ -119,7 +151,7 @@ describe('App setup', () => {
     const starter = { package: '/App/souls/starter.soul', account: 'friend', name: 'Starter', harnesses: ['claude', 'codex'], devTools: true };
     const { rerender } = render(<App census={[]} connection={sampleConnection} launcher={launcher} starter={starter} isStatic />);
     expect((screen.getByLabelText('Harness') as HTMLInputElement).value).toBe('claude');
-    fireEvent.click(screen.getByRole('button', { name: 'Launch your first soul' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start with Starter' }));
     expect(launcher.launch).toHaveBeenCalledWith({ account: 'friend', target: { package: '/App/souls/starter.soul' }, harness: 'claude', name: 'Starter' });
     const failed: LaunchApi = { ...launcher, state: { phase: 'failed', requestId: 'r1', agentId: null, detail: 'harness not installed' } };
     rerender(<App census={[]} connection={sampleConnection} launcher={failed} starter={starter} isStatic />);
@@ -132,7 +164,7 @@ describe('App setup', () => {
     let signedIn = false;
     const auth = vi.fn(async (action: 'status' | 'login') => { if (action === 'login') signedIn = true; return { loggedIn: signedIn }; });
     const { rerender } = render(<App census={[]} connection={sampleConnection} launcher={idle} starter={starter} harnessAuth={auth} isStatic />);
-    fireEvent.click(screen.getByRole('button', { name: 'Launch your first soul' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start with Starter' }));
     const launched: LaunchApi = { ...idle, state: { phase: 'launched', requestId: 'r1', agentId: 'agent_s' } };
     rerender(<App census={sampleCensus} connection={sampleConnection} launcher={launched} starter={starter} harnessAuth={auth} isStatic />);
     const signIn = await screen.findByRole('button', { name: 'Sign in to Claude' });
@@ -149,19 +181,19 @@ describe('App setup', () => {
     const starter = { package: '/App/souls/starter.soul', account: 'friend', name: 'Starter', harnesses: ['claude'], devTools: false };
     const devTools = { install: vi.fn(async () => {}), recheck: vi.fn() };
     const { rerender } = render(<App census={[]} connection={sampleConnection} launcher={launcher} starter={starter} devTools={devTools} isStatic />);
-    expect(screen.queryByRole('button', { name: 'Launch your first soul' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Start with Starter' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Install developer tools' }));
     expect(devTools.install).toHaveBeenCalled();
     fireEvent.click(await screen.findByRole('button', { name: "I've installed them" }));
     expect(devTools.recheck).toHaveBeenCalled();
     rerender(<App census={[]} connection={sampleConnection} launcher={launcher} starter={{ ...starter, devTools: true }} devTools={devTools} isStatic />);
-    expect(screen.getByRole('button', { name: 'Launch your first soul' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Start with Starter' })).toBeTruthy();
   });
 
   it('keeps the plain empty text when the starter soul is not offered', () => {
     render(<App census={[]} connection={sampleConnection} isStatic />);
-    expect(screen.queryByRole('form', { name: 'Launch your first soul' })).toBeNull();
-    expect(screen.getByText('No souls on this machine.')).toBeTruthy();
+    expect(screen.queryByRole('form', { name: 'Start with Starter' })).toBeNull();
+    expect(screen.getByText('No souls yet. Your first soul will appear here.')).toBeTruthy();
   });
 
   it('offers no launch without a launcher', () => {

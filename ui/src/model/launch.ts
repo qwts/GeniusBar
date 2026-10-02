@@ -85,18 +85,18 @@ export function applyStatus(state: LaunchState, result: unknown): LaunchState {
 const FINAL_STATUS_ERRORS = new Set(['unknown-launch', 'forbidden', 'not-approved', 'credential-invalid', 'unauthenticated']);
 
 /** The state after a `launchStatus` call failed. */
-export function applyStatusError(state: LaunchState, code: string, message: string): LaunchState {
+export function applyStatusError(state: LaunchState, code: string, _message: string): LaunchState {
   if (state.phase !== 'pending') return state;
   if (FINAL_STATUS_ERRORS.has(code)) {
-    return { phase: 'error', requestId: state.requestId, text: launchErrorText(code, message) };
+    return { phase: 'error', requestId: state.requestId, text: launchErrorText(code, _message) };
   }
-  return { ...state, note: `Could not check the launch yet (${code}); still trying.` };
+  return { ...state, note: 'Still waiting for the launch to finish. GeniusBar will keep checking.' };
 }
 
-export function launchErrorText(code: string, message: string, account?: string): string {
+export function launchErrorText(code: string, _message: string, account?: string): string {
   switch (code) {
     case 'daemon-unavailable':
-      return `No agent-bot daemon is watching ${account ? `account ${account}` : 'this account'}. Start it, then launch again.`;
+      return `GeniusBar can’t reach the agents on ${account ? `account ${account}` : 'this account'}. Make sure setup has finished, then try again.`;
     case 'unknown-launch':
       return 'The broker no longer knows this launch, or you can no longer see it.';
     case 'rate-limited':
@@ -105,8 +105,8 @@ export function launchErrorText(code: string, message: string, account?: string)
       return 'You cannot launch this soul: it is not in an account you may reach.';
     case 'broker-unreachable':
     case 'broker-timeout':
-      return 'Cannot reach the broker. The launch may or may not have been requested; check the roster before launching again.';
+      return 'GeniusBar can’t reach its background service. Check the roster before trying again.';
     default:
-      return `Could not launch (${code})${message ? `: ${message}` : '.'}`;
+      return 'GeniusBar couldn’t start this soul. Try again, and ask for help if the problem continues.';
   }
 }
