@@ -1,6 +1,9 @@
 //! The starter soul (R4): the package GeniusBar ships so a first launch
 //! needs nothing but a click. The web view learns where it is, which
-//! account to launch it in, and which harnesses it prefers.
+//! account to launch it in, and which harnesses it prefers. It also learns
+//! whether Apple's command line tools are installed: soul homes are git
+//! worktrees and Claude Code runs git, and a stock Mac's /usr/bin/git is
+//! only a stub that asks to install them.
 
 use serde::Serialize;
 use std::path::Path;
@@ -15,9 +18,12 @@ pub struct Starter {
     pub name: String,
     /// The soul's own order of preference, first is the default.
     pub harnesses: Vec<String>,
+    /// Whether git works, from Apple's command line tools or Xcode.
+    #[serde(rename = "devTools")]
+    pub dev_tools: bool,
 }
 
-pub fn read_starter(package: &Path, account: &str) -> Result<Starter, String> {
+pub fn read_starter(package: &Path, account: &str, dev_tools: bool) -> Result<Starter, String> {
     let text = std::fs::read_to_string(package.join("soul.json")).map_err(|e| e.to_string())?;
     let manifest: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
     let name = manifest["name"].as_str().unwrap_or("Starter").to_owned();
@@ -37,14 +43,44 @@ pub fn read_starter(package: &Path, account: &str) -> Result<Starter, String> {
         account: account.to_owned(),
         name,
         harnesses,
+        dev_tools,
     })
+}
+
+/// `xcode-select -p` names a developer directory only once the command line
+/// tools or Xcode are installed; elsewhere git is the user's own concern.
+fn dev_tools_installed() -> bool {
+    if !cfg!(target_os = "macos") {
+        return true;
+    }
+    std::process::Command::new("/usr/bin/xcode-select")
+        .arg("-p")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 #[tauri::command]
 pub fn starter_soul<R: Runtime>(app: AppHandle<R>) -> Result<Starter, String> {
     let resources = app.path().resource_dir().map_err(|e| e.to_string())?;
     let account = std::env::var("USER").unwrap_or_default();
-    read_starter(&resources.join("souls").join("starter.soul"), &account)
+    read_starter(
+        &resources.join("souls").join("starter.soul"),
+        &account,
+        dev_tools_installed(),
+    )
+}
+
+/// Opens Apple's own installer for the command line tools. It runs on its
+/// own; the web view checks again once the owner says it finished.
+#[tauri::command]
+pub fn install_dev_tools() -> Result<(), String> {
+    std::process::Command::new("/usr/bin/xcode-select")
+        .arg("--install")
+        .spawn()
+        .map(drop)
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -54,9 +90,10 @@ mod tests {
     #[test]
     fn reads_the_shipped_starter_soul() {
         let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("../souls/starter.soul");
-        let starter = read_starter(&package, "friend").unwrap();
+        let starter = read_starter(&package, "friend", false).unwrap();
         assert_eq!(starter.account, "friend");
         assert_eq!(starter.name, "Starter");
+        assert!(!starter.dev_tools);
         assert_eq!(
             starter.harnesses.first().map(String::as_str),
             Some("claude")
@@ -66,6 +103,6 @@ mod tests {
     #[test]
     fn refuses_an_unknown_user() {
         let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("../souls/starter.soul");
-        assert!(read_starter(&package, "").is_err());
+        assert!(read_starter(&package, "", true).is_err());
     }
 }

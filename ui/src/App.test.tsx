@@ -116,7 +116,7 @@ describe('App setup', () => {
 
   it('offers the starter soul on an empty roster and launches it with its default harness', () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
-    const starter = { package: '/App/souls/starter.soul', account: 'friend', name: 'Starter', harnesses: ['claude', 'codex'] };
+    const starter = { package: '/App/souls/starter.soul', account: 'friend', name: 'Starter', harnesses: ['claude', 'codex'], devTools: true };
     const { rerender } = render(<App census={[]} connection={sampleConnection} launcher={launcher} starter={starter} isStatic />);
     expect((screen.getByLabelText('Harness') as HTMLInputElement).value).toBe('claude');
     fireEvent.click(screen.getByRole('button', { name: 'Launch your first soul' }));
@@ -127,7 +127,7 @@ describe('App setup', () => {
   });
 
   it('after the starter launches, stays open while the roster fills and signs in to the harness', async () => {
-    const starter = { package: '/App/souls/starter.soul', account: 'friend', name: 'Starter', harnesses: ['claude'] };
+    const starter = { package: '/App/souls/starter.soul', account: 'friend', name: 'Starter', harnesses: ['claude'], devTools: true };
     const idle: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     let signedIn = false;
     const auth = vi.fn(async (action: 'status' | 'login') => { if (action === 'login') signedIn = true; return { loggedIn: signedIn }; });
@@ -142,6 +142,20 @@ describe('App setup', () => {
     expect(auth).toHaveBeenCalledWith('login', 'claude', 'agent_s');
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(screen.queryByRole('region', { name: 'Your first soul' })).toBeNull();
+  });
+
+  it('asks for Apple developer tools before the starter can launch', async () => {
+    const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    const starter = { package: '/App/souls/starter.soul', account: 'friend', name: 'Starter', harnesses: ['claude'], devTools: false };
+    const devTools = { install: vi.fn(async () => {}), recheck: vi.fn() };
+    const { rerender } = render(<App census={[]} connection={sampleConnection} launcher={launcher} starter={starter} devTools={devTools} isStatic />);
+    expect(screen.queryByRole('button', { name: 'Launch your first soul' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Install developer tools' }));
+    expect(devTools.install).toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole('button', { name: "I've installed them" }));
+    expect(devTools.recheck).toHaveBeenCalled();
+    rerender(<App census={[]} connection={sampleConnection} launcher={launcher} starter={{ ...starter, devTools: true }} devTools={devTools} isStatic />);
+    expect(screen.getByRole('button', { name: 'Launch your first soul' })).toBeTruthy();
   });
 
   it('keeps the plain empty text when the starter soul is not offered', () => {
