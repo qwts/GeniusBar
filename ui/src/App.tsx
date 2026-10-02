@@ -1,14 +1,76 @@
-// The popup's root. Census, Dudles and chat arrive with the Node bridge
-// (#7) and the R1 port (#8); until then the header reports that the
-// bridge is not connected.
-export function App() {
+import { useEffect, useMemo, useState } from 'react';
+import { HealthHeader } from './components/HealthHeader';
+import { SoulDetail } from './components/SoulDetail';
+import { SoulRow } from './components/SoulRow';
+import { allSouls, buildSoulForest, findSoul, soulKey, type CensusRow } from './model/census';
+import { disconnected, emptyRosterText, footerStatus, type ConnectionSnapshot } from './model/status';
+
+interface AppProps {
+  /** Census rows from the principal client; absent until the bridge (#7). */
+  census?: readonly CensusRow[];
+  connection?: ConnectionSnapshot;
+  onRefresh?: () => void;
+  /** Static renders (snapshots, probes): Dudles stay still, eyes open. */
+  isStatic?: boolean;
+}
+
+// Dudles stop blinking while the popup is hidden, as R1's did while the
+// menu was closed.
+function usePageHidden(): boolean {
+  const [hidden, setHidden] = useState(() => document.hidden);
+  useEffect(() => {
+    const update = () => setHidden(document.hidden);
+    document.addEventListener('visibilitychange', update);
+    return () => document.removeEventListener('visibilitychange', update);
+  }, []);
+  return hidden;
+}
+
+// Stable default so the forest memo does not rebuild on every render.
+const NO_CENSUS: readonly CensusRow[] = [];
+
+// The popup's root: health header, the census nested under parents, and
+// the read-only detail for a selected soul.
+export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false }: AppProps) {
+  const forest = useMemo(() => buildSoulForest(census), [census]);
+  const roster = useMemo(() => allSouls(forest), [forest]);
+  // Selection holds the roster key and resolves against each census, so
+  // the detail shows fresh values and closes if the soul disappears.
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const selected = selectedKey === null ? null : findSoul(forest, selectedKey);
+  const paused = usePageHidden() || isStatic;
+  const empty = emptyRosterText(connection);
+  const footer = footerStatus(connection);
+
   return (
     <main className="popup">
-      <header className="health">
-        <h1>GeniusBar</h1>
-        <p role="status">Not connected to agent-comms yet.</p>
-      </header>
-      <section className="roster" aria-label="Souls" />
+      <HealthHeader connection={connection} />
+      <section className="roster" aria-label="Souls">
+        {forest.length === 0
+          ? empty && <p className="muted empty">{empty}</p>
+          : forest.map((node) => (
+              <SoulRow
+                key={soulKey(node.soul)}
+                node={node}
+                depth={0}
+                paused={paused}
+                onSelect={(soul) => setSelectedKey(soulKey(soul))}
+              />
+            ))}
+      </section>
+      {selected && (
+        <SoulDetail soul={selected} roster={roster} paused={paused} onDone={() => setSelectedKey(null)} />
+      )}
+      {(footer || onRefresh) && (
+        <footer className="status">
+          {footer && <span className={footer.isError ? 'error small' : 'muted small'}>{footer.text}</span>}
+          {onRefresh && (
+            <button type="button" className="link" onClick={onRefresh}>
+              Refresh
+            </button>
+          )}
+        </footer>
+      )}
     </main>
   );
 }
