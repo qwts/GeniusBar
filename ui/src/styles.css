@@ -53,6 +53,8 @@ body { background: var(--bg); color: var(--fg); }
 .detail-actions { display: flex; justify-content: flex-end; }
 .status { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid var(--line); }
 .link { border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; padding: 0; margin-left: auto; }
+/* Updates (#34): the popup line mirrors the tray item's state. */
+.update { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 14px; border-bottom: 1px solid var(--line); }
 .setup { padding: 12px 14px; border-bottom: 1px solid var(--line); }
 .setup p { margin: 0 0 8px; }
 .setup ol { list-style: none; padding: 0; margin: 0 0 10px; }

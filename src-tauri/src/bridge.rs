@@ -340,13 +340,23 @@ async fn run_services<R: Runtime>(app: &AppHandle<R>, action: &str) -> Result<Va
         .resource_dir()
         .map_err(|e| unavailable(e.to_string()))?;
     let components = resources.join("components");
-    let output = app
+    let mut command = app
         .shell()
         .sidecar("node")
         .map_err(|e| unavailable(e.to_string()))?
         .envs(HOST_ENV.iter().copied())
         .env("AGENT_BOT_NPM", npm_cli(&resources))
         .env("AGENT_BOT_TOOL_PATH", tool_path(&resources))
+        // The version stamp tells a same-path bundle swap from "unchanged"
+        // (#34); the reconcile cannot happen without it, so it is optional.
+        .env(
+            "GENIUSBAR_APP_VERSION",
+            app.package_info().version.to_string(),
+        );
+    if let Ok(dir) = app.path().app_data_dir() {
+        command = command.env("GENIUSBAR_SERVICES_STAMP", dir.join("services.json"));
+    }
+    let output = command
         .args([
             resources
                 .join("bridge")

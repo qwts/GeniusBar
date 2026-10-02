@@ -6,6 +6,11 @@
 // and the app runs without it. Only a Developer ID signed build produces
 // updater artifacts: an unsigned build is never published as an update.
 //
+// GENIUSBAR_UPDATER_INSECURE=1 is the local-test escape hatch (#34): on an
+// unsigned build it allows an http:// endpoint and archive URL and emits
+// updater artifacts, so a dev build can update against a local latest.json.
+// A signed build with it set fails rather than ship an insecure updater.
+//
 // usage:
 //   SIGNED=true|false node scripts/updater.mjs config OUT.json >> "$GITHUB_OUTPUT"
 //   node scripts/updater.mjs manifest VERSION URL SIGNATURE_FILE > latest.json
@@ -31,15 +36,17 @@ function checkPubkey(pubkey) {
   }
 }
 
-function checkHttps(name, value) {
+function checkEndpoint(name, value, insecure = false) {
   let url;
   try {
     url = new URL(value);
   } catch {
     throw new Error(`${name} is not a URL`);
   }
-  // The updater refuses plain HTTP unless told to be insecure.
-  if (url.protocol !== 'https:') throw new Error(`${name} must be an https URL`);
+  // The updater refuses plain HTTP unless the build opted into it.
+  if (url.protocol !== 'https:' && !(insecure && url.protocol === 'http:')) {
+    throw new Error(`${name} must be an https URL`);
+  }
 }
 
 export function updaterConfig(env = process.env, { signed = false } = {}) {
@@ -52,25 +59,39 @@ export function updaterConfig(env = process.env, { signed = false } = {}) {
     const missing = pubkey ? 'GENIUSBAR_UPDATER_ENDPOINT' : 'GENIUSBAR_UPDATER_PUBKEY';
     throw new Error(`partial updater configuration; missing: ${missing}`);
   }
+  const insecure = env.GENIUSBAR_UPDATER_INSECURE === '1';
+  if (insecure && signed) {
+    throw new Error('GENIUSBAR_UPDATER_INSECURE is for unsigned local builds only');
+  }
   checkPubkey(pubkey);
-  checkHttps('GENIUSBAR_UPDATER_ENDPOINT', endpoint);
-  const artifacts = signed;
+  checkEndpoint('GENIUSBAR_UPDATER_ENDPOINT', endpoint, insecure);
+  // An insecure local build produces artifacts too: the test update is a
+  // tarball and signature exactly like a release's, signed with a throwaway
+  // TAURI_SIGNING_PRIVATE_KEY.
+  const artifacts = signed || insecure;
   if (artifacts && !String(env.TAURI_SIGNING_PRIVATE_KEY ?? '').length) {
-    throw new Error('a signed build with the updater enabled needs TAURI_SIGNING_PRIVATE_KEY');
+    throw new Error('a build that produces updater artifacts needs TAURI_SIGNING_PRIVATE_KEY');
   }
   return {
     enabled: true,
     artifacts,
     config: {
       bundle: { createUpdaterArtifacts: artifacts },
-      plugins: { updater: { pubkey, endpoints: [endpoint] } },
+      plugins: {
+        updater: {
+          pubkey,
+          endpoints: [endpoint],
+          ...(insecure ? { dangerousInsecureTransportProtocol: true } : {}),
+        },
+      },
     },
   };
 }
 
-export function updaterManifest({ version, url, signature, notes = '', pubDate = new Date() }) {
+export function updaterManifest({ version, url, signature, notes = '', pubDate = new Date() },
+  { insecure = false } = {}) {
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error(`${version} is not a semver version`);
-  checkHttps('the update URL', url);
+  checkEndpoint('the update URL', url, insecure);
   if (!signature.trim()) throw new Error('the update signature is empty');
   const entry = { signature: signature.trim(), url };
   return {
@@ -91,7 +112,8 @@ function main([command, ...args]) {
   } else if (command === 'manifest') {
     const [version, url, signatureFile] = args;
     if (!signatureFile) throw new Error('usage: updater.mjs manifest VERSION URL SIGNATURE_FILE');
-    const manifest = updaterManifest({ version, url, signature: readFileSync(signatureFile, 'utf8') });
+    const manifest = updaterManifest({ version, url, signature: readFileSync(signatureFile, 'utf8') },
+      { insecure: process.env.GENIUSBAR_UPDATER_INSECURE === '1' });
     process.stdout.write(`${JSON.stringify(manifest, null, 2)}\n`);
   } else {
     throw new Error('usage: updater.mjs config|manifest ...');

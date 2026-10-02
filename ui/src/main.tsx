@@ -7,6 +7,7 @@ import { useCensus } from './useCensus';
 import { useChat } from './useChat';
 import { useLaunch } from './useLaunch';
 import { useSetup } from './useSetup';
+import { useUpdates } from './useUpdates';
 import './styles.css';
 
 // The live app: census and connection come from the bridge.
@@ -15,6 +16,7 @@ function Live() {
   const { setup, runSetup } = useSetup(() => { void refresh?.(); });
   const chat = useChat();
   const launcher = useLaunch();
+  const updates = useUpdates();
   // Without the starter soul the empty roster just says so.
   const [starter, setStarter] = useState<Starter>();
   const harnessAuth: HarnessAuth = (action, harness, soul) => invoke('harness_auth', { action, harness, soul });
@@ -24,7 +26,7 @@ function Live() {
   return (
     <App census={census} connection={connection} onRefresh={refresh} setup={setup}
       onSetup={() => { void runSetup(); }} chat={chat} launcher={launcher} starter={starter} harnessAuth={harnessAuth}
-      devTools={devTools}
+      devTools={devTools} updates={updates}
       onRemoveServices={async () => { await invoke('remove_services'); void refresh?.(); }} />
   );
 }

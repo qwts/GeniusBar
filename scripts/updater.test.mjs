@@ -47,6 +47,32 @@ test('the updater refuses a private key, a non-key, and plain HTTP', () => {
   assert.throws(() => updaterConfig({ ...enabled, GENIUSBAR_UPDATER_ENDPOINT: 'latest.json' }), /not a URL/);
 });
 
+test('the insecure flag opens http endpoints on unsigned builds only (#34)', () => {
+  const local = {
+    ...enabled,
+    GENIUSBAR_UPDATER_ENDPOINT: 'http://localhost:8765/latest.json',
+    GENIUSBAR_UPDATER_INSECURE: '1',
+    TAURI_SIGNING_PRIVATE_KEY: 'throwaway-key',
+  };
+  const result = updaterConfig(local);
+  assert.equal(result.enabled, true);
+  assert.equal(result.artifacts, true);
+  assert.equal(result.config.bundle.createUpdaterArtifacts, true);
+  assert.equal(result.config.plugins.updater.dangerousInsecureTransportProtocol, true);
+  // A signed build fails rather than ship an insecure updater.
+  assert.throws(() => updaterConfig(local, { signed: true }), /unsigned local builds/);
+  // Insecure artifacts still need a signing key, and http needs the flag.
+  assert.throws(() => updaterConfig({ ...enabled, GENIUSBAR_UPDATER_INSECURE: '1' }), /TAURI_SIGNING_PRIVATE_KEY/);
+  assert.throws(() => updaterConfig({ ...enabled, GENIUSBAR_UPDATER_ENDPOINT: 'http://x/latest.json' }), /https/);
+});
+
+test('the manifest allows an http archive only in insecure mode (#34)', () => {
+  const url = 'http://localhost:8765/GeniusBar.app.tar.gz';
+  assert.throws(() => updaterManifest({ version: '1.2.3', url, signature: 's' }), /https/);
+  const manifest = updaterManifest({ version: '1.2.3', url, signature: 's' }, { insecure: true });
+  assert.equal(manifest.platforms['darwin-aarch64'].url, url);
+});
+
 test('the manifest serves the universal archive to both architectures', () => {
   const url = 'https://github.com/example/geniusbar/releases/download/v1.2.3/GeniusBar_1.2.3_universal.app.tar.gz';
   const manifest = updaterManifest({ version: '1.2.3', url, signature: 'c2ln\n', pubDate: new Date(0) });

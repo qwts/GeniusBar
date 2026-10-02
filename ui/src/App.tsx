@@ -6,12 +6,15 @@ import { RemoveServices } from './components/RemoveServices';
 import { SetupPanel } from './components/SetupPanel';
 import { SoulDetail } from './components/SoulDetail';
 import { SoulRow } from './components/SoulRow';
+import { UpdateNotice } from './components/UpdateNotice';
 import { conversationOf, emptyComposer, unreadOf } from './model/chat';
 import { allSouls, buildSoulForest, findSoul, soulKey, type CensusRow } from './model/census';
 import { needsSetup, type SetupState } from './model/setup';
 import { disconnected, emptyRosterText, footerStatus, type ConnectionSnapshot } from './model/status';
+import { updateNotice } from './model/updates';
 import type { ChatApi } from './useChat';
 import type { LaunchApi } from './useLaunch';
+import type { UpdateApi } from './useUpdates';
 
 interface AppProps {
   /** Census rows from the principal client; absent until the bridge (#7). */
@@ -35,6 +38,8 @@ interface AppProps {
   harnessAuth?: HarnessAuth;
   /** Apple's command line tools, which the starter needs first (R4). */
   devTools?: DevTools;
+  /** Update status and action (#34); without it the popup stays quiet. */
+  updates?: UpdateApi;
 }
 
 // Dudles stop blinking while the popup is hidden, as R1's did while the
@@ -54,7 +59,7 @@ const NO_CENSUS: readonly CensusRow[] = [];
 
 // The popup's root: health header, the census nested under parents, and
 // the read-only detail for a selected soul.
-export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, setup, onSetup, chat, launcher, onRemoveServices, starter, harnessAuth, devTools }: AppProps) {
+export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, setup, onSetup, chat, launcher, onRemoveServices, starter, harnessAuth, devTools, updates }: AppProps) {
   const forest = useMemo(() => buildSoulForest(census), [census]);
   const roster = useMemo(() => allSouls(forest), [forest]);
   // Selection holds the roster key and resolves against each census, so
@@ -79,6 +84,9 @@ export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, 
   // and sign-in remain after the new soul fills the roster.
   const [starterOpen, setStarterOpen] = useState(false);
   const canOfferStarter = Boolean(starter && launcher && connection.bridgeConnected && !connection.brokerUnreachable && !showSetup);
+  // The footer offers a check when the update line has nothing to say, so
+  // the panel carries the whole update flow when there is no tray (#34).
+  const canCheckUpdates = Boolean(updates && !updateNotice(updates.status) && updates.status.state !== 'disabled');
   const showStarter = canOfferStarter && (starterOpen || forest.length === 0);
   const launch = useMemo(() => launcher && {
     launcher,
@@ -89,6 +97,7 @@ export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, 
   return (
     <main className="popup">
       <HealthHeader connection={connection} />
+      {updates && <UpdateNotice status={updates.status} onAction={updates.act} />}
       {showStarter && starter && launcher && (
         <section className="detail" aria-label="Your first soul">
           <FirstLaunch starter={starter} launcher={launcher} auth={harnessAuth} devTools={devTools} onStart={() => setStarterOpen(true)} />
@@ -144,9 +153,14 @@ export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, 
           </div>
         </section>
       )}
-      {(footer || onRefresh || onRemoveServices || (launch && !showSetup)) && (
+      {(footer || onRefresh || onRemoveServices || (launch && !showSetup) || canCheckUpdates) && (
         <footer className="status">
           {footer && <span className={footer.isError ? 'error small' : 'muted small'}>{footer.text}</span>}
+          {canCheckUpdates && (
+            <button type="button" className="link" onClick={() => updates?.act()}>
+              Check for Updates…
+            </button>
+          )}
           {launch && !showSetup && !launchingPackage && (
             <button type="button" className="link" onClick={() => { setSelectedKey(null); setLaunchingPackage(true); }}>
               Launch package…
