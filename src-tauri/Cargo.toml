@@ -15,3 +15,13 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-positioner = { version = "2", features = ["tray-icon"] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["sync", "time"] }
+
+# The macOS 27 strip tool corrupts proc-macro dylibs ("mis-aligned LINKEDIT
+# string pool"), so release builds fail locally. Build-time artifacts never
+# ship, so leaving them unstripped costs nothing.
+[profile.release.build-override]
+strip = false
