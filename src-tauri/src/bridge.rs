@@ -37,6 +37,11 @@ pub const HOST_ENV: &[(&str, &str)] = &[
     ("AGENT_BOT_EXECUTOR", "1"),
 ];
 
+/// The shims that put the bundled agent-comms and agent-bot on a soul's PATH.
+pub fn tool_path(resources: &std::path::Path) -> std::path::PathBuf {
+    resources.join("bin")
+}
+
 /// The bundled npm, which the daemon uses to install soul harnesses.
 pub fn npm_cli(resources: &std::path::Path) -> std::path::PathBuf {
     resources
@@ -275,6 +280,7 @@ async fn run_setup<R: Runtime>(app: &AppHandle<R>) -> Result<(), BridgeError> {
         .map_err(|e| unavailable(e.to_string()))?
         .envs(HOST_ENV.iter().copied())
         .env("AGENT_BOT_NPM", npm_cli(&resources))
+        .env("AGENT_BOT_TOOL_PATH", tool_path(&resources))
         .args([
             resources.join("bridge").join("setup.mjs"),
             resources.join("components").join("agent-comms"),
@@ -340,6 +346,7 @@ async fn run_services<R: Runtime>(app: &AppHandle<R>, action: &str) -> Result<Va
         .map_err(|e| unavailable(e.to_string()))?
         .envs(HOST_ENV.iter().copied())
         .env("AGENT_BOT_NPM", npm_cli(&resources))
+        .env("AGENT_BOT_TOOL_PATH", tool_path(&resources))
         .args([
             resources
                 .join("bridge")
