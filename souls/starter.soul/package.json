@@ -1,0 +1,8 @@
+{
+  "name": "starter-soul",
+  "private": true,
+  "description": "The harnesses the Starter soul runs on (ADR-0276).",
+  "dependencies": {
+    "@zed-industries/claude-code-acp": "0.16.2"
+  }
+}
