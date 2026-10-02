@@ -64,7 +64,7 @@ jobs:
       - name: Fetch bundled components
         run: node scripts/fetch-components.mjs
       - name: Bridge tests
-        run: node --test bridge/ scripts/
+        run: node --test 'bridge/*.test.mjs' 'scripts/*.test.mjs'
       - name: UI typecheck and tests
         run: npm --prefix ui run typecheck && npm --prefix ui test
       - name: Rust format, lint, tests
