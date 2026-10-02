@@ -31,6 +31,48 @@ and holds the principal credential.
 The Swift app below remains the specification until the Tauri app reaches
 parity (#11).
 
+## Releases
+
+Pushing a `vX.Y.Z` tag on `main` (matching the version in
+`src-tauri/tauri.conf.json`, `package.json` and `Cargo.toml`) runs
+`.github/workflows/release.yml`. It calls `package.yml`, which builds a
+universal (Apple Silicon and Intel) `GeniusBar.app` and dmg, then publishes a
+GitHub release. `package.yml` can also be run by hand to build without
+releasing.
+
+Repository **secrets** (Settings › Secrets and variables › Actions):
+
+| Secret | Value |
+| --- | --- |
+| `CSC_LINK` | base64 of the Developer ID Application certificate (`.p12`) |
+| `CSC_KEY_PASSWORD` | the `.p12` password |
+| `APPLE_API_KEY` | base64 of the App Store Connect API key (`AuthKey_*.p8`) |
+| `APPLE_API_KEY_ID` | that key's ID |
+| `APPLE_API_ISSUER` | that key's issuer ID |
+| `TAURI_SIGNING_PRIVATE_KEY` | the updater private key from `npx tauri signer generate` |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | its password (empty if it has none) |
+
+Repository **variables**:
+
+| Variable | Value |
+| --- | --- |
+| `GENIUSBAR_UPDATER_PUBKEY` | the updater public key (the `.pub` file's contents) |
+| `GENIUSBAR_UPDATER_ENDPOINT` | `https://github.com/<owner>/<repo>/releases/latest/download/latest.json` |
+
+All five Apple secrets give a Developer ID signed, notarized build. With none
+of them the build is ad-hoc signed and labeled `unsigned-dev`; a partial set
+fails the build. A signed release also needs the updater variables and key,
+and carries the dmg, `GeniusBar_<version>_universal.app.tar.gz` with its
+`.sig`, and `latest.json`. An unsigned build is published only as a
+prerelease titled "(unsigned)" with the dmg alone: no `latest.json` and no
+updater archive, so installed apps never update to it.
+
+The updater key and endpoint are build-time configuration, not code
+(ADR-0004 decision 8). A build without them, such as `npm run
+build:unsigned`, runs with updates off and shows "Updates Off in This Build"
+in the tray menu. With them, the app checks at startup and from the tray's
+"Check for Updates…" item; the web view has no updater permissions.
+
 ## Building and running (Swift, R1)
 
 Requirements: macOS 14+, Swift 6 toolchain (Xcode 16+ or swift.org), no
