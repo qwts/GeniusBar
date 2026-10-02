@@ -136,7 +136,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(bridge::Bridge::default())
         .manage(Dismissed::default())
-        .invoke_handler(tauri::generate_handler![bridge::bridge])
+        .invoke_handler(tauri::generate_handler![bridge::bridge, bridge::setup])
         .setup(move |app| {
             bridge::start(app.handle().clone());
             let window = app

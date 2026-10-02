@@ -14,7 +14,7 @@ use std::{
 
 use serde::Serialize;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Manager, Runtime, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
     ShellExt,
@@ -24,6 +24,14 @@ use tokio::sync::oneshot;
 /// The principal operations the web view may call; bridge.mjs holds the
 /// same list and checks it again.
 pub const METHODS: &[&str] = &["census", "send", "inbox", "ack", "launch", "launchStatus"];
+
+/// GeniusBar's own agent-comms names (ADR-0004 decision 8, agent-comms
+/// ADR-0059): the bridge and setup both run with them, so the credential
+/// setup saves is the one the bridge reads.
+pub const HOST_ENV: &[(&str, &str)] = &[
+    ("AGENT_COMMS_SERVICE_LABEL", "app.geniusbar.broker"),
+    ("AGENT_COMMS_CREDENTIAL_NAME", "app.geniusbar.principal"),
+];
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const RESTART_MIN: Duration = Duration::from_secs(1);
@@ -52,6 +60,7 @@ type Reply = Result<Value, BridgeError>;
 pub struct Bridge {
     next_id: AtomicU64,
     stopping: AtomicBool,
+    setting_up: AtomicBool,
     child: Mutex<Option<CommandChild>>,
     pending: Mutex<HashMap<u64, oneshot::Sender<Reply>>>,
 }
@@ -107,6 +116,7 @@ fn spawn_bridge<R: Runtime>(
         .shell()
         .sidecar("node")
         .map_err(|e| e.to_string())?
+        .envs(HOST_ENV.iter().copied())
         .args([script, comms])
         .spawn()
         .map_err(|e| e.to_string())?;
@@ -206,6 +216,81 @@ pub async fn bridge(
     }
 }
 
+/// Parses one setup line: progress to forward, or the final outcome.
+pub fn parse_setup_line(line: &[u8]) -> Option<Result<Value, BridgeError>> {
+    let value: Value = serde_json::from_slice(line).ok()?;
+    match value.get("done").and_then(Value::as_bool) {
+        None => Some(Ok(value)),
+        Some(true) => Some(Ok(json!({ "done": true }))),
+        Some(false) => {
+            let field = |name: &str| value.get(name).and_then(Value::as_str).unwrap_or("");
+            let code = Some(field("code"))
+                .filter(|c| !c.is_empty())
+                .unwrap_or("setup-failed");
+            Some(Err(BridgeError::new(code, field("message"))))
+        }
+    }
+}
+
+/// First-run setup (#9), on the owner's click: runs `bridge/setup.mjs` in
+/// the bundled Node and forwards its progress as `setup-progress` events.
+#[tauri::command]
+pub async fn setup<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, Bridge>,
+) -> Result<(), BridgeError> {
+    if state.setting_up.swap(true, Ordering::SeqCst) {
+        return Err(BridgeError::new(
+            "setup-running",
+            "setup is already running",
+        ));
+    }
+    let outcome = run_setup(&app).await;
+    state.setting_up.store(false, Ordering::SeqCst);
+    outcome
+}
+
+async fn run_setup<R: Runtime>(app: &AppHandle<R>) -> Result<(), BridgeError> {
+    let unavailable = |e: String| BridgeError::new("setup-unavailable", &e);
+    let resources = app
+        .path()
+        .resource_dir()
+        .map_err(|e| unavailable(e.to_string()))?;
+    let (mut events, _child) = app
+        .shell()
+        .sidecar("node")
+        .map_err(|e| unavailable(e.to_string()))?
+        .envs(HOST_ENV.iter().copied())
+        .args([
+            resources.join("bridge").join("setup.mjs"),
+            resources.join("components").join("agent-comms"),
+        ])
+        .spawn()
+        .map_err(|e| unavailable(e.to_string()))?;
+    let mut outcome = Err(BridgeError::new(
+        "setup-failed",
+        "setup ended without a result",
+    ));
+    while let Some(event) = events.recv().await {
+        match event {
+            CommandEvent::Stdout(line) => match parse_setup_line(&line) {
+                Some(Ok(value)) if value.get("done").is_some() => outcome = Ok(()),
+                Some(Ok(progress)) => {
+                    let _ = app.emit("setup-progress", progress);
+                }
+                Some(Err(error)) => outcome = Err(error),
+                None => {}
+            },
+            CommandEvent::Stderr(line) => {
+                eprintln!("setup: {}", String::from_utf8_lossy(&line).trim_end());
+            }
+            CommandEvent::Terminated(_) => break,
+            _ => {}
+        }
+    }
+    outcome
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,6 +311,24 @@ mod tests {
             parse_reply(br#"{"id":5,"ok":false}"#),
             Some((5, Err(BridgeError::new("bridge-error", ""))))
         );
+    }
+
+    #[test]
+    fn parses_setup_progress_and_outcomes() {
+        let progress = json!({ "step": "broker", "state": "done" });
+        assert_eq!(
+            parse_setup_line(progress.to_string().as_bytes()),
+            Some(Ok(progress))
+        );
+        assert_eq!(
+            parse_setup_line(br#"{"done":true}"#),
+            Some(Ok(json!({ "done": true })))
+        );
+        assert_eq!(
+            parse_setup_line(br#"{"done":false,"code":"broker-not-ready","message":"late"}"#),
+            Some(Err(BridgeError::new("broker-not-ready", "late")))
+        );
+        assert_eq!(parse_setup_line(b"noise"), None);
     }
 
     #[test]

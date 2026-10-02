@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { HealthHeader } from './components/HealthHeader';
+import { SetupPanel } from './components/SetupPanel';
 import { SoulDetail } from './components/SoulDetail';
 import { SoulRow } from './components/SoulRow';
 import { allSouls, buildSoulForest, findSoul, soulKey, type CensusRow } from './model/census';
+import { needsSetup, type SetupState } from './model/setup';
 import { disconnected, emptyRosterText, footerStatus, type ConnectionSnapshot } from './model/status';
 
 interface AppProps {
@@ -12,6 +14,9 @@ interface AppProps {
   onRefresh?: () => void;
   /** Static renders (snapshots, probes): Dudles stay still, eyes open. */
   isStatic?: boolean;
+  /** First-run setup; offered only when given and the connection needs it. */
+  setup?: SetupState;
+  onSetup?: () => void;
 }
 
 // Dudles stop blinking while the popup is hidden, as R1's did while the
@@ -31,7 +36,7 @@ const NO_CENSUS: readonly CensusRow[] = [];
 
 // The popup's root: health header, the census nested under parents, and
 // the read-only detail for a selected soul.
-export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false }: AppProps) {
+export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, setup, onSetup }: AppProps) {
   const forest = useMemo(() => buildSoulForest(census), [census]);
   const roster = useMemo(() => allSouls(forest), [forest]);
   // Selection holds the roster key and resolves against each census, so
@@ -45,6 +50,7 @@ export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, 
   return (
     <main className="popup">
       <HealthHeader connection={connection} />
+      {setup && onSetup && (setup.running || needsSetup(connection)) && <SetupPanel setup={setup} onSetup={onSetup} />}
       <section className="roster" aria-label="Souls">
         {forest.length === 0
           ? empty && <p className="muted empty">{empty}</p>
