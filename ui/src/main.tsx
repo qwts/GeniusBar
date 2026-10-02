@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { useCensus } from './useCensus';
 import { useChat } from './useChat';
+import { useLaunch } from './useLaunch';
 import { useSetup } from './useSetup';
 import './styles.css';
 
@@ -11,7 +12,11 @@ function Live() {
   const { census, connection, refresh } = useCensus();
   const { setup, runSetup } = useSetup(() => { void refresh?.(); });
   const chat = useChat();
-  return <App census={census} connection={connection} onRefresh={refresh} setup={setup} onSetup={() => { void runSetup(); }} chat={chat} />;
+  const launcher = useLaunch();
+  return (
+    <App census={census} connection={connection} onRefresh={refresh} setup={setup}
+      onSetup={() => { void runSetup(); }} chat={chat} launcher={launcher} />
+  );
 }
 
 createRoot(document.getElementById('root')!).render(
