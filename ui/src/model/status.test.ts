@@ -29,7 +29,7 @@ describe('Broker error messages', () => {
   // belong to agent-comms now.
   it('points unauthenticated at principal pairing', () => {
     expect(brokerErrorMessage('unauthenticated', 'unknown principal')).toBe(
-      'Not paired or not approved. Run: agent-comms principal pair',
+      'Not set up yet. Use Set up below.',
     );
   });
 
@@ -107,6 +107,8 @@ describe('Footer status', () => {
     expect(
       footerStatus({ ...connected, lastRefresh: refreshed, lastError: 'boom', brokerUnreachable: true }),
     ).toEqual({ text: `Last known · ${formatTime(refreshed)}`, isError: false });
+    // Before setup the keychain has no principal: the header says so, not the footer.
+    expect(footerStatus({ ...connected, unpaired: true, lastError: 'cannot read the principal' })).toBeNull();
   });
 });
 

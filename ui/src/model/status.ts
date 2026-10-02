@@ -33,7 +33,9 @@ export const disconnected: ConnectionSnapshot = {
   lastRefresh: null,
 };
 
-export const unpairedMessage = 'Not paired or not approved. Run: agent-comms principal pair';
+// The setup panel shows whenever the app is unpaired, so this points there
+// rather than at a terminal (R4: a friend has none).
+export const unpairedMessage = 'Not set up yet. Use Set up below.';
 export const pendingApprovalMessage =
   'Waiting for owner approval. The owner runs: agent-comms admin principals, then agent-comms admin principal-approve CODE';
 
@@ -135,7 +137,8 @@ export function footerStatus(s: ConnectionSnapshot): FooterState | null {
   if (s.brokerUnreachable && s.lastRefresh) {
     return { text: `Last known · ${formatTime(s.lastRefresh)}`, isError: false };
   }
-  if (s.lastError !== null) return { text: s.lastError, isError: true };
+  // Unpaired is the header's note and the setup panel's job, not an error.
+  if (s.lastError !== null && !s.unpaired) return { text: s.lastError, isError: true };
   if (s.lastRefresh) return { text: `Updated ${formatTime(s.lastRefresh)}`, isError: false };
   return null;
 }
