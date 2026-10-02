@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { NODE_PLATFORMS, UNIVERSAL_TARGETS, sidecarName, stampFor, tagCommit } from './fetch-components.mjs';
+import { NODE_PLATFORMS, UNIVERSAL_TARGETS, nodeMember, sidecarName, stampFor, tagCommit } from './fetch-components.mjs';
 
 const pins = JSON.parse(readFileSync(new URL('../components.json', import.meta.url), 'utf8'));
 
@@ -46,4 +46,11 @@ test('a universal stamp changes when either slice is repinned', () => {
   const repinned = { ...pins, sha256: { ...pins.sha256, 'darwin-x64': 'c' } };
   assert.notEqual(stampFor('universal-apple-darwin', repinned), stampFor('universal-apple-darwin', pins));
   assert.throws(() => stampFor('riscv64-unknown-linux-gnu', pins), /no bundled Node/);
+});
+
+test('npm comes from the pinned Node archive, on every platform', () => {
+  assert.equal(nodeMember('darwin-arm64', 'npm', '1.2.3'), 'node-v1.2.3-darwin-arm64/lib/node_modules/npm');
+  assert.equal(nodeMember('win-x64', 'npm', '1.2.3'), 'node-v1.2.3-win-x64/node_modules/npm');
+  assert.equal(nodeMember('darwin-x64', 'node', '1.2.3'), 'node-v1.2.3-darwin-x64/bin/node');
+  assert.equal(nodeMember('win-arm64', 'node', '1.2.3'), 'node-v1.2.3-win-arm64/node.exe');
 });
