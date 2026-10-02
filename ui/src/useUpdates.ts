@@ -15,11 +15,14 @@ export function useUpdates(enabled: boolean = inApp()): UpdateApi {
   const [status, setStatus] = useState<UpdateStatus>(idleUpdate);
   useEffect(() => {
     if (!enabled) return;
+    // Registration resolves later; an unmount before then (StrictMode's
+    // effect replay) must still remove the listener once it arrives.
+    let disposed = false;
     let unlisten: (() => void) | undefined;
     void invoke<UpdateStatus>('update_status').then(setStatus, () => {});
     void listen<UpdateStatus>('update-status', (event) => setStatus(event.payload))
-      .then((stop) => { unlisten = stop; });
-    return () => unlisten?.();
+      .then((stop) => { if (disposed) stop(); else unlisten = stop; }, () => {});
+    return () => { disposed = true; unlisten?.(); };
   }, [enabled]);
   const act = useCallback(() => { void invoke('update_action'); }, []);
   return { status: enabled ? status : idleUpdate, act };
