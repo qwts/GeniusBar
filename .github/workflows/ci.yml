@@ -1,4 +1,5 @@
-# GeniusBar CI: build and test the Swift package on a macOS runner.
+# GeniusBar CI on macOS runners: the Tauri app (UI tests, Rust checks, an
+# unsigned bundle) and, until #11 removes it, the R1 Swift package.
 #
 # Every action is pinned to a 40-hex commit, never a branch or tag (ENG-0355,
 # ENG-0282). The governed lifecycle lanes from qwts-agent-ci (ci-policy,
@@ -24,8 +25,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
-  build-test:
-    name: CI
+  swift:
+    name: Swift
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: macos-latest
     timeout-minutes: 20
@@ -37,3 +38,42 @@ jobs:
         run: swift build
       - name: Test
         run: swift test
+
+  tauri:
+    name: Tauri
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      # rustup reads rust-toolchain.toml, so the pinned toolchain installs here.
+      - name: Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        with:
+          workspaces: src-tauri
+      - name: Install
+        run: npm ci && npm --prefix ui ci
+      - name: UI typecheck and tests
+        run: npm --prefix ui run typecheck && npm --prefix ui test
+      - name: Rust format, lint, tests
+        working-directory: src-tauri
+        run: cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+      - name: Unsigned bundle
+        run: npm run build:unsigned
+
+  # The required check. It stays named CI so the ruleset never changes as
+  # jobs come and go.
+  gate:
+    name: CI
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    needs: [swift, tauri]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All jobs passed
+        run: test "${{ needs.swift.result }}" = success && test "${{ needs.tauri.result }}" = success

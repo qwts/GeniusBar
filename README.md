@@ -6,7 +6,26 @@ broker `census` operation nested under their parents, each with a
 deterministic Dudle avatar, plus a broker `health` header. No routing, no
 authority, no chat (chat comes in R3).
 
-## Building and running
+## Tauri app (R3)
+
+GeniusBar is moving to a Tauri 2 menubar/tray app with a bundled Node
+sidecar ([ADR-0004](docs/decisions/ADR-0004-tauri-menubar-app-with-a-node-sidecar.md)).
+The shell lives in `src-tauri/` and the web UI in `ui/`. Requirements: Node
+24 and the Rust toolchain from `rust-toolchain.toml`.
+
+```sh
+npm ci && npm --prefix ui ci
+npm run tauri dev               # tray item with its popup
+npm run tauri dev -- -- --window   # the same UI in a regular window
+npm --prefix ui test            # UI tests
+(cd src-tauri && cargo test)    # shell tests
+npm run build:unsigned          # unsigned GeniusBar.app
+```
+
+The Swift app below remains the specification until the Tauri app reaches
+parity (#11).
+
+## Building and running (Swift, R1)
 
 Requirements: macOS 14+, Swift 6 toolchain (Xcode 16+ or swift.org), no
 third-party dependencies.
