@@ -1,0 +1,5 @@
+#!/bin/sh
+# GeniusBar's Node for the souls it runs (R4): harnesses such as the Claude
+# agent SDK start their CLI with `node` from PATH, and a stock Mac has none.
+here=$(cd "$(dirname "$0")" && pwd -P)
+exec "$here/../../MacOS/node" "$@"
