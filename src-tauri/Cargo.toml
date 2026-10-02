@@ -1,0 +1,17 @@
+[package]
+name = "geniusbar"
+version = "0.1.0"
+description = "GeniusBar's Tauri shell: tray item, popup window, platform calls (ADR-0004)"
+edition = "2021"
+publish = false
+
+[lib]
+name = "geniusbar_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-positioner = { version = "2", features = ["tray-icon"] }
