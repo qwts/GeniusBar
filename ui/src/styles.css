@@ -16,3 +16,40 @@ body { background: var(--bg); color: var(--fg); }
 .health h1 { font-size: 13px; font-weight: 600; margin: 0; }
 .health p { color: var(--muted); margin: 2px 0 0; }
 .roster { flex: 1; overflow-y: auto; }
+:root { --ok: #34c759; --bad: #ff3b30; --unknown: #8e8e93; --warn: #ff9500; --accent: #0a84ff; }
+.muted { color: var(--muted); }
+.small { font-size: 11px; }
+.block { display: block; }
+.error { color: var(--bad); }
+.health-title { display: flex; align-items: center; gap: 6px; font-weight: 600; color: var(--fg); }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot-ok { background: var(--ok); }
+.dot-bad { background: var(--bad); }
+.dot-unknown { background: var(--unknown); }
+.note { color: var(--muted); }
+.empty { padding: 8px 14px; margin: 0; }
+.soul-row {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 4px 14px; border: 0; background: none; color: inherit;
+  font: inherit; text-align: left; cursor: pointer;
+}
+.soul-row:hover, .soul-row:focus-visible { background: var(--line); }
+.soul-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.soul-line { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+.presence { padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--unknown) 20%, transparent); }
+.presence-joined { background: color-mix(in srgb, var(--ok) 20%, transparent); }
+.presence-watching { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.unacked { color: var(--warn); }
+.dudle { flex: none; }
+.detail { padding: 12px 14px; border-top: 1px solid var(--line); }
+.detail-head { display: flex; gap: 12px; align-items: center; }
+.detail h2 { font-size: 13px; margin: 0; }
+.detail p { margin: 2px 0; }
+.selectable { user-select: text; }
+.detail dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 8px 0; }
+.detail dl > div { display: contents; }
+.detail dt { color: var(--muted); }
+.detail dd { margin: 0; }
+.detail-actions { display: flex; justify-content: flex-end; }
+.status { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid var(--line); }
+.link { border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; padding: 0; margin-left: auto; }
