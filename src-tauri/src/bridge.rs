@@ -25,12 +25,14 @@ use tokio::sync::oneshot;
 /// same list and checks it again.
 pub const METHODS: &[&str] = &["census", "send", "inbox", "ack", "launch", "launchStatus"];
 
-/// GeniusBar's own agent-comms names (ADR-0004 decision 8, agent-comms
-/// ADR-0059): the bridge and setup both run with them, so the credential
-/// setup saves is the one the bridge reads.
+/// GeniusBar's own agent-comms and agent-bot names (ADR-0004 decision 8,
+/// agent-comms ADR-0059, agent-bot #302): the bridge, setup and the
+/// services script all run with them, so the credential setup saves is the
+/// one the bridge reads, and only GeniusBar's login services are touched.
 pub const HOST_ENV: &[(&str, &str)] = &[
     ("AGENT_COMMS_SERVICE_LABEL", "app.geniusbar.broker"),
     ("AGENT_COMMS_CREDENTIAL_NAME", "app.geniusbar.principal"),
+    ("AGENT_BOT_SERVICE_LABEL", "app.geniusbar.agent-bot"),
 ];
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -264,6 +266,7 @@ async fn run_setup<R: Runtime>(app: &AppHandle<R>) -> Result<(), BridgeError> {
         .args([
             resources.join("bridge").join("setup.mjs"),
             resources.join("components").join("agent-comms"),
+            resources.join("components").join("agent-bot"),
         ])
         .spawn()
         .map_err(|e| unavailable(e.to_string()))?;
@@ -289,6 +292,92 @@ async fn run_setup<R: Runtime>(app: &AppHandle<R>) -> Result<(), BridgeError> {
         }
     }
     outcome
+}
+
+/// The services script's one-line result: `{ok: true, ...}` or
+/// `{ok: false, code, message}`.
+fn parse_services_output(stdout: &[u8]) -> Result<Value, BridgeError> {
+    let line = stdout
+        .split(|b| *b == b'\n')
+        .rev()
+        .find(|line| !line.iter().all(u8::is_ascii_whitespace))
+        .unwrap_or_default();
+    let value: Value = serde_json::from_slice(line)
+        .map_err(|_| BridgeError::new("services-failed", "the services script gave no result"))?;
+    if value.get("ok").and_then(Value::as_bool) == Some(true) {
+        return Ok(value);
+    }
+    let field = |name: &str| value.get(name).and_then(Value::as_str).unwrap_or("");
+    let code = Some(field("code"))
+        .filter(|c| !c.is_empty())
+        .unwrap_or("services-failed");
+    Err(BridgeError::new(code, field("message")))
+}
+
+/// Runs `bridge/services.mjs ACTION` in the bundled Node (#9).
+async fn run_services<R: Runtime>(app: &AppHandle<R>, action: &str) -> Result<Value, BridgeError> {
+    let unavailable = |e: String| BridgeError::new("services-unavailable", &e);
+    let resources = app
+        .path()
+        .resource_dir()
+        .map_err(|e| unavailable(e.to_string()))?;
+    let components = resources.join("components");
+    let output = app
+        .shell()
+        .sidecar("node")
+        .map_err(|e| unavailable(e.to_string()))?
+        .envs(HOST_ENV.iter().copied())
+        .args([
+            resources
+                .join("bridge")
+                .join("services.mjs")
+                .into_os_string(),
+            action.into(),
+            components.join("agent-comms").into_os_string(),
+            components.join("agent-bot").into_os_string(),
+        ])
+        .output()
+        .await
+        .map_err(|e| unavailable(e.to_string()))?;
+    parse_services_output(&output.stdout)
+}
+
+/// The owner's explicit "Remove services" (#9): unloads and deletes
+/// GeniusBar's broker and daemon login services. Never alongside setup.
+#[tauri::command]
+pub async fn remove_services<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, Bridge>,
+) -> Result<Value, BridgeError> {
+    if state.setting_up.swap(true, Ordering::SeqCst) {
+        return Err(BridgeError::new(
+            "setup-running",
+            "setup is already running",
+        ));
+    }
+    let outcome = run_services(&app, "remove").await;
+    state.setting_up.store(false, Ordering::SeqCst);
+    outcome
+}
+
+/// At launch, re-registers GeniusBar's services if they still run an older
+/// or moved copy of the app (#9). Release builds only: a development build
+/// lives in `target/` and must not take over the installed app's services.
+pub fn refresh_services<R: Runtime>(app: AppHandle<R>) {
+    if cfg!(debug_assertions) {
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<Bridge>();
+        if state.setting_up.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        match run_services(&app, "refresh").await {
+            Ok(result) => eprintln!("services: {result}"),
+            Err(error) => eprintln!("services: refresh failed: {} {}", error.code, error.message),
+        }
+        state.setting_up.store(false, Ordering::SeqCst);
+    });
 }
 
 #[cfg(test)]
@@ -353,5 +442,24 @@ mod tests {
             "bridge-restarting"
         );
         assert!(bridge.pending.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn parses_services_results() {
+        assert_eq!(
+            parse_services_output(b"{\"ok\":true,\"broker\":\"current\",\"daemon\":\"absent\"}\n"),
+            Ok(json!({ "ok": true, "broker": "current", "daemon": "absent" }))
+        );
+        assert_eq!(
+            parse_services_output(br#"{"ok":false,"code":"launchctl-failed","message":"busy"}"#),
+            Err(BridgeError::new("launchctl-failed", "busy"))
+        );
+        assert_eq!(
+            parse_services_output(b""),
+            Err(BridgeError::new(
+                "services-failed",
+                "the services script gave no result"
+            ))
+        );
     }
 }

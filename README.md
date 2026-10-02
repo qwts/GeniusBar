@@ -28,6 +28,15 @@ The app bundles its own Node and pinned agent-comms and agent-bot releases
 reaches agent-comms only through `bridge/bridge.mjs`, which runs in that Node
 and holds the principal credential.
 
+First-run setup (on the owner's click) uses an agent-comms broker that already
+answers, or registers GeniusBar's own (`app.geniusbar.broker`). It pairs and
+approves this account and GeniusBar as a principal. Then it uses a running
+agent-bot daemon, or pairs one and registers it (`app.geniusbar.agent-bot`).
+Both login services run the app's own Node. In release builds, each launch
+re-registers a GeniusBar service that still points at an older or moved copy
+of the app. **Remove services…** in the popup footer unloads and deletes
+both. Services from another install, such as Homebrew's, are never changed.
+
 The Swift app below remains the specification until the Tauri app reaches
 parity (#11).
 

@@ -2,7 +2,7 @@
 // connection calls for setup at all.
 import type { ConnectionSnapshot } from './status';
 
-export type SetupStep = 'broker' | 'account' | 'principal';
+export type SetupStep = 'broker' | 'account' | 'principal' | 'daemon';
 export type StepState = 'pending' | 'running' | 'done';
 
 export interface SetupState {
@@ -15,11 +15,12 @@ export const SETUP_STEPS: readonly { step: SetupStep; label: string }[] = [
   { step: 'broker', label: 'Start the agent-comms broker' },
   { step: 'account', label: 'Pair this account' },
   { step: 'principal', label: 'Pair GeniusBar as your principal' },
+  { step: 'daemon', label: 'Start the agent-bot daemon' },
 ];
 
 export const idleSetup: SetupState = {
   running: false,
-  steps: { broker: 'pending', account: 'pending', principal: 'pending' },
+  steps: { broker: 'pending', account: 'pending', principal: 'pending', daemon: 'pending' },
   error: null,
 };
 

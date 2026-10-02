@@ -9,7 +9,7 @@ describe('SetupPanel', () => {
   it('lists the steps and starts setup on click', () => {
     const onSetup = vi.fn();
     render(<SetupPanel setup={idleSetup} onSetup={onSetup} />);
-    expect(screen.getAllByRole('listitem')).toHaveLength(3);
+    expect(screen.getAllByRole('listitem')).toHaveLength(4);
     fireEvent.click(screen.getByRole('button', { name: 'Set up' }));
     expect(onSetup).toHaveBeenCalledOnce();
   });

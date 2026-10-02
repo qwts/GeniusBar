@@ -17,7 +17,7 @@ describe('needsSetup', () => {
 describe('applyProgress', () => {
   it('marks known steps and ignores anything else', () => {
     const s = applyProgress(applyProgress(idleSetup, { step: 'broker', state: 'done' }), { step: 'account', state: 'running' });
-    expect(s.steps).toEqual({ broker: 'done', account: 'running', principal: 'pending' });
+    expect(s.steps).toEqual({ broker: 'done', account: 'running', principal: 'pending', daemon: 'pending' });
     expect(applyProgress(s, { step: 'other', state: 'done' })).toBe(s);
     expect(applyProgress(s, { step: 'broker', state: 'exploded' })).toBe(s);
   });
