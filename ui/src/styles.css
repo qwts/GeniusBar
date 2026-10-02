@@ -58,3 +58,14 @@ body { background: var(--bg); color: var(--fg); }
 .setup ol { list-style: none; padding: 0; margin: 0 0 10px; }
 .setup li { padding: 2px 0; color: var(--muted); }
 .setup li.done, .setup li.running { color: var(--fg); }
+/* Chat (#17). Bodies are plain text; pre-wrap keeps their whitespace. */
+.unread-badge { padding: 0 6px; border-radius: 999px; background: var(--accent); color: #fff; }
+.chat { margin: 8px 0; border-top: 1px solid var(--line); padding-top: 8px; }
+.chat-log { list-style: none; margin: 0 0 8px; padding: 0; max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.chat-msg { max-width: 85%; padding: 4px 8px; border-radius: 8px; background: var(--line); }
+.chat-in { align-self: flex-start; }
+.chat-out { align-self: flex-end; background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.chat .chat-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-composer { display: flex; gap: 6px; align-items: flex-end; }
+.chat-composer textarea { flex: 1; min-width: 0; resize: vertical; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+.chat .error { margin: 4px 0 0; }

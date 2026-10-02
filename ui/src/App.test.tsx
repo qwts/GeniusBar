@@ -1,11 +1,13 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
-import { sampleCensus, sampleConnection } from './model/fixtures';
+import { emptyComposer, mergeIncoming, emptyChat } from './model/chat';
+import { inboxMessage, sampleCensus, sampleConnection } from './model/fixtures';
 import { idleSetup } from './model/setup';
 import { disconnected } from './model/status';
+import type { ChatApi } from './useChat';
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); globalThis.localStorage?.clear(); });
 
 describe('App', () => {
   it('shows the header and an empty roster before the bridge connects', () => {
@@ -53,6 +55,27 @@ describe('App', () => {
     expect(screen.getAllByRole('button', { name: /presence/ })).toHaveLength(3);
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     expect(onRefresh).toHaveBeenCalledOnce();
+  });
+
+  it('shows unread counts on rows and opens the conversation, marking it read', () => {
+    const { state } = mergeIncoming(emptyChat, [
+      inboxMessage('msg_1', 1, 'hello', { account: 'user', agentId: 'agent_c' }),
+      inboxMessage('msg_2', 2, 'again', { account: 'user', agentId: 'agent_c' }),
+    ]);
+    const chat: ChatApi = { chat: state, composers: {}, open: vi.fn(), setDraft: vi.fn(), send: vi.fn() };
+    render(<App census={sampleCensus} connection={sampleConnection} isStatic chat={chat} />);
+    const row = screen.getByRole('button', { name: /^agent_c,.*2 unread messages/ });
+    expect(row.textContent).toContain('2 new');
+    expect(chat.open).toHaveBeenLastCalledWith(null);
+    fireEvent.click(row);
+    expect(chat.open).toHaveBeenLastCalledWith('user/agent_c');
+    const dialog = screen.getByRole('dialog', { name: 'agent_c, agent_c' });
+    expect(dialog.textContent).toContain('hello');
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message to agent_c' }), { target: { value: 'yo' } });
+    expect(chat.setDraft).toHaveBeenCalledWith('user/agent_c', 'yo');
+    expect(chat.composers['user/agent_c'] ?? emptyComposer).toEqual(emptyComposer);
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(chat.open).toHaveBeenLastCalledWith(null);
   });
 });
 
