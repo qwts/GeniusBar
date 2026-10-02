@@ -3,6 +3,7 @@
 //! reaches agent-comms through the Node bridge (#7).
 
 mod bridge;
+mod updates;
 
 use std::{
     sync::Mutex,
@@ -89,8 +90,9 @@ fn show_window_mode(app: &mut App, window: &WebviewWindow) -> tauri::Result<()> 
 fn install_tray(app: &mut App, window: &WebviewWindow) -> tauri::Result<()> {
     #[cfg(target_os = "macos")]
     app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    let check = updates::menu_item(app.handle())?;
     let quit = MenuItem::with_id(app, "quit", "Quit GeniusBar", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&quit])?;
+    let menu = Menu::with_items(app, &[&check, &quit])?;
     TrayIconBuilder::with_id("geniusbar")
         .icon(tauri::include_image!("icons/tray.png"))
         .icon_as_template(true)
@@ -100,6 +102,8 @@ fn install_tray(app: &mut App, window: &WebviewWindow) -> tauri::Result<()> {
         .on_menu_event(|app, event| {
             if event.id() == "quit" {
                 app.exit(0);
+            } else if event.id() == updates::MENU_ID {
+                updates::on_click(app);
             }
         })
         .on_tray_icon_event(|tray, event| {
@@ -116,6 +120,7 @@ fn install_tray(app: &mut App, window: &WebviewWindow) -> tauri::Result<()> {
             }
         })
         .build(app)?;
+    updates::check_at_startup(app.handle());
     // A popup closes when the user clicks elsewhere, like a menu.
     let popup = window.clone();
     window.on_window_event(move |event| {
@@ -136,9 +141,11 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(bridge::Bridge::default())
         .manage(Dismissed::default())
+        .manage(updates::Updates::default())
         .invoke_handler(tauri::generate_handler![bridge::bridge, bridge::setup])
         .setup(move |app| {
             bridge::start(app.handle().clone());
+            updates::init(app.handle())?;
             let window = app
                 .get_webview_window("main")
                 .expect("tauri.conf.json defines the main window");

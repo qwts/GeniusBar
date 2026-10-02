@@ -7,7 +7,9 @@
 // that tag must resolve to, so a moved tag fails the build.
 //
 // usage: node scripts/fetch-components.mjs [--target RUST_TRIPLE]
-// Tauri sets TAURI_ENV_TARGET_TRIPLE for its before-build commands.
+// Tauri sets TAURI_ENV_TARGET_TRIPLE for its before-build commands. For
+// universal-apple-darwin, both darwin binaries are fetched and verified, then
+// joined with lipo into the one sidecar Tauri looks for under that triple.
 
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -28,6 +30,28 @@ export const NODE_PLATFORMS = {
   'aarch64-pc-windows-msvc': 'win-arm64',
   'x86_64-pc-windows-msvc': 'win-x64',
 };
+
+// A target built from several per-architecture Node binaries.
+export const UNIVERSAL_TARGETS = {
+  'universal-apple-darwin': ['aarch64-apple-darwin', 'x86_64-apple-darwin'],
+};
+
+// The sidecar path Tauri expects for a target: `<externalBin>-<triple>`.
+export function sidecarName(triple) {
+  return `node-${triple}${triple.endsWith('-windows-msvc') ? '.exe' : ''}`;
+}
+
+// What a sidecar's .version stamp records, so a pin change refetches it.
+// A universal stamp covers every slice, so changing either checksum rebuilds.
+export function stampFor(triple, pins = PINS.node) {
+  const parts = UNIVERSAL_TARGETS[triple] ?? [triple];
+  const sums = parts.map((part) => {
+    const platform = NODE_PLATFORMS[part];
+    if (!platform) throw new Error(`no bundled Node for target ${part}`);
+    return pins.sha256[platform];
+  });
+  return `${pins.version} ${sums.join(' ')}`;
+}
 
 // Paths a component never needs at runtime when it has no package "files".
 const EXCLUDED = new Set(['.github', 'docs', 'tests', 'Formula', 'governance']);
@@ -53,14 +77,15 @@ async function download(url, file) {
 }
 
 export async function fetchNode(triple) {
+  if (UNIVERSAL_TARGETS[triple]) return fetchUniversalNode(triple);
   const platform = NODE_PLATFORMS[triple];
   if (!platform) throw new Error(`no bundled Node for target ${triple}`);
   const { version, sha256: sums } = PINS.node;
   const windows = platform.startsWith('win');
   const archive = `node-v${version}-${platform}.${windows ? 'zip' : 'tar.gz'}`;
-  const out = path.join(BINARIES, `node-${triple}${windows ? '.exe' : ''}`);
+  const out = path.join(BINARIES, sidecarName(triple));
   const stamp = `${out}.version`;
-  if (existsSync(out) && existsSync(stamp) && readFileSync(stamp, 'utf8') === `${version} ${sums[platform]}`) return out;
+  if (existsSync(out) && existsSync(stamp) && readFileSync(stamp, 'utf8') === stampFor(triple)) return out;
   mkdirSync(CACHE, { recursive: true });
   const cached = path.join(CACHE, archive);
   if (!existsSync(cached) || sha256(cached) !== sums[platform]) {
@@ -80,10 +105,23 @@ export async function fetchNode(triple) {
     mkdirSync(BINARIES, { recursive: true });
     cpSync(path.join(work, member), out);
     chmodSync(out, 0o755);
-    writeFileSync(stamp, `${version} ${sums[platform]}`);
+    writeFileSync(stamp, stampFor(triple));
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
+  return out;
+}
+
+async function fetchUniversalNode(triple) {
+  const out = path.join(BINARIES, sidecarName(triple));
+  const stamp = `${out}.version`;
+  if (existsSync(out) && existsSync(stamp) && readFileSync(stamp, 'utf8') === stampFor(triple)) return out;
+  // Each slice is checksum-verified by fetchNode before lipo sees it.
+  const slices = [];
+  for (const part of UNIVERSAL_TARGETS[triple]) slices.push(await fetchNode(part));
+  execFileSync('lipo', ['-create', ...slices, '-output', out]);
+  chmodSync(out, 0o755);
+  writeFileSync(stamp, stampFor(triple));
   return out;
 }
 
