@@ -28,6 +28,8 @@ interface AppProps {
   launcher?: LaunchApi;
   /** Removes GeniusBar's login services (#9); without it there is no action. */
   onRemoveServices?: () => Promise<void>;
+  /** Roster key whose detail starts open (snapshot `--snapshot-detail`). */
+  initialSelectedKey?: string | null;
 }
 
 // Dudles stop blinking while the popup is hidden, as R1's did while the
@@ -47,12 +49,12 @@ const NO_CENSUS: readonly CensusRow[] = [];
 
 // The popup's root: health header, the census nested under parents, and
 // the read-only detail for a selected soul.
-export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, setup, onSetup, chat, launcher, onRemoveServices }: AppProps) {
+export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, setup, onSetup, chat, launcher, onRemoveServices, initialSelectedKey = null }: AppProps) {
   const forest = useMemo(() => buildSoulForest(census), [census]);
   const roster = useMemo(() => allSouls(forest), [forest]);
   // Selection holds the roster key and resolves against each census, so
   // the detail shows fresh values and closes if the soul disappears.
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(initialSelectedKey);
   const selected = selectedKey === null ? null : findSoul(forest, selectedKey);
   const paused = usePageHidden() || isStatic;
   // The open conversation is marked read, now and as messages arrive.

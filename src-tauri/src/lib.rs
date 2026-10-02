@@ -3,9 +3,11 @@
 //! reaches agent-comms through the Node bridge (#7).
 
 mod bridge;
+mod snapshot;
 mod updates;
 
 use std::{
+    path::PathBuf,
     sync::Mutex,
     time::{Duration, Instant},
 };
@@ -24,13 +26,38 @@ pub enum Mode {
     Tray,
     /// `--window`: the same UI in a regular titled window, for automation.
     Window,
+    /// `--snapshot PATH [--snapshot-detail ID]`: render the popup to a PNG
+    /// and exit, never showing a window (#6).
+    Snapshot {
+        path: PathBuf,
+        detail: Option<String>,
+    },
 }
 
-pub fn parse_mode<I: IntoIterator<Item = S>, S: AsRef<str>>(args: I) -> Mode {
-    if args.into_iter().any(|arg| arg.as_ref() == "--window") {
-        Mode::Window
-    } else {
-        Mode::Tray
+/// Parses the launch flags as R1's `parseLaunchOptions` did. Snapshot wins
+/// over `--window`; a flag missing its value is a usage error.
+pub fn parse_mode<I: IntoIterator<Item = S>, S: AsRef<str>>(args: I) -> Result<Mode, String> {
+    let (mut window, mut path, mut detail) = (false, None, None);
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        let mut value = |flag: &str| {
+            args.next()
+                .map(|v| v.as_ref().to_owned())
+                .filter(|v| !v.is_empty() && !v.starts_with("--"))
+                .ok_or_else(|| format!("{flag} needs a value"))
+        };
+        match arg.as_ref() {
+            "--window" => window = true,
+            "--snapshot" => path = Some(PathBuf::from(value("--snapshot")?)),
+            "--snapshot-detail" => detail = Some(value("--snapshot-detail")?),
+            _ => {}
+        }
+    }
+    match (path, detail) {
+        (Some(path), detail) => Ok(Mode::Snapshot { path, detail }),
+        (None, Some(_)) => Err("--snapshot-detail needs --snapshot".into()),
+        (None, None) if window => Ok(Mode::Window),
+        (None, None) => Ok(Mode::Tray),
     }
 }
 
@@ -135,29 +162,46 @@ fn install_tray(app: &mut App, window: &WebviewWindow) -> tauri::Result<()> {
 }
 
 pub fn run() {
-    let mode = parse_mode(std::env::args().skip(1));
+    let mode = parse_mode(std::env::args().skip(1)).unwrap_or_else(|error| {
+        eprintln!("geniusbar: {error}");
+        std::process::exit(2);
+    });
+    let snapshot = match &mode {
+        Mode::Snapshot { path, detail } => Some((path.clone(), detail.clone())),
+        _ => None,
+    };
     tauri::Builder::default()
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_shell::init())
         .manage(bridge::Bridge::default())
         .manage(Dismissed::default())
         .manage(updates::Updates::default())
+        .manage(snapshot::SnapshotRequest(snapshot))
         .invoke_handler(tauri::generate_handler![
             bridge::bridge,
             bridge::setup,
-            bridge::remove_services
+            bridge::remove_services,
+            snapshot::snapshot_options,
+            snapshot::snapshot_write
         ])
         .setup(move |app| {
             bridge::start(app.handle().clone());
-            bridge::refresh_services(app.handle().clone());
-            updates::init(app.handle())?;
             let window = app
                 .get_webview_window("main")
                 .expect("tauri.conf.json defines the main window");
             match mode {
                 Mode::Window => show_window_mode(app, &window)?,
                 Mode::Tray => install_tray(app, &window)?,
+                Mode::Snapshot { .. } => {
+                    // No tray, no updater, no service changes: render and exit.
+                    #[cfg(target_os = "macos")]
+                    app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                    snapshot::arm_deadline(app.handle().clone());
+                    return Ok(());
+                }
             }
+            bridge::refresh_services(app.handle().clone());
+            updates::init(app.handle())?;
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -175,8 +219,29 @@ mod tests {
 
     #[test]
     fn tray_is_the_default() {
-        assert_eq!(parse_mode(Vec::<String>::new()), Mode::Tray);
-        assert_eq!(parse_mode(["--other"]), Mode::Tray);
+        assert_eq!(parse_mode(Vec::<String>::new()), Ok(Mode::Tray));
+        assert_eq!(parse_mode(["--other"]), Ok(Mode::Tray));
+    }
+
+    #[test]
+    fn snapshot_flags_take_values_and_win_over_window() {
+        assert_eq!(
+            parse_mode(["--window", "--snapshot", "/tmp/g.png"]),
+            Ok(Mode::Snapshot {
+                path: "/tmp/g.png".into(),
+                detail: None
+            })
+        );
+        assert_eq!(
+            parse_mode(["--snapshot-detail", "agent_c", "--snapshot", "out.png"]),
+            Ok(Mode::Snapshot {
+                path: "out.png".into(),
+                detail: Some("agent_c".into())
+            })
+        );
+        assert!(parse_mode(["--snapshot"]).is_err());
+        assert!(parse_mode(["--snapshot", "--window"]).is_err());
+        assert!(parse_mode(["--snapshot-detail", "agent_c"]).is_err());
     }
 
     #[test]
@@ -193,7 +258,7 @@ mod tests {
 
     #[test]
     fn window_flag_selects_window_mode() {
-        assert_eq!(parse_mode(["--window"]), Mode::Window);
-        assert_eq!(parse_mode(["--x", "--window"]), Mode::Window);
+        assert_eq!(parse_mode(["--window"]), Ok(Mode::Window));
+        assert_eq!(parse_mode(["--x", "--window"]), Ok(Mode::Window));
     }
 }
