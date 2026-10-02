@@ -35,9 +35,9 @@ export const disconnected: ConnectionSnapshot = {
 
 // The setup panel shows whenever the app is unpaired, so this points there
 // rather than at a terminal (R4: a friend has none).
-export const unpairedMessage = 'Not set up yet. Use Set up below.';
+export const unpairedMessage = 'GeniusBar needs setup on this Mac. Choose Set up below.';
 export const pendingApprovalMessage =
-  'Waiting for owner approval. The owner runs: agent-comms admin principals, then agent-comms admin principal-approve CODE';
+  'GeniusBar needs approval to connect. Ask your account owner to approve it.';
 
 /**
  * User-facing text for a broker error. Pairing errors point at the fix;
@@ -46,7 +46,10 @@ export const pendingApprovalMessage =
 export function brokerErrorMessage(code: string, message: string): string {
   if (code === 'unauthenticated') return unpairedMessage;
   if (code === 'not-approved') return pendingApprovalMessage;
-  return message === '' ? code : `${message} (${code})`;
+  if (code === 'broker-unreachable' || code === 'broker-timeout' || code === 'broker-untrusted') {
+    return 'GeniusBar can’t reach its background service yet.';
+  }
+  return message === '' ? 'GeniusBar couldn’t check your account. Try again in a moment.' : message;
 }
 
 export function formatUptime(ms: number): string {
@@ -72,41 +75,36 @@ export interface HeaderState {
 
 export function healthHeader(s: ConnectionSnapshot): HeaderState {
   if (!s.bridgeConnected) {
-    const title = 'Not connected to agent-comms yet.';
+    const title = 'Connecting to GeniusBar’s background service…';
     return { tone: 'unknown', title, detail: null, label: title };
   }
   if (s.brokerUnreachable) {
-    const title = 'Broker unreachable';
+    const title = 'Can’t reach the background service';
     if (s.lastRefresh) {
       const time = formatTime(s.lastRefresh);
       return {
         tone: 'bad',
         title,
-        detail: `Last known · ${time}`,
-        label: `Broker unreachable. Last known census ${time}.`,
+        detail: `Last updated · ${time}`,
+        label: `Can’t reach the background service. Last updated ${time}.`,
       };
     }
     return {
       tone: 'bad',
       title,
-      detail: 'No successful census yet.',
-      label: 'Broker unreachable. No successful census yet.',
+      detail: 'Your souls will appear here once GeniusBar connects.',
+      label: 'Can’t reach the background service. Your souls will appear here once GeniusBar connects.',
     };
   }
   if (s.health) {
-    const h = s.health;
-    const detail =
-      `uptime ${formatUptime(h.uptimeMs)} · log ${h.eventLogBytes} B · ` +
-      `accounts ${h.pairings.accounts} · principals ${h.pairings.principals} · ` +
-      `watches ${h.watches}`;
-    return { tone: 'ok', title: 'Broker healthy', detail, label: `Broker healthy. ${detail}` };
+    return { tone: 'ok', title: 'Connected', detail: null, label: 'Connected' };
   }
   // The principal client has no health op; a census proves the broker is up.
   if (s.lastRefresh) {
-    const title = 'Connected to agent-comms';
+    const title = 'Connected';
     return { tone: 'ok', title, detail: null, label: title };
   }
-  const title = 'Broker status unknown';
+  const title = 'Checking connection…';
   return { tone: 'unknown', title, detail: null, label: title };
 }
 
@@ -124,7 +122,7 @@ export function credentialNote(s: ConnectionSnapshot): string | null {
  */
 export function emptyRosterText(s: ConnectionSnapshot): string | null {
   if (!s.bridgeConnected) return null;
-  return s.brokerUnreachable ? 'No successful census yet.' : 'No souls on this machine.';
+  return s.brokerUnreachable ? 'Your souls will appear here once GeniusBar connects.' : 'No souls yet. Your first soul will appear here.';
 }
 
 export interface FooterState {
@@ -135,8 +133,11 @@ export interface FooterState {
 /** Footer status: outage age first, then the last error, then freshness. */
 export function footerStatus(s: ConnectionSnapshot): FooterState | null {
   if (s.brokerUnreachable && s.lastRefresh) {
-    return { text: `Last known · ${formatTime(s.lastRefresh)}`, isError: false };
+    return { text: `Last updated · ${formatTime(s.lastRefresh)}`, isError: false };
   }
+  // Before the first successful census this is part of first-run setup;
+  // the setup panel already explains what to do.
+  if (s.brokerUnreachable && !s.lastRefresh) return null;
   // A missing credential is the setup panel's job, not an error. Approval
   // instructions and bridge failures (no setup panel then) still show.
   const setupsJob = s.unpaired && s.bridgeConnected && s.lastError !== pendingApprovalMessage;

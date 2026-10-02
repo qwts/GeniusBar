@@ -91,7 +91,7 @@ export function FirstLaunch({ starter, launcher, auth, devTools, onStart }:
   return (
     <form
       className="first-launch"
-      aria-label="Launch your first soul"
+      aria-label="Start with Starter"
       onSubmit={(e) => {
         e.preventDefault();
         if (!ready) return;
@@ -112,7 +112,7 @@ export function FirstLaunch({ starter, launcher, auth, devTools, onStart }:
       )}
       {!started && (
         <div className="detail-actions">
-          <button type="submit" disabled={!ready}>Launch your first soul</button>
+          <button type="submit" disabled={!ready}>Start with Starter</button>
         </div>
       )}
     </form>

@@ -26,7 +26,7 @@ describe('Conversation', () => {
     const onSend = vi.fn();
     const onDraft = vi.fn();
     const { rerender } = render(<Conversation name="luna" entries={[]} composer={emptyComposer} onDraft={onDraft} onSend={onSend} />);
-    expect(screen.getByText('No messages with luna yet.')).toBeTruthy();
+    expect(screen.getByText('Say hello to luna to start chatting.')).toBeTruthy();
     const send = screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement;
     expect(send.disabled).toBe(true);
     fireEvent.change(screen.getByRole('textbox', { name: 'Message to luna' }), { target: { value: 'hi' } });

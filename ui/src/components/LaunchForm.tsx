@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { displayName, type CensusRow } from '../model/census';
 import { canLaunch, type LaunchState } from '../model/launch';
 import type { LaunchApi } from '../useLaunch';
@@ -8,6 +8,11 @@ interface LaunchFormProps {
   /** Accounts and harnesses seen in the census, offered as suggestions. */
   accounts: readonly string[];
   harnesses: readonly string[];
+  /** Pre-filled path when opened from Finder. */
+  initialPackagePath?: string;
+  /** File-open validation is performed by the shell using the Starter reader. */
+  checkingPackage?: boolean;
+  packageError?: string | null;
   /** Launch this existing soul; without it, the form launches a package. */
   soul?: CensusRow;
 }
@@ -46,9 +51,11 @@ export function LaunchStatus({ state }: { state: LaunchState }) {
  * Launch form for an existing soul or a soul package. One launch at a time;
  * the result stays on screen and is never retried by the app.
  */
-export function LaunchForm({ launcher, accounts, harnesses, soul }: LaunchFormProps) {
+export function LaunchForm({ launcher, accounts, harnesses, soul, initialPackagePath = '', checkingPackage = false,
+  packageError: initialPackageError = null }: LaunchFormProps) {
   const [account, setAccount] = useState(soul?.account ?? (accounts.length === 1 ? accounts[0] : ''));
-  const [packagePath, setPackagePath] = useState('');
+  const [packagePath, setPackagePath] = useState(initialPackagePath);
+  const [packageError, setPackageError] = useState(initialPackageError);
   const [harness, setHarness] = useState(soul?.harness ?? '');
   const [name, setName] = useState('');
   // The launcher is shared: show its result only in the form that started it.
@@ -57,13 +64,15 @@ export function LaunchForm({ launcher, accounts, harnesses, soul }: LaunchFormPr
   const ready = canLaunch(launcher.state);
   const what = soul ? displayName(soul) : 'a soul package';
 
+  useEffect(() => setPackageError(initialPackageError), [initialPackageError]);
+
   return (
     <form
       className="launch"
       aria-label={`Launch ${what}`}
       onSubmit={(e) => {
         e.preventDefault();
-        if (!ready) return;
+        if (!ready || checkingPackage || packageError) return;
         setStarted(true);
         void launcher.launch({
           account,
@@ -82,7 +91,10 @@ export function LaunchForm({ launcher, accounts, harnesses, soul }: LaunchFormPr
       {!soul && (
         <label>
           <span>Package</span>
-          <input value={packagePath} placeholder="Path in that account" onChange={(e) => setPackagePath(e.target.value)} />
+          <input value={packagePath} placeholder="Path in that account" onChange={(e) => {
+            setPackagePath(e.target.value);
+            setPackageError(null);
+          }} />
         </label>
       )}
       <label>
@@ -93,10 +105,12 @@ export function LaunchForm({ launcher, accounts, harnesses, soul }: LaunchFormPr
         <span>Name</span>
         <input value={name} placeholder="Optional" onChange={(e) => setName(e.target.value)} />
       </label>
+      {checkingPackage && <p className="muted small" role="status">Checking this soul package…</p>}
+      {packageError && <p className="error small" role="alert">{packageError}</p>}
       {started ? <LaunchStatus state={launcher.state} />
         : !ready && <p className="muted small">Another launch is still waiting for its result.</p>}
       <div className="detail-actions">
-        <button type="submit" disabled={!ready}>Launch</button>
+        <button type="submit" disabled={!ready || checkingPackage || Boolean(packageError)}>Launch</button>
       </div>
     </form>
   );

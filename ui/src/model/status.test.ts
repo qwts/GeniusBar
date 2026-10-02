@@ -29,7 +29,7 @@ describe('Broker error messages', () => {
   // belong to agent-comms now.
   it('points unauthenticated at principal pairing', () => {
     expect(brokerErrorMessage('unauthenticated', 'unknown principal')).toBe(
-      'Not set up yet. Use Set up below.',
+      'GeniusBar needs setup on this Mac. Choose Set up below.',
     );
   });
 
@@ -40,9 +40,11 @@ describe('Broker error messages', () => {
     expect(brokerErrorMessage('not-approved', '')).toBe(pendingApprovalMessage);
   });
 
-  it('shows other errors as message and code', () => {
-    expect(brokerErrorMessage('no-such-soul', 'gone')).toBe('gone (no-such-soul)');
-    expect(brokerErrorMessage('no-such-soul', '')).toBe('no-such-soul');
+  it('shows other actionable errors as message and code', () => {
+    expect(brokerErrorMessage('no-such-soul', 'gone')).toBe('gone');
+    expect(brokerErrorMessage('no-such-soul', '')).toBe('GeniusBar couldn’t check your account. Try again in a moment.');
+    expect(brokerErrorMessage('broker-unreachable', 'socket missing'))
+      .toBe('GeniusBar can’t reach its background service yet.');
   });
 });
 
@@ -50,7 +52,7 @@ describe('Health header', () => {
   it('reports the missing bridge before anything else', () => {
     const header = healthHeader(disconnected);
     expect(header.tone).toBe('unknown');
-    expect(header.title).toMatch(/not connected/i);
+    expect(header.title).toMatch(/connecting/i);
     expect(credentialNote(disconnected)).toBeNull();
     expect(emptyRosterText(disconnected)).toBeNull();
   });
@@ -64,25 +66,25 @@ describe('Health header', () => {
   it('flags an unreachable broker, with or without a last census', () => {
     const never = healthHeader({ ...connected, brokerUnreachable: true, health });
     expect(never.tone).toBe('bad');
-    expect(never.title).toBe('Broker unreachable');
-    expect(never.detail).toBe('No successful census yet.');
-    expect(never.label).toBe('Broker unreachable. No successful census yet.');
+    expect(never.title).toBe('Can’t reach the background service');
+    expect(never.detail).toBe('Your souls will appear here once GeniusBar connects.');
+    expect(never.label).toBe('Can’t reach the background service. Your souls will appear here once GeniusBar connects.');
     const known = healthHeader({ ...connected, brokerUnreachable: true, lastRefresh: refreshed });
-    expect(known.detail).toBe(`Last known · ${formatTime(refreshed)}`);
-    expect(known.label).toBe(`Broker unreachable. Last known census ${formatTime(refreshed)}.`);
-    expect(emptyRosterText({ ...connected, brokerUnreachable: true })).toBe('No successful census yet.');
+    expect(known.detail).toBe(`Last updated · ${formatTime(refreshed)}`);
+    expect(known.label).toBe(`Can’t reach the background service. Last updated ${formatTime(refreshed)}.`);
+    expect(emptyRosterText({ ...connected, brokerUnreachable: true })).toBe('Your souls will appear here once GeniusBar connects.');
   });
 
   it('summarises a healthy broker', () => {
     const header = healthHeader({ ...connected, health });
     expect(header.tone).toBe('ok');
-    expect(header.title).toBe('Broker healthy');
-    expect(header.detail).toBe('uptime 12s · log 512 B · accounts 1 · principals 2 · watches 3');
-    expect(emptyRosterText({ ...connected, health })).toBe('No souls on this machine.');
+    expect(header.title).toBe('Connected');
+    expect(header.detail).toBeNull();
+    expect(emptyRosterText({ ...connected, health })).toBe('No souls yet. Your first soul will appear here.');
   });
 
   it('says unknown when connected with no health yet', () => {
-    expect(healthHeader(connected).title).toBe('Broker status unknown');
+    expect(healthHeader(connected).title).toBe('Checking connection…');
   });
 
   it('formats uptime in seconds, minutes, then hours and minutes', () => {
@@ -106,20 +108,22 @@ describe('Footer status', () => {
     });
     expect(
       footerStatus({ ...connected, lastRefresh: refreshed, lastError: 'boom', brokerUnreachable: true }),
-    ).toEqual({ text: `Last known · ${formatTime(refreshed)}`, isError: false });
+    ).toEqual({ text: `Last updated · ${formatTime(refreshed)}`, isError: false });
     // Before setup the keychain has no principal: the header says so, not the footer.
     expect(footerStatus({ ...connected, unpaired: true, lastError: 'cannot read the principal' })).toBeNull();
+    expect(footerStatus({ ...connected, brokerUnreachable: true, lastError: 'GeniusBar can’t reach its background service yet.' })).toBeNull();
     // Waiting for approval and a dropped bridge are still the footer's to say.
     expect(footerStatus({ ...connected, unpaired: true, lastError: pendingApprovalMessage }))
       .toEqual({ text: pendingApprovalMessage, isError: true });
-    expect(footerStatus({ ...connected, unpaired: true, bridgeConnected: false, lastError: 'node exited (bridge-exited)' }))
-      .toEqual({ text: 'node exited (bridge-exited)', isError: true });
+    expect(footerStatus({ ...connected, unpaired: true, bridgeConnected: false,
+      lastError: 'GeniusBar had trouble starting its background service. Try reopening GeniusBar.' }))
+      .toEqual({ text: 'GeniusBar had trouble starting its background service. Try reopening GeniusBar.', isError: true });
   });
 });
 
 describe('healthHeader without a health op', () => {
   it('reports connected once a census has succeeded', () => {
     const s = { ...disconnected, bridgeConnected: true, lastRefresh: new Date('2026-10-02T01:00:00Z') };
-    expect(healthHeader(s)).toMatchObject({ tone: 'ok', title: 'Connected to agent-comms' });
+    expect(healthHeader(s)).toMatchObject({ tone: 'ok', title: 'Connected' });
   });
 });

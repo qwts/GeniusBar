@@ -52,6 +52,18 @@
       "../bin/agent-comms": "bin/agent-comms",
       "../bin/agent-bot": "bin/agent-bot",
       "../bin/node": "bin/node"
-    }
+    },
+    "fileAssociations": [
+      {
+        "ext": ["soul"],
+        "name": "GeniusBar Soul Package",
+        "role": "Viewer",
+        "rank": "Owner",
+        "exportedType": {
+          "identifier": "app.geniusbar.soul",
+          "conformsTo": ["public.data"]
+        }
+      }
+    ]
   }
 }
