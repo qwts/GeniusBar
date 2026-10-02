@@ -9,8 +9,8 @@ use std::sync::{
     Mutex,
 };
 
-use serde_json::Value;
-use tauri::{menu::MenuItem, AppHandle, Manager, Wry};
+use serde_json::{json, Value};
+use tauri::{menu::MenuItem, AppHandle, Emitter, Manager, Wry};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 /// The tray menu item's id.
@@ -33,7 +33,7 @@ pub fn configured(updater: Option<&Value>) -> bool {
     pubkey && endpoints
 }
 
-/// What the tray item shows.
+/// What the tray item and the panel show.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Status {
     Disabled,
@@ -42,6 +42,8 @@ pub enum Status {
     UpToDate,
     Available(String),
     Installing(String),
+    /// The bundle is swapped; a restart puts the new version in charge.
+    ReadyToRestart(String),
     Failed,
 }
 
@@ -54,8 +56,36 @@ pub fn label(status: &Status) -> (String, bool) {
         Status::UpToDate => ("GeniusBar Is Up to Date".into(), true),
         Status::Available(version) => (format!("Install GeniusBar {version} and Restart"), true),
         Status::Installing(version) => (format!("Installing GeniusBar {version}…"), false),
+        Status::ReadyToRestart(version) => (format!("Restart to Finish GeniusBar {version}"), true),
         Status::Failed => ("Update Failed — Try Again".into(), true),
     }
+}
+
+/// The status as the panel sees it: `{"state": "…", "version": "…"|null}`.
+pub fn payload(status: &Status) -> Value {
+    let (state, version) = match status {
+        Status::Disabled => ("disabled", None),
+        Status::Idle => ("idle", None),
+        Status::Checking => ("checking", None),
+        Status::UpToDate => ("up-to-date", None),
+        Status::Available(v) => ("available", Some(v)),
+        Status::Installing(v) => ("installing", Some(v)),
+        Status::ReadyToRestart(v) => ("ready-to-restart", Some(v)),
+        Status::Failed => ("failed", None),
+    };
+    json!({ "state": state, "version": version })
+}
+
+/// Where a found update sits between the check and the restart.
+#[derive(Default)]
+enum Phase {
+    /// Nothing waiting: a click checks for an update.
+    #[default]
+    None,
+    /// Checked and waiting for the install click.
+    Pending(Box<Update>),
+    /// Installed; a click forces the restart a request might have lost.
+    Installed,
 }
 
 #[derive(Default)]
@@ -64,8 +94,10 @@ pub struct Updates {
     enabled: AtomicBool,
     /// A check or install is running; further clicks wait for it.
     busy: AtomicBool,
-    /// An update found by a check, installed by the next click.
-    pending: Mutex<Option<Update>>,
+    /// The update's position between a check and the restart.
+    phase: Mutex<Phase>,
+    /// The last status shown; the panel reads it back on mount.
+    status: Mutex<Option<Status>>,
     item: Mutex<Option<MenuItem<Wry>>>,
 }
 
@@ -78,26 +110,52 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// The status a surface should show now: the last one shown, or the
+/// build's resting state before anything has run.
+fn current(app: &AppHandle) -> Status {
+    let updates = app.state::<Updates>();
+    let shown = updates.status.lock().unwrap().clone();
+    shown.unwrap_or_else(|| {
+        if updates.enabled.load(Ordering::SeqCst) {
+            Status::Idle
+        } else {
+            Status::Disabled
+        }
+    })
+}
+
 /// The tray's "Check for Updates…" item, disabled when updates are off.
 pub fn menu_item(app: &AppHandle) -> tauri::Result<MenuItem<Wry>> {
     let updates = app.state::<Updates>();
-    let status = if updates.enabled.load(Ordering::SeqCst) {
-        Status::Idle
-    } else {
-        Status::Disabled
-    };
+    let status = current(app);
     let (text, enabled) = label(&status);
     let item = MenuItem::with_id(app, MENU_ID, text, enabled, None::<&str>)?;
     *updates.item.lock().unwrap() = Some(item.clone());
+    *updates.status.lock().unwrap() = Some(status);
     Ok(item)
 }
 
-fn show(app: &AppHandle, status: &Status) {
-    if let Some(item) = app.state::<Updates>().item.lock().unwrap().as_ref() {
-        let (text, enabled) = label(status);
+fn show(app: &AppHandle, status: Status) {
+    let updates = app.state::<Updates>();
+    *updates.status.lock().unwrap() = Some(status.clone());
+    if let Some(item) = updates.item.lock().unwrap().as_ref() {
+        let (text, enabled) = label(&status);
         let _ = item.set_text(text);
         let _ = item.set_enabled(enabled);
     }
+    let _ = app.emit("update-status", payload(&status));
+}
+
+/// The panel's read of the status the tray item shows.
+#[tauri::command]
+pub fn update_status(app: AppHandle) -> Value {
+    payload(&current(&app))
+}
+
+/// The panel's update action performs the same click as the tray item.
+#[tauri::command]
+pub fn update_action(app: AppHandle) {
+    on_click(&app);
 }
 
 /// Checks once at startup. A failure here stays quiet (the user may be
@@ -113,10 +171,23 @@ pub fn on_click(app: &AppHandle) {
 
 fn run(app: &AppHandle, quiet: bool) {
     let updates = app.state::<Updates>();
-    if !updates.enabled.load(Ordering::SeqCst) || updates.busy.swap(true, Ordering::SeqCst) {
+    if !updates.enabled.load(Ordering::SeqCst) {
         return;
     }
-    let pending = updates.pending.lock().unwrap().take();
+    // An installed update restarts on the next click: the recovery when a
+    // requested restart was vetoed. Never behind `busy`; nothing may block it.
+    if matches!(*updates.phase.lock().unwrap(), Phase::Installed) {
+        // A main-thread restart skips the Exit event, so stop the bridge here.
+        crate::bridge::stop(app);
+        app.restart();
+    }
+    if updates.busy.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let pending = match std::mem::replace(&mut *updates.phase.lock().unwrap(), Phase::None) {
+        Phase::Pending(update) => Some(*update),
+        _ => None,
+    };
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         match pending {
@@ -128,7 +199,7 @@ fn run(app: &AppHandle, quiet: bool) {
 }
 
 async fn check(app: &AppHandle, quiet: bool) {
-    show(app, &Status::Checking);
+    show(app, Status::Checking);
     let found = match app.updater() {
         Ok(updater) => updater.check().await,
         Err(error) => Err(error),
@@ -136,39 +207,40 @@ async fn check(app: &AppHandle, quiet: bool) {
     match found {
         Ok(Some(update)) => {
             let status = Status::Available(update.version.clone());
-            *app.state::<Updates>().pending.lock().unwrap() = Some(update);
-            show(app, &status);
+            *app.state::<Updates>().phase.lock().unwrap() = Phase::Pending(Box::new(update));
+            show(app, status);
         }
         Ok(None) => show(
             app,
             if quiet {
-                &Status::Idle
+                Status::Idle
             } else {
-                &Status::UpToDate
+                Status::UpToDate
             },
         ),
         Err(error) => {
             eprintln!("update check failed: {error}");
-            show(
-                app,
-                if quiet {
-                    &Status::Idle
-                } else {
-                    &Status::Failed
-                },
-            );
+            show(app, if quiet { Status::Idle } else { Status::Failed });
         }
     }
 }
 
 async fn install(app: &AppHandle, update: Update) {
-    show(app, &Status::Installing(update.version.clone()));
+    let version = update.version.clone();
+    show(app, Status::Installing(version.clone()));
     match update.download_and_install(|_, _| {}, || {}).await {
-        // A requested restart runs the exit path, so the bridge stops first.
-        Ok(()) => app.request_restart(),
+        Ok(()) => {
+            // The restart is requested so the exit path stops the bridge. If
+            // the request is ever vetoed, the Installed phase keeps a
+            // clickable "restart to finish" item rather than a stuck
+            // "Installing…".
+            *app.state::<Updates>().phase.lock().unwrap() = Phase::Installed;
+            show(app, Status::ReadyToRestart(version));
+            app.request_restart();
+        }
         Err(error) => {
             eprintln!("update install failed: {error}");
-            show(app, &Status::Failed);
+            show(app, Status::Failed);
         }
     }
 }
@@ -204,5 +276,35 @@ mod tests {
         assert!(label(&Status::Failed).1);
         let (text, enabled) = label(&Status::Available("1.2.3".into()));
         assert!(enabled && text.contains("1.2.3"));
+        let (text, enabled) = label(&Status::ReadyToRestart("1.2.3".into()));
+        assert!(enabled && text.contains("1.2.3") && text.contains("Restart"));
+    }
+
+    #[test]
+    fn the_panel_reads_the_same_status_as_the_tray() {
+        assert_eq!(
+            payload(&Status::Idle),
+            json!({ "state": "idle", "version": null })
+        );
+        assert_eq!(
+            payload(&Status::Disabled),
+            json!({ "state": "disabled", "version": null })
+        );
+        assert_eq!(
+            payload(&Status::Failed),
+            json!({ "state": "failed", "version": null })
+        );
+        assert_eq!(
+            payload(&Status::Available("1.2.3".into())),
+            json!({ "state": "available", "version": "1.2.3" })
+        );
+        assert_eq!(
+            payload(&Status::Installing("1.2.3".into())),
+            json!({ "state": "installing", "version": "1.2.3" })
+        );
+        assert_eq!(
+            payload(&Status::ReadyToRestart("1.2.3".into())),
+            json!({ "state": "ready-to-restart", "version": "1.2.3" })
+        );
     }
 }

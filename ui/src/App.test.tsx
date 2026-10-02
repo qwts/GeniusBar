@@ -169,6 +169,24 @@ describe('App setup', () => {
     expect(screen.queryByRole('button', { name: 'Launch package…' })).toBeNull();
   });
 
+  it('shows update states in the panel and acts on them (#34)', () => {
+    const act = vi.fn();
+    const updates = { status: { state: 'available' as const, version: '0.1.1' }, act };
+    render(<App census={sampleCensus} connection={sampleConnection} updates={updates} isStatic />);
+    expect(screen.getByRole('status', { name: 'Update' }).textContent).toContain('GeniusBar 0.1.1 is available.');
+    fireEvent.click(screen.getByRole('button', { name: 'Install and restart' }));
+    expect(act).toHaveBeenCalledOnce();
+    // While the update needs action, the footer check hides.
+    expect(screen.queryByRole('button', { name: 'Check for Updates…' })).toBeNull();
+    cleanup();
+    render(<App connection={sampleConnection} updates={{ ...updates, status: { state: 'idle', version: null } }} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'Check for Updates…' }));
+    expect(act).toHaveBeenCalledTimes(2);
+    cleanup();
+    render(<App connection={sampleConnection} updates={{ ...updates, status: { state: 'disabled', version: null } }} isStatic />);
+    expect(screen.queryByRole('button', { name: 'Check for Updates…' })).toBeNull();
+  });
+
   it('removes services only after the owner confirms, and shows a failure inline', async () => {
     const onRemove = vi.fn<() => Promise<void>>(async () => { throw new Error('launchctl would not unload'); });
     render(<App connection={sampleConnection} onRemoveServices={onRemove} isStatic />);
