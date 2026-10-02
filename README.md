@@ -15,12 +15,18 @@ The shell lives in `src-tauri/` and the web UI in `ui/`. Requirements: Node
 
 ```sh
 npm ci && npm --prefix ui ci
+node scripts/fetch-components.mjs   # pinned Node, agent-comms, agent-bot
 npm run tauri dev               # tray item with its popup
 npm run tauri dev -- -- --window   # the same UI in a regular window
 npm --prefix ui test            # UI tests
 (cd src-tauri && cargo test)    # shell tests
 npm run build:unsigned          # unsigned GeniusBar.app
 ```
+
+The app bundles its own Node and pinned agent-comms and agent-bot releases
+(`components.json`); it never uses a Node the user installed. The web view
+reaches agent-comms only through `bridge/bridge.mjs`, which runs in that Node
+and holds the principal credential.
 
 The Swift app below remains the specification until the Tauri app reaches
 parity (#11).

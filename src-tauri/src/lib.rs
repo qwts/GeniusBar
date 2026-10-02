@@ -2,10 +2,17 @@
 //! anchored to it, and platform calls. Agent logic stays out of Rust; it
 //! reaches agent-comms through the Node bridge (#7).
 
+mod bridge;
+
+use std::{
+    sync::Mutex,
+    time::{Duration, Instant},
+};
+
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    App, Manager, WebviewWindow, WindowEvent,
+    App, Manager, RunEvent, WebviewWindow, WindowEvent,
 };
 use tauri_plugin_positioner::{Position, WindowExt};
 
@@ -26,7 +33,35 @@ pub fn parse_mode<I: IntoIterator<Item = S>, S: AsRef<str>>(args: I) -> Mode {
     }
 }
 
+/// A tray click that arrives this soon after the popup hid for losing focus
+/// is the click that took the focus: it closes the popup, not reopens it.
+const DISMISS_GRACE: Duration = Duration::from_millis(300);
+
+/// When the popup last hid because it lost focus.
+#[derive(Default)]
+struct Dismissed(Mutex<Option<Instant>>);
+
+impl Dismissed {
+    fn record(&self, at: Instant) {
+        *self.0.lock().unwrap() = Some(at);
+    }
+
+    /// True if a click at `at` follows a focus-loss hide within the grace
+    /// period. The record is consumed either way.
+    fn just_dismissed(&self, at: Instant) -> bool {
+        self.0
+            .lock()
+            .unwrap()
+            .take()
+            .is_some_and(|hidden| at.saturating_duration_since(hidden) < DISMISS_GRACE)
+    }
+}
+
 fn toggle_popup(window: &WebviewWindow) {
+    let dismissed = window.state::<Dismissed>();
+    if dismissed.just_dismissed(Instant::now()) {
+        return;
+    }
     if window.is_visible().unwrap_or(false) {
         let _ = window.hide();
     } else {
@@ -85,6 +120,9 @@ fn install_tray(app: &mut App, window: &WebviewWindow) -> tauri::Result<()> {
     let popup = window.clone();
     window.on_window_event(move |event| {
         if let WindowEvent::Focused(false) = event {
+            if popup.is_visible().unwrap_or(false) {
+                popup.state::<Dismissed>().record(Instant::now());
+            }
             let _ = popup.hide();
         }
     });
@@ -95,7 +133,12 @@ pub fn run() {
     let mode = parse_mode(std::env::args().skip(1));
     tauri::Builder::default()
         .plugin(tauri_plugin_positioner::init())
+        .plugin(tauri_plugin_shell::init())
+        .manage(bridge::Bridge::default())
+        .manage(Dismissed::default())
+        .invoke_handler(tauri::generate_handler![bridge::bridge])
         .setup(move |app| {
+            bridge::start(app.handle().clone());
             let window = app
                 .get_webview_window("main")
                 .expect("tauri.conf.json defines the main window");
@@ -105,8 +148,13 @@ pub fn run() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("GeniusBar failed to start");
+        .build(tauri::generate_context!())
+        .expect("GeniusBar failed to start")
+        .run(|app, event| {
+            if let RunEvent::Exit = event {
+                bridge::stop(app);
+            }
+        });
 }
 
 #[cfg(test)]
@@ -117,6 +165,18 @@ mod tests {
     fn tray_is_the_default() {
         assert_eq!(parse_mode(Vec::<String>::new()), Mode::Tray);
         assert_eq!(parse_mode(["--other"]), Mode::Tray);
+    }
+
+    #[test]
+    fn a_click_right_after_a_focus_hide_keeps_the_popup_closed() {
+        let dismissed = Dismissed::default();
+        let hidden = Instant::now();
+        dismissed.record(hidden);
+        assert!(dismissed.just_dismissed(hidden + Duration::from_millis(50)));
+        // Consumed: the next click toggles normally.
+        assert!(!dismissed.just_dismissed(hidden + Duration::from_millis(60)));
+        dismissed.record(hidden);
+        assert!(!dismissed.just_dismissed(hidden + DISMISS_GRACE));
     }
 
     #[test]

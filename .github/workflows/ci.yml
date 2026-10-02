@@ -59,6 +59,12 @@ jobs:
           workspaces: src-tauri
       - name: Install
         run: npm ci && npm --prefix ui ci
+      # Pinned Node (checksum-verified) and components; the shell's build
+      # needs the sidecar binary to exist.
+      - name: Fetch bundled components
+        run: node scripts/fetch-components.mjs
+      - name: Bridge tests
+        run: node --test 'bridge/*.test.mjs' 'scripts/*.test.mjs'
       - name: UI typecheck and tests
         run: npm --prefix ui run typecheck && npm --prefix ui test
       - name: Rust format, lint, tests

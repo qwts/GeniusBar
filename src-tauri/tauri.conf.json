@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "app.geniusbar",
   "build": {
-    "beforeDevCommand": "npm --prefix ui run dev",
+    "beforeDevCommand": "node scripts/fetch-components.mjs && npm --prefix ui run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm --prefix ui run build",
+    "beforeBuildCommand": "node scripts/fetch-components.mjs && npm --prefix ui run build",
     "frontendDist": "../ui/dist"
   },
   "app": {
@@ -39,6 +39,13 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "externalBin": [
+      "binaries/node"
+    ],
+    "resources": {
+      "resources/components/": "components/",
+      "../bridge/bridge.mjs": "bridge/bridge.mjs"
+    }
   }
 }
