@@ -1,0 +1,5 @@
+#!/bin/sh
+# GeniusBar's agent-bot for the souls it runs (ADR-0276): the bundled
+# component on the bundled Node, so a soul needs nothing installed.
+here=$(cd "$(dirname "$0")" && pwd -P)
+exec "$here/../../MacOS/node" "$here/../components/agent-bot/agent-bot.mjs" "$@"

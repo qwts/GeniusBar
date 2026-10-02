@@ -12,7 +12,7 @@ interface LaunchFormProps {
   soul?: CensusRow;
 }
 
-function LaunchStatus({ state }: { state: LaunchState }) {
+export function LaunchStatus({ state }: { state: LaunchState }) {
   switch (state.phase) {
     case 'idle':
       return null;

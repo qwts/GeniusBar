@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { emptyComposer, mergeIncoming, emptyChat } from './model/chat';
@@ -112,6 +112,42 @@ describe('App setup', () => {
     const refused: LaunchApi = { ...launcher, state: { phase: 'error', requestId: null, text: 'No agent-bot daemon is watching account user.' } };
     rerender(<App census={sampleCensus} connection={sampleConnection} launcher={refused} isStatic />);
     expect(screen.getByRole('alert').textContent).toMatch(/No agent-bot daemon/);
+  });
+
+  it('offers the starter soul on an empty roster and launches it with its default harness', () => {
+    const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    const starter = { package: '/App/souls/starter.soul', account: 'friend', name: 'Starter', harnesses: ['claude', 'codex'] };
+    const { rerender } = render(<App census={[]} connection={sampleConnection} launcher={launcher} starter={starter} isStatic />);
+    expect((screen.getByLabelText('Harness') as HTMLInputElement).value).toBe('claude');
+    fireEvent.click(screen.getByRole('button', { name: 'Launch your first soul' }));
+    expect(launcher.launch).toHaveBeenCalledWith({ account: 'friend', target: { package: '/App/souls/starter.soul' }, harness: 'claude', name: 'Starter' });
+    const failed: LaunchApi = { ...launcher, state: { phase: 'failed', requestId: 'r1', agentId: null, detail: 'harness not installed' } };
+    rerender(<App census={[]} connection={sampleConnection} launcher={failed} starter={starter} isStatic />);
+    expect(screen.getByRole('alert').textContent).toMatch(/harness not installed/);
+  });
+
+  it('after the starter launches, stays open while the roster fills and signs in to the harness', async () => {
+    const starter = { package: '/App/souls/starter.soul', account: 'friend', name: 'Starter', harnesses: ['claude'] };
+    const idle: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    let signedIn = false;
+    const auth = vi.fn(async (action: 'status' | 'login') => { if (action === 'login') signedIn = true; return { loggedIn: signedIn }; });
+    const { rerender } = render(<App census={[]} connection={sampleConnection} launcher={idle} starter={starter} harnessAuth={auth} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'Launch your first soul' }));
+    const launched: LaunchApi = { ...idle, state: { phase: 'launched', requestId: 'r1', agentId: 'agent_s' } };
+    rerender(<App census={sampleCensus} connection={sampleConnection} launcher={launched} starter={starter} harnessAuth={auth} isStatic />);
+    const signIn = await screen.findByRole('button', { name: 'Sign in to Claude' });
+    expect(auth).toHaveBeenCalledWith('status', 'claude', 'agent_s');
+    fireEvent.click(signIn);
+    await waitFor(() => expect(screen.getByText(/Ready\. Open the soul/)).toBeTruthy());
+    expect(auth).toHaveBeenCalledWith('login', 'claude', 'agent_s');
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('region', { name: 'Your first soul' })).toBeNull();
+  });
+
+  it('keeps the plain empty text when the starter soul is not offered', () => {
+    render(<App census={[]} connection={sampleConnection} isStatic />);
+    expect(screen.queryByRole('form', { name: 'Launch your first soul' })).toBeNull();
+    expect(screen.getByText('No souls on this machine.')).toBeTruthy();
   });
 
   it('offers no launch without a launcher', () => {

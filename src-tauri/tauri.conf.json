@@ -47,7 +47,10 @@
       "resources/components/": "components/",
       "../bridge/bridge.mjs": "bridge/bridge.mjs",
       "../bridge/setup.mjs": "bridge/setup.mjs",
-      "../bridge/services.mjs": "bridge/services.mjs"
+      "../bridge/services.mjs": "bridge/services.mjs",
+      "../souls/starter.soul/": "souls/starter.soul/",
+      "../bin/agent-comms": "bin/agent-comms",
+      "../bin/agent-bot": "bin/agent-bot"
     }
   }
 }
