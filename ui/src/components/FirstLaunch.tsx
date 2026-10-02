@@ -10,6 +10,14 @@ export interface Starter {
   name: string;
   /** The soul's preference order; the first is its default. */
   harnesses: readonly string[];
+  /** Whether git works; a stock Mac first needs Apple's command line tools. */
+  devTools: boolean;
+}
+
+/** Opens Apple's installer for the command line tools, then checks again. */
+export interface DevTools {
+  install: () => Promise<void>;
+  recheck: () => void;
 }
 
 /** A harness's sign-in for a soul, from the shell's `harness_auth`. */
@@ -49,15 +57,36 @@ function HarnessSignIn({ auth, harness, soul }: { auth: HarnessAuth; harness: st
   }
 }
 
+/** Shown instead of the launch until git works on this Mac. */
+function DevToolsNeeded({ devTools }: { devTools?: DevTools }) {
+  const [opened, setOpened] = useState(false);
+  const [error, setError] = useState<string>();
+  return (
+    <div role="status">
+      <p>Your soul needs Apple's command line developer tools first. It's a free install from Apple and takes a few minutes.</p>
+      {error && <p className="error small" role="alert">{error}</p>}
+      {devTools && (
+        <div className="detail-actions">
+          <button type="button" onClick={() => {
+            devTools.install().then(() => setOpened(true), (e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+          }}>Install developer tools</button>
+          {opened && <button type="button" onClick={devTools.recheck}>I've installed them</button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * The empty roster's one-click start (R4): launches the bundled starter
  * soul with its default harness, which the owner may change first.
  */
-export function FirstLaunch({ starter, launcher, auth, onStart }:
-  { starter: Starter; launcher: LaunchApi; auth?: HarnessAuth; onStart?: () => void }) {
+export function FirstLaunch({ starter, launcher, auth, devTools, onStart }:
+  { starter: Starter; launcher: LaunchApi; auth?: HarnessAuth; devTools?: DevTools; onStart?: () => void }) {
   const [harness, setHarness] = useState(starter.harnesses[0] ?? '');
   const [started, setStarted] = useState(false);
   const ids = useId();
+  if (!starter.devTools && !started) return <DevToolsNeeded devTools={devTools} />;
   const ready = canLaunch(launcher.state) && harness.trim() !== '';
   return (
     <form

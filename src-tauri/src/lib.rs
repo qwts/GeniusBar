@@ -148,6 +148,7 @@ pub fn run() {
             bridge::setup,
             bridge::remove_services,
             starter::starter_soul,
+            starter::install_dev_tools,
             bridge::harness_auth
         ])
         .setup(move |app| {
