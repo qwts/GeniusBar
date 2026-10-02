@@ -109,6 +109,11 @@ describe('Footer status', () => {
     ).toEqual({ text: `Last known · ${formatTime(refreshed)}`, isError: false });
     // Before setup the keychain has no principal: the header says so, not the footer.
     expect(footerStatus({ ...connected, unpaired: true, lastError: 'cannot read the principal' })).toBeNull();
+    // Waiting for approval and a dropped bridge are still the footer's to say.
+    expect(footerStatus({ ...connected, unpaired: true, lastError: pendingApprovalMessage }))
+      .toEqual({ text: pendingApprovalMessage, isError: true });
+    expect(footerStatus({ ...connected, unpaired: true, bridgeConnected: false, lastError: 'node exited (bridge-exited)' }))
+      .toEqual({ text: 'node exited (bridge-exited)', isError: true });
   });
 });
 

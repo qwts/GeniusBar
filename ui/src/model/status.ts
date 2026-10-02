@@ -137,8 +137,10 @@ export function footerStatus(s: ConnectionSnapshot): FooterState | null {
   if (s.brokerUnreachable && s.lastRefresh) {
     return { text: `Last known · ${formatTime(s.lastRefresh)}`, isError: false };
   }
-  // Unpaired is the header's note and the setup panel's job, not an error.
-  if (s.lastError !== null && !s.unpaired) return { text: s.lastError, isError: true };
+  // A missing credential is the setup panel's job, not an error. Approval
+  // instructions and bridge failures (no setup panel then) still show.
+  const setupsJob = s.unpaired && s.bridgeConnected && s.lastError !== pendingApprovalMessage;
+  if (s.lastError !== null && !setupsJob) return { text: s.lastError, isError: true };
   if (s.lastRefresh) return { text: `Updated ${formatTime(s.lastRefresh)}`, isError: false };
   return null;
 }
