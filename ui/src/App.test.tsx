@@ -6,6 +6,7 @@ import { inboxMessage, sampleCensus, sampleConnection } from './model/fixtures';
 import { idleSetup } from './model/setup';
 import { disconnected } from './model/status';
 import type { ChatApi } from './useChat';
+import type { LaunchApi } from './useLaunch';
 
 afterEach(() => { cleanup(); globalThis.localStorage?.clear(); });
 
@@ -86,5 +87,35 @@ describe('App setup', () => {
     expect(screen.getByRole('region', { name: 'Setup' })).toBeTruthy();
     expect(screen.queryByRole('region', { name: 'Souls' })).toBeNull();
     expect(screen.queryByText('No souls on this machine.')).toBeNull();
+  });
+
+  it('launches a selected soul with its account and harness filled in', () => {
+    const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: /^luna,/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Launch…' }));
+    const form = screen.getByRole('form', { name: /^Launch / });
+    expect((screen.getByLabelText('Account') as HTMLInputElement).value).toBe('user');
+    expect((screen.getByLabelText('Harness') as HTMLInputElement).value).toBe('codex');
+    fireEvent.submit(form);
+    expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { soul: 'agent_p' }, harness: 'codex', name: '' });
+  });
+
+  it('launches a package from the footer, and shows a refusal inline', () => {
+    const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    const { rerender } = render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'Launch package…' }));
+    fireEvent.change(screen.getByLabelText('Package'), { target: { value: '/souls/helper' } });
+    fireEvent.change(screen.getByLabelText('Harness'), { target: { value: 'claude' } });
+    fireEvent.submit(screen.getByRole('form', { name: 'Launch a soul package' }));
+    expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { package: '/souls/helper' }, harness: 'claude', name: '' });
+    const refused: LaunchApi = { ...launcher, state: { phase: 'error', requestId: null, text: 'No agent-bot daemon is watching account user.' } };
+    rerender(<App census={sampleCensus} connection={sampleConnection} launcher={refused} isStatic />);
+    expect(screen.getByRole('alert').textContent).toMatch(/No agent-bot daemon/);
+  });
+
+  it('offers no launch without a launcher', () => {
+    render(<App census={sampleCensus} connection={sampleConnection} isStatic />);
+    expect(screen.queryByRole('button', { name: 'Launch package…' })).toBeNull();
   });
 });

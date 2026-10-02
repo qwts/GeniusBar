@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { HealthHeader } from './components/HealthHeader';
+import { LaunchForm } from './components/LaunchForm';
 import { SetupPanel } from './components/SetupPanel';
 import { SoulDetail } from './components/SoulDetail';
 import { SoulRow } from './components/SoulRow';
@@ -8,6 +9,7 @@ import { allSouls, buildSoulForest, findSoul, soulKey, type CensusRow } from './
 import { needsSetup, type SetupState } from './model/setup';
 import { disconnected, emptyRosterText, footerStatus, type ConnectionSnapshot } from './model/status';
 import type { ChatApi } from './useChat';
+import type { LaunchApi } from './useLaunch';
 
 interface AppProps {
   /** Census rows from the principal client; absent until the bridge (#7). */
@@ -21,6 +23,8 @@ interface AppProps {
   onSetup?: () => void;
   /** Chat with souls (#17); without it the detail has no conversation. */
   chat?: ChatApi;
+  /** Launching souls and packages (#18); without it there is no Launch. */
+  launcher?: LaunchApi;
 }
 
 // Dudles stop blinking while the popup is hidden, as R1's did while the
@@ -40,7 +44,7 @@ const NO_CENSUS: readonly CensusRow[] = [];
 
 // The popup's root: health header, the census nested under parents, and
 // the read-only detail for a selected soul.
-export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, setup, onSetup, chat }: AppProps) {
+export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, setup, onSetup, chat, launcher }: AppProps) {
   const forest = useMemo(() => buildSoulForest(census), [census]);
   const roster = useMemo(() => allSouls(forest), [forest]);
   // Selection holds the roster key and resolves against each census, so
@@ -60,6 +64,12 @@ export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, 
   const empty = emptyRosterText(connection);
   const footer = footerStatus(connection);
   const showSetup = Boolean(setup && onSetup && (setup.running || needsSetup(connection)));
+  const [launchingPackage, setLaunchingPackage] = useState(false);
+  const launch = useMemo(() => launcher && {
+    launcher,
+    accounts: [...new Set(roster.map((s) => s.account))].sort(),
+    harnesses: [...new Set(roster.flatMap((s) => (s.harness ? [s.harness] : [])))].sort(),
+  }, [launcher, roster]);
 
   return (
     <main className="popup">
@@ -94,12 +104,29 @@ export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, 
             onDraft: (draft) => chat.setDraft(openKey, draft),
             onSend: () => { void chat.send(openKey); },
           } : undefined}
+          launch={launch}
           onDone={() => setSelectedKey(null)}
         />
       )}
-      {(footer || onRefresh) && (
+      {launch && launchingPackage && !showSetup && (
+        <section className="detail" aria-label="Launch a soul package">
+          <h2>Launch a soul package</h2>
+          <LaunchForm {...launch} />
+          <div className="detail-actions">
+            <button type="button" onClick={() => setLaunchingPackage(false)}>
+              Close
+            </button>
+          </div>
+        </section>
+      )}
+      {(footer || onRefresh || (launch && !showSetup)) && (
         <footer className="status">
           {footer && <span className={footer.isError ? 'error small' : 'muted small'}>{footer.text}</span>}
+          {launch && !showSetup && !launchingPackage && (
+            <button type="button" className="link" onClick={() => { setSelectedKey(null); setLaunchingPackage(true); }}>
+              Launch package…
+            </button>
+          )}
           {onRefresh && (
             <button type="button" className="link" onClick={onRefresh}>
               Refresh

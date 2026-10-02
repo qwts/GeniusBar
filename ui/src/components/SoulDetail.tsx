@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   availabilityNote,
   displayHarness,
@@ -10,6 +10,8 @@ import type { ChatEntry, Composer } from '../model/chat';
 import { deriveDudle } from '../model/dudle';
 import { Conversation } from './Conversation';
 import { Dudle } from './Dudle';
+import { LaunchForm } from './LaunchForm';
+import type { LaunchApi } from '../useLaunch';
 
 /** The conversation with this soul, when chat is available (#17). */
 export interface SoulChat {
@@ -25,6 +27,8 @@ interface SoulDetailProps {
   roster?: readonly CensusRow[];
   paused?: boolean;
   chat?: SoulChat;
+  /** Launching this soul (#18); without it there is no Launch action. */
+  launch?: { launcher: LaunchApi; accounts: readonly string[]; harnesses: readonly string[] };
   onDone: () => void;
 }
 
@@ -37,8 +41,9 @@ function yesNo(value: boolean | null | undefined): string {
  * Done takes focus on open so the keyboard lands inside, and Escape
  * closes it (a draft survives, held by the chat store).
  */
-export function SoulDetail({ soul, roster = [], paused = false, chat, onDone }: SoulDetailProps) {
+export function SoulDetail({ soul, roster = [], paused = false, chat, launch, onDone }: SoulDetailProps) {
   const done = useRef<HTMLButtonElement>(null);
+  const [launching, setLaunching] = useState(false);
   useEffect(() => done.current?.focus(), []);
 
   const name = displayName(soul);
@@ -98,7 +103,13 @@ export function SoulDetail({ soul, roster = [], paused = false, chat, onDone }: 
       {chat && (
         <Conversation name={name} entries={chat.entries} composer={chat.composer} onDraft={chat.onDraft} onSend={chat.onSend} />
       )}
+      {launch && launching && <LaunchForm {...launch} soul={soul} />}
       <div className="detail-actions">
+        {launch && !launching && (
+          <button type="button" onClick={() => setLaunching(true)}>
+            Launch…
+          </button>
+        )}
         <button type="button" ref={done} onClick={onDone}>
           Done
         </button>
