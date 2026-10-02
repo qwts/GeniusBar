@@ -74,7 +74,9 @@ export async function fetchNode(triple) {
   const work = mkdtempSync(path.join(tmpdir(), 'geniusbar-node-'));
   try {
     const member = `node-v${version}-${platform}/${windows ? 'node.exe' : 'bin/node'}`;
-    execFileSync('tar', ['-xf', cached, '-C', work, member]);
+    // Windows' own tar (bsdtar) reads ZIPs; elsewhere GNU tar may not.
+    if (windows && process.platform !== 'win32') execFileSync('unzip', ['-q', cached, member, '-d', work]);
+    else execFileSync('tar', ['-xf', cached, '-C', work, member]);
     mkdirSync(BINARIES, { recursive: true });
     cpSync(path.join(work, member), out);
     chmodSync(out, 0o755);

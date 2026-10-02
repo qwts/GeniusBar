@@ -12,7 +12,7 @@ use std::{
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    App, Manager, WebviewWindow, WindowEvent,
+    App, Manager, RunEvent, WebviewWindow, WindowEvent,
 };
 use tauri_plugin_positioner::{Position, WindowExt};
 
@@ -148,8 +148,13 @@ pub fn run() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("GeniusBar failed to start");
+        .build(tauri::generate_context!())
+        .expect("GeniusBar failed to start")
+        .run(|app, event| {
+            if let RunEvent::Exit = event {
+                bridge::stop(app);
+            }
+        });
 }
 
 #[cfg(test)]

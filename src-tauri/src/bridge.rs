@@ -6,7 +6,7 @@
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Mutex,
     },
     time::{Duration, Instant},
@@ -51,6 +51,7 @@ type Reply = Result<Value, BridgeError>;
 #[derive(Default)]
 pub struct Bridge {
     next_id: AtomicU64,
+    stopping: AtomicBool,
     child: Mutex<Option<CommandChild>>,
     pending: Mutex<HashMap<u64, oneshot::Sender<Reply>>>,
 }
@@ -113,11 +114,25 @@ fn spawn_bridge<R: Runtime>(
     Ok(events)
 }
 
+/// Stops the bridge for good when the app exits: no restart, and the child
+/// is killed rather than left to notice its closed stdin.
+pub fn stop<R: Runtime>(app: &AppHandle<R>) {
+    let bridge = app.state::<Bridge>();
+    bridge.stopping.store(true, Ordering::SeqCst);
+    if let Some(child) = bridge.child.lock().unwrap().take() {
+        let _ = child.kill();
+    }
+    bridge.fail_all(&BridgeError::new("bridge-stopped", "the app is quitting"));
+}
+
 /// Starts the bridge and keeps it running for the life of the app.
 pub fn start<R: Runtime>(app: AppHandle<R>) {
     tauri::async_runtime::spawn(async move {
         let mut backoff = RESTART_MIN;
         loop {
+            if app.state::<Bridge>().stopping.load(Ordering::SeqCst) {
+                return;
+            }
             let started = Instant::now();
             match spawn_bridge(&app) {
                 Ok(mut events) => {
