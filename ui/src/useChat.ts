@@ -39,7 +39,8 @@ const asBridgeError = (error: unknown) =>
  * before those ids, and only those, are acked. Starts from the beginning
  * each time, so ids whose ack failed are re-read and acked next poll.
  */
-export async function pollInbox(callImpl: typeof call, store: (messages: unknown[]) => string[]):
+export async function pollInbox(callImpl: typeof call, store: (messages: unknown[]) => string[],
+  acked: (ids: string[]) => void = () => {}):
   Promise<{ ok: true } | { ok: false; code: string; message: string }> {
   try {
     let after = 0;
@@ -47,7 +48,10 @@ export async function pollInbox(callImpl: typeof call, store: (messages: unknown
       const result = await callImpl<InboxPage>('inbox', { after, limit: INBOX_PAGE });
       const messages = Array.isArray(result?.messages) ? result.messages : [];
       const stored = store(messages);
-      if (stored.length) await callImpl('ack', { ids: stored });
+      if (stored.length) {
+        await callImpl('ack', { ids: stored });
+        acked(stored);
+      }
       if (!(result.remaining > 0) || messages.length === 0 || !(result.cursor > after)) break;
       after = result.cursor;
     }
@@ -117,10 +121,19 @@ export function useChat({
   // synchronously before it acks; state mirrors it for rendering.
   const store = useRef<ChatState>(initial);
   const [chat, setChat] = useState<ChatState>(initial);
-  const update = useCallback((fn: (s: ChatState) => ChatState) => {
+  // Ids stored but not yet acked; kept on disk past the STORED_ENTRIES window.
+  const unacked = useRef<Set<string>>(new Set());
+  /** Applies `fn` and saves; returns false when the history could not be saved. */
+  const update = useCallback((fn: (s: ChatState) => ChatState): boolean => {
     store.current = fn(store.current);
     setChat(store.current);
-    saved.current?.setItem(CHAT_STORAGE_KEY, toStored(store.current));
+    if (!saved.current) return false;
+    try {
+      saved.current.setItem(CHAT_STORAGE_KEY, toStored(store.current, unacked.current));
+      return true;
+    } catch {
+      return false;
+    }
   }, []);
 
   const composerRef = useRef<Record<string, Composer>>({});
@@ -139,15 +152,18 @@ export function useChat({
     if (inFlight.current) return;
     inFlight.current = true;
     try {
+      // Without a saved copy an ack would delete the only one, so an
+      // unsaved page is left in the mailbox to be read again next poll.
       await pollInbox(deps.current.callImpl, (messages) => {
         let stored: string[] = [];
-        update((s) => {
+        const ok = update((s) => {
           const merged = mergeIncoming(s, messages, openKey.current);
           stored = merged.stored;
+          stored.forEach((id) => unacked.current.add(id));
           return merged.state;
         });
-        return stored;
-      });
+        return ok ? stored : [];
+      }, (ids) => ids.forEach((id) => unacked.current.delete(id)));
     } finally {
       inFlight.current = false;
     }
@@ -176,8 +192,12 @@ export function useChat({
     updateComposer(key, () => started.composer);
     const outcome = await sendMessage(deps.current.callImpl, key, started.body, started.key);
     if (outcome.ok) {
-      update((s) => addSent(s, key, { messageId: outcome.messageId, body: started.body, at: deps.current.now(), seq: outcome.seq }));
-      updateComposer(key, (c) => sendSucceeded(c, started.body));
+      const saved = update((s) => addSent(s, key,
+        { messageId: outcome.messageId, body: started.body, at: deps.current.now(), seq: outcome.seq }));
+      // Delivered but unsaved: keep the draft and its key, so sending again
+      // is a broker duplicate that retries the save without a second copy.
+      updateComposer(key, (c) => saved ? sendSucceeded(c, started.body)
+        : sendFailed(c, 'not-saved', ''));
     } else {
       updateComposer(key, (c) => sendFailed(c, outcome.code, outcome.message));
     }

@@ -69,7 +69,8 @@ export function unreadOf(state: ChatState, key: string): number {
 export function senderKey(message: unknown): string | null {
   const m = message as Partial<InboxMessage> | null;
   if (!m || typeof m !== 'object' || typeof m.id !== 'string' || !m.id) return null;
-  if (typeof m.body !== 'string' || typeof m.at !== 'number') return null;
+  if (typeof m.body !== 'string' || typeof m.at !== 'number' || typeof m.seq !== 'number') return null;
+  if (typeof m.kind !== 'string' || typeof m.to?.principal !== 'string' || !m.to.principal) return null;
   const from = m.from;
   if (!from || typeof from.account !== 'string' || typeof from.agentId !== 'string') return null;
   if (!from.account || !from.agentId) return null;
@@ -109,8 +110,7 @@ export function mergeIncoming(state: ChatState, messages: readonly unknown[], op
     const m = raw as InboxMessage;
     if (!next.ids.has(m.id)) {
       next = addEntry(next, key, {
-        id: m.id, direction: 'in', body: m.body, at: m.at,
-        seq: typeof m.seq === 'number' ? m.seq : null,
+        id: m.id, direction: 'in', body: m.body, at: m.at, seq: m.seq,
       }, key === openKey ? 0 : 1);
     }
     if (!stored.includes(m.id)) stored.push(m.id);
@@ -194,6 +194,8 @@ export function sendErrorText(code: string, message: string): string {
     case 'broker-unreachable':
     case 'broker-timeout':
       return 'Cannot reach the broker. Send again to retry; it will not be delivered twice.';
+    case 'not-saved':
+      return 'Sent, but your history could not be saved. Send again to retry saving; it will not be delivered twice.';
     default:
       return `Could not send (${code})${message ? `: ${message}` : '.'}`;
   }
@@ -205,10 +207,16 @@ export function sendErrorText(code: string, message: string): string {
 /** Entries kept per conversation on disk; older ones are dropped. */
 export const STORED_ENTRIES = 500;
 
-export function toStored(state: ChatState): string {
+/**
+ * Serializes the newest STORED_ENTRIES of each conversation, plus every
+ * entry in `keep`: messages not yet acked must survive on disk however old,
+ * or a failed ack followed by a later one would lose them.
+ */
+export function toStored(state: ChatState, keep: ReadonlySet<string> = new Set()): string {
   const conversations: Record<string, Conversation> = {};
   for (const [key, c] of Object.entries(state.conversations)) {
-    conversations[key] = { entries: c.entries.slice(-STORED_ENTRIES), unread: c.unread };
+    const from = c.entries.length - STORED_ENTRIES;
+    conversations[key] = { entries: c.entries.filter((e, i) => i >= from || keep.has(e.id)), unread: c.unread };
   }
   return JSON.stringify({ v: 1, conversations });
 }

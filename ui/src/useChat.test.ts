@@ -9,6 +9,11 @@ afterEach(() => { cleanup(); globalThis.localStorage?.clear(); });
 
 type Call = (method: string, params?: Record<string, unknown>) => Promise<unknown>;
 
+function memoryStorage() {
+  const saved = new Map<string, string>();
+  return { saved, getItem: (k: string) => saved.get(k) ?? null, setItem: (k: string, v: string) => { saved.set(k, v); } };
+}
+
 describe('pollInbox', () => {
   it('pages by cursor while messages remain, storing each page before acking it', async () => {
     const log: string[] = [];
@@ -84,7 +89,9 @@ describe('useChat', () => {
   it('polls, stores, acks, and marks the open conversation read', async () => {
     const bridge = fakeBridge();
     bridge.inbox.push(inboxMessage('msg_1', 1));
-    const { result } = renderHook(() => useChat({ enabled: true, callImpl: bridge.callImpl as never, intervalMs: 20 }));
+    const { result } = renderHook(() => useChat({
+      enabled: true, callImpl: bridge.callImpl as never, intervalMs: 20, storage: memoryStorage(),
+    }));
     await waitFor(() => expect(bridge.acked).toEqual(['msg_1']));
     expect(unreadOf(result.current.chat, 'user/agent_p')).toBe(1);
 
@@ -100,6 +107,7 @@ describe('useChat', () => {
     let n = 0;
     const { result } = renderHook(() => useChat({
       enabled: false, callImpl: bridge.callImpl as never, newKey: () => `k${++n}`, now: () => 9_000,
+      storage: memoryStorage(),
     }));
     act(() => result.current.setDraft('user/agent_p', 'hello'));
     bridge.failSends(new BridgeError('rate-limited', 'slow down'));
@@ -118,6 +126,45 @@ describe('useChat', () => {
     act(() => result.current.setDraft('user/agent_p', 'again'));
     await act(() => result.current.send('user/agent_p'));
     expect(bridge.sends.map((s) => s.key)).toEqual(['k1', 'k1', 'k2']);
+  });
+
+  it('does not ack what it cannot save', async () => {
+    for (const storage of [null, { getItem: () => null, setItem: () => { throw new Error('quota'); } }]) {
+      const bridge = fakeBridge();
+      bridge.inbox.push(inboxMessage('msg_1', 1));
+      const { result, unmount } = renderHook(() => useChat({
+        enabled: true, callImpl: bridge.callImpl as never, intervalMs: 20, storage,
+      }));
+      await waitFor(() => expect(conversationOf(result.current.chat, 'user/agent_p').entries).toHaveLength(1));
+      await new Promise((r) => setTimeout(r, 60));
+      expect(bridge.acked).toEqual([]);
+      unmount();
+    }
+  });
+
+  it('keeps the draft and key when a delivered send cannot be saved, and retries the save', async () => {
+    const bridge = fakeBridge();
+    const storage = memoryStorage();
+    let failSave = true;
+    const flaky = { getItem: storage.getItem, setItem: (k: string, v: string) => {
+      if (failSave) throw new Error('quota');
+      storage.setItem(k, v);
+    } };
+    const { result } = renderHook(() => useChat({
+      enabled: false, callImpl: bridge.callImpl as never, newKey: () => 'k1', storage: flaky,
+    }));
+    act(() => result.current.setDraft('user/agent_p', 'hello'));
+    await act(() => result.current.send('user/agent_p'));
+    expect(result.current.composers['user/agent_p']).toMatchObject({
+      draft: 'hello', sending: false, pending: { body: 'hello', key: 'k1' },
+    });
+    expect(result.current.composers['user/agent_p'].error).toMatch(/could not be saved/);
+
+    failSave = false;
+    await act(() => result.current.send('user/agent_p'));
+    expect(bridge.sends.map((s) => s.key)).toEqual(['k1', 'k1']);
+    expect(result.current.composers['user/agent_p']).toMatchObject({ draft: '', error: null });
+    expect(storage.saved.get(CHAT_STORAGE_KEY)).toContain('msg_sent_k1');
   });
 });
 
