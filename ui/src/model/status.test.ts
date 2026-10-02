@@ -109,3 +109,10 @@ describe('Footer status', () => {
     ).toEqual({ text: `Last known · ${formatTime(refreshed)}`, isError: false });
   });
 });
+
+describe('healthHeader without a health op', () => {
+  it('reports connected once a census has succeeded', () => {
+    const s = { ...disconnected, bridgeConnected: true, lastRefresh: new Date('2026-10-02T01:00:00Z') };
+    expect(healthHeader(s)).toMatchObject({ tone: 'ok', title: 'Connected to agent-comms' });
+  });
+});
