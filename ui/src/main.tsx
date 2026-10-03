@@ -3,6 +3,7 @@ import { listen } from '@tauri-apps/api/event';
 import { StrictMode, useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import type { CliToolsApi } from './components/CliTools';
 import type { DevTools, HarnessAuth, Starter } from './components/FirstLaunch';
 import { useCensus } from './useCensus';
 import { useChat } from './useChat';
@@ -14,7 +15,7 @@ import './styles.css';
 // The live app: census and connection come from the bridge.
 function Live() {
   const { census, connection, refresh } = useCensus();
-  const { setup, runSetup } = useSetup(() => { void refresh?.(); });
+  const { setup, existing, runSetup } = useSetup(() => { void refresh?.(); });
   const chat = useChat();
   const launcher = useLaunch();
   const updates = useUpdates();
@@ -55,9 +56,14 @@ function Live() {
   const loadStarter = () => { invoke<Starter>('starter_soul').then(setStarter, () => {}); };
   const devTools: DevTools = { install: () => invoke('install_dev_tools'), recheck: loadStarter };
   useEffect(loadStarter, []);
+  const cliTools: CliToolsApi = {
+    status: () => invoke('cli_tools', { action: 'status' }),
+    install: (replace) => invoke('cli_tools', { action: 'install', replace }),
+    uninstall: () => invoke('cli_tools', { action: 'uninstall' }),
+  };
   return (
     <App census={census} connection={connection} onRefresh={refresh} setup={setup}
-      onSetup={() => { void runSetup(); }} chat={chat} launcher={launcher} starter={starter} harnessAuth={harnessAuth}
+      onSetup={(migrate) => { void runSetup(migrate); }} existingServices={existing} cliTools={cliTools} chat={chat} launcher={launcher} starter={starter} harnessAuth={harnessAuth}
       devTools={devTools} openedPackage={openedPackage} updates={updates}
       onRemoveServices={async () => { await invoke('remove_services'); void refresh?.(); }} />
   );

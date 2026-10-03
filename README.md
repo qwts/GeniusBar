@@ -35,7 +35,48 @@ agent-bot daemon, or pairs one and registers it (`app.geniusbar.agent-bot`).
 Both login services run the app's own Node. In release builds, each launch
 re-registers a GeniusBar service that still points at an older or moved copy
 of the app. **Remove services…** in the popup footer unloads and deletes
-both. Services from another install, such as Homebrew's, are never changed.
+both. Services from another install, such as Homebrew's, are never changed,
+except by the migration below.
+
+### Command-line tools: Homebrew is not required
+
+**Command-line tools…** in the popup footer puts the bundled `agent-bot` and
+`agent-comms` on your PATH, like VS Code's `code` command (#41). They are
+small wrapper scripts in `~/.local/bin` that run the copies inside the app,
+so an in-app update reaches them with nothing to reinstall, and each launch
+repoints them if the app moved. That directory must be on your PATH. An
+agent you start yourself (in a terminal, an IDE or a chat app) can then run
+`agent-bot setup-worktree` and `agent-comms join` with no other install. No
+admin password is needed.
+
+If `agent-bot` or `agent-comms` is already in `~/.local/bin` (Homebrew's
+link, say), GeniusBar shows where it points and replaces it only when you
+click **Replace and install**. The old entry is renamed to
+`<name>.before-geniusbar`, and **Uninstall** puts it back. Uninstall removes
+only the wrappers GeniusBar wrote; each one carries a
+`# geniusbar-cli-tool` marker line.
+
+### Moving from a Homebrew install
+
+On a Mac that already runs Homebrew's broker (`dev.qwts.agent-comms.broker`)
+or daemon (`dev.qwts.agent-bot.daemon`), setup names what is running and
+offers two choices:
+
+- **Move to GeniusBar** stops those services, starts GeniusBar's own in
+  their place, and waits until both answer. Only then are the Homebrew units
+  renamed to `<label>.plist.geniusbar-migrated`, so they no longer start at
+  login. Both installs keep their state in the same directories, so your
+  agents, inboxes, unread messages, pairings and daemon settings
+  (`cold-wake.json`, `wake-sessions.json`) carry over unchanged. If anything
+  fails, GeniusBar removes what it installed and starts the Homebrew services
+  again.
+- **Keep them** sets GeniusBar up on the services that are already running.
+
+After moving, install the command-line tools above. You can then run
+`brew uninstall agent-bot agent-comms` whenever you like. Don't run
+`agent-comms broker install` or `agent-bot daemon install` from a Homebrew
+copy afterwards: that would start a second broker or daemon next to
+GeniusBar's.
 
 The Swift app below remains the specification until the Tauri app reaches
 parity (#11).

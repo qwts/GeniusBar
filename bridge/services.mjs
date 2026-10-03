@@ -11,17 +11,25 @@
 //            `launchctl kickstart -k`, putting them on the new files (#34).
 //            Untouched when already current.
 //   remove   The owner's explicit action: unload and delete both units.
+//   inspect  Report another install's broker and daemon (Homebrew's), if
+//            any, so setup can offer to move them over (#41).
+//   migrate  The owner's explicit action: stop that install's units and
+//            start GeniusBar's own in their place, or put them back.
 //
-// Only units under GeniusBar's labels are touched. A broker or daemon from
-// another install (Homebrew, say) has its own label and is never changed.
+// Only units under GeniusBar's labels are touched, except by migrate. A
+// broker or daemon from another install (Homebrew, say) has its own label;
+// migrate stops it, and renames its unit aside only once GeniusBar's are
+// running. Both installs keep their state in the same directories, so the
+// souls, inboxes, pairings and daemon settings carry over as they are.
 // Result: one JSON line, {ok: true, broker, daemon} with each one of
 // 'absent' | 'current' | 'reinstalled' | 'restarted' | 'removed' |
-// 'unsupported', or {ok: false, code, message}.
+// 'migrated' | 'unsupported' (inspect: null or {label, program, version}),
+// or {ok: false, code, message}.
 //
-// usage: node services.mjs refresh|remove AGENT_COMMS_DIR AGENT_BOT_DIR
+// usage: node services.mjs refresh|remove|inspect|migrate AGENT_COMMS_DIR AGENT_BOT_DIR
 
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -109,11 +117,104 @@ export async function removeServices({ units, read, cli, bot, stamp }) {
   return result;
 }
 
+/** The labels a Homebrew (or source) install of agent-comms and agent-bot uses. */
+export const FOREIGN_LABELS = { broker: 'dev.qwts.agent-comms.broker', daemon: 'dev.qwts.agent-bot.daemon' };
+/** A migrated unit is renamed to this, so launchd no longer loads it at login. */
+export const MIGRATED = '.geniusbar-migrated';
+const MIGRATE_WAIT_MS = 15_000;
+
+const xmlUnescape = (value) => value.replaceAll('&lt;', '<').replaceAll('&gt;', '>')
+  .replaceAll('&quot;', '"').replaceAll('&apos;', "'").replaceAll('&amp;', '&');
+
+/** A launchd plist's ProgramArguments, or [] when it has none. */
+export function programArgs(plist) {
+  const block = plist.match(/<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/);
+  return block ? [...block[1].matchAll(/<string>([^<]*)<\/string>/g)].map((m) => xmlUnescape(m[1])) : [];
+}
+
+/** What another install's unit runs: its command line and, from a Cellar path, its version. */
+export function describeUnit(label, plist) {
+  const program = programArgs(plist);
+  const cellar = program.map((arg) => arg.match(/\/Cellar\/(agent-comms|agent-bot)\/([^/]+)\//)).find(Boolean);
+  const group = program.indexOf('--group');
+  return {
+    label,
+    program,
+    version: cellar ? cellar[2] : null,
+    homebrew: program.some((arg) => arg.startsWith('/opt/homebrew/') || arg.startsWith('/usr/local/')),
+    ...(group >= 0 && program[group + 1] ? { group: program[group + 1] } : {}),
+  };
+}
+
+/** Another install's broker and daemon units, each null when absent. */
+export function inspectServices({ foreign, read }) {
+  const found = {};
+  for (const which of ['broker', 'daemon']) {
+    const plist = read(foreign[which].plist);
+    found[which] = plist === null ? null : describeUnit(foreign[which].label, plist);
+  }
+  return found;
+}
+
+/**
+ * Moves another install's broker and daemon over to GeniusBar's own units.
+ * Its units are stopped (`bootout`), GeniusBar's are installed and must
+ * answer, and only then are the old units renamed aside. Any failure
+ * removes what was installed and starts the old units again (`bootstrap`),
+ * so a failed or cancelled move leaves the machine running as before.
+ */
+export async function migrateServices({ foreign, read, cli, bot, bootout, bootstrap, rename, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now }) {
+  const found = inspectServices({ foreign, read });
+  if (!found.broker && !found.daemon) return { broker: 'absent', daemon: 'absent' };
+  const stopped = [];
+  const installed = [];
+  const waitFor = async (probe, code, message) => {
+    const deadline = now() + MIGRATE_WAIT_MS;
+    while (!(await probe())) {
+      if (now() > deadline) throw new SetupError(code, message);
+      await sleep(250);
+    }
+  };
+  try {
+    // The daemon talks to the broker, so it stops first and starts last.
+    for (const which of ['daemon', 'broker']) {
+      if (!found[which]) continue;
+      if (!(await bootout(foreign[which].label))) throw new SetupError('migrate-stop-failed', `launchctl would not stop ${foreign[which].label}`);
+      stopped.push(which);
+    }
+    const group = found.broker?.group;
+    const broker = await cli(['broker', 'install', ...(group ? ['--group', group] : [])]);
+    if (!broker?.installed) throw failed(broker, 'broker-install-failed');
+    installed.push('broker');
+    await waitFor(async () => (await cli(['broker', 'pairings']))?.ok, 'broker-not-ready', 'GeniusBar’s broker did not start');
+    const daemon = await bot(['daemon', 'install', '--json']);
+    if (!daemon?.label) throw failed(daemon, 'daemon-install-failed');
+    installed.push('daemon');
+    await waitFor(async () => (await bot(['daemon', 'status', '--json']))?.running, 'daemon-not-ready', 'GeniusBar’s identity daemon did not start');
+  } catch (error) {
+    if (installed.includes('daemon')) await bot(['daemon', 'disable', '--json']);
+    if (installed.includes('broker')) await cli(['broker', 'uninstall']);
+    const restored = [];
+    for (const which of ['broker', 'daemon']) {
+      if (stopped.includes(which) && await bootstrap(foreign[which].plist)) restored.push(which);
+    }
+    const back = restored.length === stopped.length ? 'the previous services were started again' : 'the previous services could not all be started again';
+    throw new SetupError(error.code ?? 'migrate-failed', `${error.message}; ${back}`);
+  }
+  const result = {};
+  for (const which of ['broker', 'daemon']) {
+    if (!found[which]) { result[which] = 'absent'; continue; }
+    rename(foreign[which].plist, `${foreign[which].plist}${MIGRATED}`);
+    result[which] = 'migrated';
+  }
+  return result;
+}
+
 async function main() {
   const [action, commsDir, botDir] = process.argv.slice(2);
   const write = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
-  if (!['refresh', 'remove'].includes(action) || !commsDir || !botDir) {
-    process.stderr.write('usage: services.mjs refresh|remove AGENT_COMMS_DIR AGENT_BOT_DIR\n');
+  if (!['refresh', 'remove', 'inspect', 'migrate'].includes(action) || !commsDir || !botDir) {
+    process.stderr.write('usage: services.mjs refresh|remove|inspect|migrate AGENT_COMMS_DIR AGENT_BOT_DIR\n');
     process.exit(2);
   }
   if (process.platform !== 'darwin') {
@@ -153,10 +254,23 @@ async function main() {
   });
   const version = process.env.GENIUSBAR_APP_VERSION || undefined;
   const ports = { units, read, cli: runner(commsEntry), bot: runner(botEntry), version, stamp, kickstart };
+  const foreign = Object.fromEntries(Object.entries(FOREIGN_LABELS)
+    .map(([which, label]) => [which, { label, plist: path.join(agents, `${label}.plist`) }]));
+  const launchctl = (args) => new Promise((resolve) => {
+    execFile('/bin/launchctl', args, { timeout: 15_000 }, (error) => resolve(error === null));
+  });
+  const migration = {
+    foreign,
+    bootout: (label) => launchctl(['bootout', `gui/${process.getuid()}/${label}`]),
+    bootstrap: (plist) => launchctl(['bootstrap', `gui/${process.getuid()}`, plist]),
+    rename: renameSync,
+  };
   try {
     const result = action === 'refresh'
       ? await refreshServices({ ...ports, node: process.execPath, commsEntry })
-      : await removeServices(ports);
+      : action === 'inspect' ? inspectServices({ foreign, read })
+        : action === 'migrate' ? await migrateServices({ ...ports, ...migration })
+          : await removeServices(ports);
     write({ ok: true, ...result });
   } catch (error) {
     write({ ok: false, code: error.code ?? 'services-failed', message: String(error.message ?? error) });

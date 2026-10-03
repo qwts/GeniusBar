@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { FirstLaunch, type DevTools, type HarnessAuth, type Starter } from './components/FirstLaunch';
 import { HealthHeader } from './components/HealthHeader';
 import { LaunchForm } from './components/LaunchForm';
+import { CliTools, type CliToolsApi } from './components/CliTools';
 import { RemoveServices } from './components/RemoveServices';
 import { SetupPanel } from './components/SetupPanel';
 import { SoulDetail } from './components/SoulDetail';
@@ -9,7 +10,7 @@ import { SoulRow } from './components/SoulRow';
 import { UpdateNotice } from './components/UpdateNotice';
 import { conversationOf, emptyComposer, unreadOf } from './model/chat';
 import { allSouls, buildSoulForest, findSoul, soulKey, type CensusRow } from './model/census';
-import { needsSetup, type SetupState } from './model/setup';
+import { needsSetup, type ExistingServices, type SetupState } from './model/setup';
 import { disconnected, emptyRosterText, footerStatus, type ConnectionSnapshot } from './model/status';
 import { updateNotice } from './model/updates';
 import type { ChatApi } from './useChat';
@@ -25,7 +26,11 @@ interface AppProps {
   isStatic?: boolean;
   /** First-run setup; offered only when given and the connection needs it. */
   setup?: SetupState;
-  onSetup?: () => void;
+  onSetup?: (migrate?: boolean) => void;
+  /** Another install's broker and daemon, which setup offers to move over (#41). */
+  existingServices?: ExistingServices | null;
+  /** Installs agent-bot and agent-comms on PATH (#41). */
+  cliTools?: CliToolsApi;
   /** Chat with souls (#17); without it the detail has no conversation. */
   chat?: ChatApi;
   /** Launching souls and packages (#18); without it there is no Launch. */
@@ -61,7 +66,7 @@ const NO_CENSUS: readonly CensusRow[] = [];
 
 // The popup's root: health header, the census nested under parents, and
 // the read-only detail for a selected soul.
-export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, setup, onSetup, chat, launcher, openedPackage, onRemoveServices, starter, harnessAuth, devTools, updates }: AppProps) {
+export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, setup, onSetup, chat, launcher, openedPackage, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools }: AppProps) {
   const forest = useMemo(() => buildSoulForest(census), [census]);
   const roster = useMemo(() => allSouls(forest), [forest]);
   // Selection holds the roster key and resolves against each census, so
@@ -122,7 +127,7 @@ export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, 
       )}
       {/* The setup panel replaces the roster, which has nothing true to say yet. */}
       {showSetup && setup && onSetup ? (
-        <SetupPanel setup={setup} onSetup={onSetup} />
+        <SetupPanel setup={setup} onSetup={onSetup} existing={existingServices} />
       ) : (
         <section className="roster" aria-label="Souls">
           {forest.length === 0
@@ -171,7 +176,7 @@ export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, 
           </div>
         </section>
       )}
-      {(footer || onRefresh || onRemoveServices || (launch && !showSetup) || canCheckUpdates) && (
+      {(footer || onRefresh || onRemoveServices || cliTools || (launch && !showSetup) || canCheckUpdates) && (
         <footer className="status">
           {footer && <span className={footer.isError ? 'error small' : 'muted small'}>{footer.text}</span>}
           {canCheckUpdates && (
@@ -184,6 +189,7 @@ export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, 
               Launch package…
             </button>
           )}
+          {cliTools && <CliTools api={cliTools} />}
           {onRemoveServices && !setup?.running && <RemoveServices onRemove={onRemoveServices} />}
           {onRefresh && (
             <button type="button" className="link" onClick={onRefresh}>

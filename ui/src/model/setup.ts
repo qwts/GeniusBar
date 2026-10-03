@@ -18,6 +18,29 @@ export const SETUP_STEPS: readonly { step: SetupStep; label: string }[] = [
   { step: 'daemon', label: 'Start your agents' },
 ];
 
+/** One service from another install, as `inspect_services` reports it. */
+export interface ExistingService {
+  label: string;
+  program: string[];
+  version: string | null;
+  homebrew: boolean;
+}
+export interface ExistingServices {
+  broker: ExistingService | null;
+  daemon: ExistingService | null;
+}
+
+/** A short description of another install's services, or null when there are none. */
+export function describeExisting(existing: ExistingServices | null | undefined): string | null {
+  if (!existing || (!existing.broker && !existing.daemon)) return null;
+  const from = existing.broker?.homebrew || existing.daemon?.homebrew ? ' from Homebrew' : '';
+  const parts = [
+    existing.broker && `agent-comms${existing.broker.version ? ` ${existing.broker.version}` : ''}`,
+    existing.daemon && `agent-bot${existing.daemon.version ? ` ${existing.daemon.version}` : ''}`,
+  ].filter(Boolean);
+  return `${parts.join(' and ')}${from}`;
+}
+
 export const idleSetup: SetupState = {
   running: false,
   steps: { broker: 'pending', account: 'pending', principal: 'pending', daemon: 'pending' },
