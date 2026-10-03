@@ -1073,7 +1073,7 @@ dependencies = [
 
 [[package]]
 name = "geniusbar"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "block2",
  "objc2",
