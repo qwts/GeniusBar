@@ -32,6 +32,8 @@ interface AppProps {
   onRefresh?: () => void;
   /** Static renders (snapshots, probes): Dudles stay still, eyes open. */
   isStatic?: boolean;
+  /** Opens this soul's detail (a roster key), for `--snapshot-detail`. */
+  select?: string | null;
   /** First-run setup; offered only when given and the connection needs it. */
   setup?: SetupState;
   onSetup?: (migrate?: boolean) => void;
@@ -90,7 +92,7 @@ function LanguageSelect() {
 
 // The GeniusBar menu (the tray popup's content, and the toolbar popover in
 // window mode) and, from it, one companion's session.
-function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, setup, onSetup, chat, launcher, openedPackage, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools }: AppProps) {
+function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools }: AppProps) {
   const { t } = useI18n();
   const forest = useMemo(() => buildSoulForest(census), [census]);
   const roster = useMemo(() => allSouls(forest), [forest]);
@@ -98,6 +100,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   // the session shows fresh values and closes if the soul disappears.
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const selected = selectedKey === null ? null : findSoul(forest, selectedKey);
+  useEffect(() => { if (select !== null) setSelectedKey(select); }, [select]);
   const paused = usePageHidden() || isStatic;
   // The open conversation is marked read, now and as messages arrive.
   const openKey = selected ? soulKey(selected) : null;

@@ -62,6 +62,11 @@ describe('App', () => {
     expect(session.isConnected).toBe(false);
   });
 
+  it('opens the detail it is told to select, for --snapshot-detail', () => {
+    render(<App census={sampleCensus} connection={sampleConnection} isStatic select="user/agent_c" />);
+    expect(screen.getByRole('region', { name: 'agent_c, agent_c' })).toBeTruthy();
+  });
+
   it('keeps the last census on screen while the broker is unreachable', () => {
     const lastRefresh = new Date(2026, 0, 1, 12, 0, 1);
     const onRefresh = vi.fn();

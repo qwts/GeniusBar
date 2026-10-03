@@ -5,10 +5,12 @@ import { createRoot } from 'react-dom/client';
 import { App, type AppMode } from './App';
 import type { CliToolsApi } from './components/CliTools';
 import type { DevTools, HarnessAuth, Starter } from './components/FirstLaunch';
+import { inApp } from './bridge';
 import { useCensus } from './useCensus';
 import { useChat } from './useChat';
 import { useLaunch } from './useLaunch';
 import { useSetup } from './useSetup';
+import { useSnapshot, type SnapshotOptions } from './useSnapshot';
 import { useUpdates } from './useUpdates';
 import '@fontsource/ibm-plex-sans/latin-400.css';
 import '@fontsource/ibm-plex-sans/latin-500.css';
@@ -16,11 +18,14 @@ import '@fontsource/ibm-plex-sans/latin-600.css';
 import '@fontsource/jetbrains-mono/latin-400.css';
 import './styles.css';
 
-// The live app: census and connection come from the bridge.
-function Live() {
+// The live app: census and connection come from the bridge. A snapshot
+// renders the same popup statically and changes nothing: no inbox polling
+// or acks, and no Finder-opened packages taken from the queue.
+function Live({ snapshot }: { snapshot: SnapshotOptions | null }) {
   const { census, connection, refresh } = useCensus();
+  const select = useSnapshot(snapshot, census, connection, refresh);
   const { setup, existing, runSetup } = useSetup(() => { void refresh?.(); });
-  const chat = useChat();
+  const chat = useChat({ enabled: inApp() && !snapshot });
   const launcher = useLaunch();
   const updates = useUpdates();
   const [openedPackage, setOpenedPackage] = useState<{ id: number; path: string; checking: boolean; error: string | null }>();
@@ -43,6 +48,7 @@ function Live() {
     }
   }, []);
   useEffect(() => {
+    if (snapshot) return;
     let active = true;
     let unlisten: (() => void) | undefined;
     void listen('soul-package-opened', () => { void loadOpenedPackages(); }).then((stop) => {
@@ -53,7 +59,7 @@ function Live() {
       }
     });
     return () => { active = false; unlisten?.(); };
-  }, [loadOpenedPackages]);
+  }, [loadOpenedPackages, snapshot]);
   // Without the starter soul the empty roster just says so.
   const [starter, setStarter] = useState<Starter>();
   const harnessAuth: HarnessAuth = (action, harness, soul) => invoke('harness_auth', { action, harness, soul });
@@ -69,15 +75,17 @@ function Live() {
   const [mode, setMode] = useState<AppMode>('tray');
   useEffect(() => { invoke<AppMode>('app_mode').then(setMode, () => {}); }, []);
   return (
-    <App mode={mode} census={census} connection={connection} onRefresh={refresh} setup={setup}
-      onSetup={(migrate) => { void runSetup(migrate); }} existingServices={existing} cliTools={cliTools} chat={chat} launcher={launcher} starter={starter} harnessAuth={harnessAuth}
+    <App mode={mode} census={census} connection={connection} onRefresh={refresh} setup={setup} isStatic={Boolean(snapshot)} select={select}
+      onSetup={(migrate) => { void runSetup(migrate); }} existingServices={existing} cliTools={cliTools} chat={snapshot ? undefined : chat} launcher={launcher} starter={starter} harnessAuth={harnessAuth}
       devTools={devTools} openedPackage={openedPackage} updates={updates}
       onRemoveServices={async () => { await invoke('remove_services'); void refresh?.(); }} />
   );
 }
 
+// The shell says before the first render whether this is a snapshot.
+const snapshot = inApp() ? await invoke<SnapshotOptions | null>('snapshot_options').catch(() => null) : null;
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <Live />
+    <Live snapshot={snapshot} />
   </StrictMode>,
 );
