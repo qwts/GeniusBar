@@ -651,7 +651,7 @@ mod tests {
             ))
         );
         assert_eq!(
-            parse_soul_comms(b"{\"agentId\":\"agent_1\"}\n", b""),
+            parse_soul_comms(b"{\"agentId\":\"agent_1\",\"comms\":true}\n", b""),
             Err(BridgeError::new(
                 "soul-comms-failed",
                 "agent-bot gave no comms state"
@@ -780,7 +780,9 @@ fn parse_soul_comms(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> 
     };
     if let Ok(value) = serde_json::from_str::<Value>(&last(stdout)) {
         if value.get("agentId").and_then(Value::as_str).is_some()
-            && value.get("comms").and_then(Value::as_bool).is_some()
+            && ["managed", "comms", "running"]
+                .iter()
+                .all(|field| value.get(*field).and_then(Value::as_bool).is_some())
         {
             return Ok(value);
         }

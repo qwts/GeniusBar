@@ -82,6 +82,43 @@ describe('CompanionDetails', () => {
       expect(field('Agent comms')).toMatch(/^Off/);
     });
 
+    it('a change for one soul never lands on another soul shown since', async () => {
+      vi.mocked(soulComms).mockImplementation(async (agentId: string) => ({ ...stopped, agentId, comms: agentId === child.agentId }));
+      let finish: (value: typeof stopped) => void = () => {};
+      vi.mocked(setSoulComms).mockImplementationOnce(() => new Promise((done) => { finish = done; }));
+      const { rerender } = render(<CompanionDetails soul={child} />);
+      fireEvent.click(await screen.findByRole('switch', { name: /Agent comms for/ }));
+      rerender(<CompanionDetails soul={luna} />);
+      await waitFor(() => expect(field('Agent comms')).toBe('Off'));
+      finish({ ...stopped, comms: true });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(field('Agent comms')).toBe('Off');
+      expect(screen.queryByText('Waiting for your approval…')).toBeNull();
+    });
+
+    it('a refresh during a change does not replace its result', async () => {
+      vi.mocked(soulComms).mockResolvedValue(stopped);
+      let finish: (value: typeof stopped) => void = () => {};
+      vi.mocked(setSoulComms).mockImplementationOnce(() => new Promise((done) => { finish = done; }));
+      const { rerender } = render(<CompanionDetails soul={child} metricsRefresh={0} />);
+      fireEvent.click(await screen.findByRole('switch', { name: /Agent comms for/ }));
+      rerender(<CompanionDetails soul={child} metricsRefresh={1} />);
+      expect(soulComms).toHaveBeenCalledOnce();
+      finish({ ...stopped, comms: false });
+      await waitFor(() => expect(field('Agent comms')).toBe('Off'));
+    });
+
+    it('relaunching keeps the soul setting: no switch until it is known, then it follows it', async () => {
+      const { LaunchForm } = await import('./LaunchForm');
+      const launcher = { state: { phase: 'idle' as const }, launch: vi.fn(async () => {}), reset: vi.fn() };
+      const { rerender } = render(<LaunchForm launcher={launcher} accounts={['user']} harnesses={[]} soul={child} />);
+      expect(screen.queryByRole('switch')).toBeNull();
+      rerender(<LaunchForm launcher={launcher} accounts={['user']} harnesses={[]} soul={child} initialComms={false} />);
+      expect((screen.getByRole('switch', { name: 'Agent comms' }) as HTMLInputElement).checked).toBe(false);
+      fireEvent.submit(screen.getByRole('form'));
+      expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ comms: false }));
+    });
+
     it('adds no rows when agent-bot cannot say', async () => {
       render(<CompanionDetails soul={child} />);
       await waitFor(() => expect(soulComms).toHaveBeenCalledOnce());
