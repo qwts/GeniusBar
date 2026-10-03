@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { emptyComposer, mergeIncoming, emptyChat } from './model/chat';
+import type { CensusRow } from './model/census';
 import { inboxMessage, sampleCensus, sampleConnection } from './model/fixtures';
 import { idleSetup } from './model/setup';
 import { disconnected } from './model/status';
@@ -10,6 +11,22 @@ import type { ChatApi } from './useChat';
 import type { LaunchApi } from './useLaunch';
 
 afterEach(() => { cleanup(); globalThis.localStorage?.clear(); layoutActions.forget(); });
+
+// luna's team with a subagent of its own, so a hidden lead can leave
+// several descendants behind it.
+const nestedCensus: readonly CensusRow[] = [
+  ...sampleCensus.filter((soul) => soul.agentId !== 'agent_gone'),
+  {
+    account: 'user',
+    agentId: 'agent_k',
+    name: 'kiro',
+    harness: 'claude',
+    parent: 'agent_c',
+    presence: 'joined',
+    unacked: 0,
+    lastWake: null,
+  },
+];
 
 describe('App', () => {
   it('shows the header and an empty roster before the bridge connects', () => {
@@ -286,6 +303,43 @@ describe('App window mode', () => {
     expect(within(desktop()).getByRole('button', { name: /^agent_c,/ })).toBeTruthy();
   });
 
+  it('replaces a hidden team lead with a neutral placeholder, keeping its subagents reachable', () => {
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'GeniusBar menu' }));
+    const menu = screen.getByRole('dialog', { name: 'GeniusBar menu' });
+    fireEvent.click(within(menu).getByRole('button', { name: 'Hide from desktop: luna' }));
+    // The hidden lead leaves nothing behind: no avatar, no name, no harness,
+    // and no longer the card's accessible name either.
+    const card = within(desktop()).getByRole('region', { name: 'Team' });
+    expect(card.textContent).not.toMatch(/luna|codex/i);
+    expect(within(card).queryByRole('button', { name: /^luna,/ })).toBeNull();
+    expect(within(desktop()).queryByRole('region', { name: 'luna' })).toBeNull();
+    // Only what reaches the visible subagent is left, and it still opens.
+    expect(card.textContent).toContain('1 subagent');
+    fireEvent.click(within(card).getByRole('button', { name: /^agent_c,/ }));
+    expect(screen.getByRole('dialog', { name: 'agent_c' })).toBeTruthy();
+    // Collapsing the card still folds its subagent away.
+    fireEvent.click(within(card).getByRole('button', { name: 'Collapse team' }));
+    expect(within(card).queryByRole('button', { name: /^agent_c,/ })).toBeNull();
+  });
+
+  it('counts the subagents hidden under a hidden lead, and drops the card once all are hidden', () => {
+    render(<App mode="window" census={nestedCensus} connection={sampleConnection} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'GeniusBar menu' }));
+    const menu = screen.getByRole('dialog', { name: 'GeniusBar menu' });
+    fireEvent.click(within(menu).getByRole('button', { name: 'Hide from desktop: luna' }));
+    fireEvent.click(within(menu).getByRole('button', { name: 'Hide from desktop: agent_c' }));
+    const card = within(desktop()).getByRole('region', { name: 'Team' });
+    expect(card.textContent).toContain('2 subagents · 1 hidden');
+    expect(within(card).queryByRole('button', { name: /^agent_c,/ })).toBeNull();
+    expect(within(card).getByRole('button', { name: /^kiro,/ })).toBeTruthy();
+    fireEvent.click(within(menu).getByRole('button', { name: 'Hide from desktop: kiro' }));
+    expect(within(desktop()).queryByRole('region', { name: 'Team' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'luna' })).toBeNull();
+    fireEvent.click(within(menu).getByRole('button', { name: 'Show all hidden (3)' }));
+    expect(within(desktop()).getByRole('region', { name: 'luna' })).toBeTruthy();
+  });
+
   it('opens the menu on its own while setup is needed', () => {
     const unpaired = { ...disconnected, bridgeConnected: true, unpaired: true };
     render(<App mode="window" connection={unpaired} setup={idleSetup} onSetup={() => {}} />);
@@ -305,5 +359,16 @@ describe('App language', () => {
     cleanup();
     render(<App census={sampleCensus} connection={sampleConnection} isStatic />);
     expect(screen.getByRole('combobox', { name: 'Idioma' })).toHaveProperty('value', 'es');
+  });
+
+  it('localizes the placeholder a hidden team lead leaves behind', () => {
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'GeniusBar menu' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Language' }), { target: { value: 'es' } });
+    const menu = screen.getByRole('dialog', { name: 'Menú de GeniusBar' });
+    fireEvent.click(within(menu).getByRole('button', { name: 'Ocultar del escritorio: luna' }));
+    const card = within(screen.getByRole('main', { name: 'Flota' })).getByRole('region', { name: 'Equipo' });
+    expect(card.textContent).toContain('1 subagente');
+    expect(card.textContent).not.toMatch(/luna|codex/i);
   });
 });

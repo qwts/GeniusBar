@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react';
-import { ChevronDown, EyeOff, X } from 'lucide-react';
+import { ChevronDown, EyeOff, Users, X } from 'lucide-react';
 import { displayHarness, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
 import { companionLabel, teamsOf, type Team } from '../model/fleet';
 import { useI18n } from '../lib/i18n';
@@ -84,6 +84,12 @@ interface ClusterProps {
   onOpen: (soul: CensusRow) => void;
 }
 
+/**
+ * One team's card. A hidden lead shows nothing of itself — no avatar, name
+ * or harness — just a neutral placeholder with the subagent and hidden
+ * counts, so hiding a team root hides it even when the team has visible
+ * subagents to reach. Only the controls those subagents need stay.
+ */
 function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unreadOf, selectedKey, onOpen }: ClusterProps) {
   const { t } = useI18n();
   const key = soulKey(team.lead);
@@ -91,6 +97,11 @@ function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unread
   const [live, setLive] = useState<{ x: number; y: number } | null>(null);
   const at = live ?? pos;
   const count = team.members.length;
+  const hiddenCount = count - visible.length;
+  const subagents = count > 0 ? (count === 1 ? t('team.countOne') : t('team.countMany', { count })) : null;
+  const hidden = hiddenCount > 0
+    ? (hiddenCount === 1 ? t('team.hiddenOne') : t('team.hiddenMany', { count: hiddenCount }))
+    : null;
 
   const onDown = (e: PointerEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest('button')) return;
@@ -109,22 +120,36 @@ function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unread
 
   return (
     <section
-      aria-label={displayName(team.lead)}
+      aria-label={leadHidden ? t('team.placeholder') : displayName(team.lead)}
       style={{ left: at.x, top: at.y, width: CARD_W }}
       className={`absolute rounded-xl border border-border bg-card/80 shadow-lg backdrop-blur-md ${live ? 'z-20' : ''}`}
     >
       <div onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
         className={`flex touch-none items-center gap-2 p-2 ${live ? 'cursor-grabbing' : 'cursor-grab'}`}>
-        {leadHidden ? <span className="size-12" /> : (
-          <CompanionButton soul={team.lead} size={40} paused={paused} unread={unreadOf?.(team.lead) ?? 0}
-            selected={selectedKey === key} onOpen={onOpen} bare />
+        {leadHidden ? (
+          <>
+            <span className="grid size-10 shrink-0 place-items-center rounded-lg border border-dashed border-border text-muted-foreground" aria-hidden>
+              <Users className="size-5" />
+            </span>
+            <div className="min-w-0 flex-1 select-none">
+              <p className="m-0 truncate text-sm font-semibold">{t('team.placeholder')}</p>
+              <p className="m-0 truncate font-mono text-[10px] text-muted-foreground">
+                {[subagents, hidden].filter((part): part is string => part !== null).join(' · ')}
+              </p>
+            </div>
+          </>
+        ) : (
+          <>
+            <CompanionButton soul={team.lead} size={40} paused={paused} unread={unreadOf?.(team.lead) ?? 0}
+              selected={selectedKey === key} onOpen={onOpen} bare />
+            <div className="min-w-0 flex-1 select-none">
+              <p className="m-0 truncate text-sm font-semibold">{displayName(team.lead)}</p>
+              <p className="m-0 truncate font-mono text-[10px] text-muted-foreground">
+                {displayHarness(team.lead)}{subagents && <> · {subagents}</>}
+              </p>
+            </div>
+          </>
         )}
-        <div className="min-w-0 flex-1 select-none">
-          <p className="m-0 truncate text-sm font-semibold">{displayName(team.lead)}</p>
-          <p className="m-0 truncate font-mono text-[10px] text-muted-foreground">
-            {displayHarness(team.lead)}{count > 0 && <> · {count === 1 ? t('team.countOne') : t('team.countMany', { count })}</>}
-          </p>
-        </div>
         {count > 0 && (
           <button
             type="button"
