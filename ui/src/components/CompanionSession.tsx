@@ -32,6 +32,8 @@ export interface LaunchProps {
   launcher: LaunchApi;
   accounts: readonly string[];
   harnesses: readonly string[];
+  /** The viewer's default harness for new launches. */
+  defaultHarness?: string | null;
 }
 
 type Tab = 'chat' | 'tree' | 'details';

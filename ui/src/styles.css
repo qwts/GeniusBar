@@ -136,6 +136,7 @@
   .launch label, .first-launch label { display: grid; grid-template-columns: 64px 1fr; gap: 8px; align-items: center; }
   .launch label > span, .first-launch label > span { color: var(--muted-foreground); font-size: 12px; }
   .launch input[readonly] { border-color: transparent; background: transparent; padding-left: 0; }
+  .launch .launch-step { margin: 4px 0 0; font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted-foreground); }
 
   /* Form controls and plain buttons get the design's look by default. */
   .gb input:not([type]), .gb input[type="text"], .gb input[type="search"], .gb textarea, .gb select {

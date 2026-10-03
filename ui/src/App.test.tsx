@@ -7,10 +7,11 @@ import { inboxMessage, sampleCensus, sampleConnection } from './model/fixtures';
 import { idleSetup } from './model/setup';
 import { disconnected } from './model/status';
 import { LAYOUT_KEY, layoutActions } from './state/layout';
+import { preferenceActions } from './state/preferences';
 import type { ChatApi } from './useChat';
 import type { LaunchApi } from './useLaunch';
 
-afterEach(() => { cleanup(); globalThis.localStorage?.clear(); layoutActions.forget(); });
+afterEach(() => { cleanup(); globalThis.localStorage?.clear(); layoutActions.forget(); preferenceActions.forget(); });
 
 // luna's team with a subagent of its own, so a hidden lead can leave
 // several descendants behind it.
@@ -126,6 +127,23 @@ describe('App setup', () => {
     expect((screen.getByLabelText('Harness') as HTMLInputElement).value).toBe('codex');
     fireEvent.submit(form);
     expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { soul: 'agent_p' }, harness: 'codex', name: '' });
+  });
+
+  it('prefills the default harness, and still launches any harness typed in', () => {
+    preferenceActions.setDefaultHarness('opencode');
+    const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'Launch package…' }));
+    const harness = screen.getByLabelText('Harness') as HTMLInputElement;
+    expect(harness.value).toBe('opencode');
+    // The list only suggests: a harness that is in neither the census nor the known list still launches.
+    const suggested = [...document.getElementById(harness.getAttribute('list')!)!.querySelectorAll('option')].map((o) => o.value);
+    expect(suggested).toEqual(expect.arrayContaining(['claude', 'opencode', 'muse', 'codex']));
+    expect(suggested).not.toContain('my-own-harness');
+    fireEvent.change(screen.getByLabelText('Package'), { target: { value: '/souls/helper' } });
+    fireEvent.change(harness, { target: { value: 'my-own-harness' } });
+    fireEvent.submit(screen.getByRole('form', { name: 'Launch a companion package' }));
+    expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { package: '/souls/helper' }, harness: 'my-own-harness', name: '' });
   });
 
   it('launches a package from the footer, and shows a refusal inline', () => {
@@ -366,6 +384,19 @@ describe('App window mode', () => {
     expect(within(desktop()).queryByRole('region', { name: 'Team' })).toBeNull();
     expect(screen.queryByRole('region', { name: 'luna' })).toBeNull();
     fireEvent.click(within(menu).getByRole('button', { name: 'Show all hidden (3)' }));
+    expect(within(desktop()).getByRole('region', { name: 'luna' })).toBeTruthy();
+  });
+
+  it('hides and shows a whole team from the menu, beside the lead-only eye', () => {
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'GeniusBar menu' }));
+    const menu = screen.getByRole('dialog', { name: 'GeniusBar menu' });
+    expect(within(menu).getByRole('button', { name: 'Hide from desktop: luna' })).toBeTruthy();
+    fireEvent.click(within(menu).getByRole('button', { name: 'Hide team from desktop: luna' }));
+    expect(within(desktop()).queryByRole('region', { name: 'Team' })).toBeNull();
+    expect(within(desktop()).queryByRole('region', { name: 'luna' })).toBeNull();
+    expect(JSON.parse(localStorage.getItem(LAYOUT_KEY)!).hidden).toEqual(['user/agent_p', 'user/agent_c']);
+    fireEvent.click(within(menu).getByRole('button', { name: 'Show team on desktop: luna' }));
     expect(within(desktop()).getByRole('region', { name: 'luna' })).toBeTruthy();
   });
 

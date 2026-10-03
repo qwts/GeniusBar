@@ -48,12 +48,30 @@ describe('FleetList', () => {
     const { rerender } = render(<FleetList forest={forest} paused onOpen={() => {}} unreadOf={(s) => (s === luna ? 2 : 0)} />);
     expect(screen.getByRole('button', { name: /^luna,.*2 unread messages/ }).textContent).toContain('2 new');
     expect(screen.queryByRole('button', { name: /^Hide from desktop/ })).toBeNull();
-    rerender(<FleetList forest={forest} paused onOpen={() => {}} hiding={{ hidden: ['user/agent_c'], onToggle, onShowAll: () => {} }} />);
+    rerender(<FleetList forest={forest} paused onOpen={() => {}} hiding={{ hidden: ['user/agent_c'], onToggle, onToggleTeam: () => {}, onShowAll: () => {} }} />);
     const show = screen.getByRole('button', { name: 'Show on desktop: agent_c' });
     expect(show.getAttribute('aria-pressed')).toBe('false');
     fireEvent.click(show);
     expect(onToggle).toHaveBeenCalledWith('user/agent_c', false);
     expect(screen.getByRole('button', { name: 'Show all hidden (1)' })).toBeTruthy();
+  });
+
+  it('hides a whole team from its lead, and single companions from their own rows', () => {
+    const onToggle = vi.fn();
+    const onToggleTeam = vi.fn();
+    render(<FleetList forest={forest} paused onOpen={() => {}} hiding={{ hidden: [], onToggle, onToggleTeam, onShowAll: () => {} }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Hide team from desktop: luna' }));
+    expect(onToggleTeam).toHaveBeenCalledWith(['user/agent_p', 'user/agent_c'], true);
+    // Searching narrows the rows, not the team that hiding acts on.
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'luna' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Hide team from desktop: luna' }));
+    expect(onToggleTeam).toHaveBeenLastCalledWith(['user/agent_p', 'user/agent_c'], true);
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Hide from desktop: agent_c' }));
+    expect(onToggle).toHaveBeenCalledWith('user/agent_c', true);
+    // The lead keeps its own eye for hiding just itself.
+    fireEvent.click(screen.getByRole('button', { name: 'Hide from desktop: luna' }));
+    expect(onToggle).toHaveBeenLastCalledWith('user/agent_p', true);
   });
 
   it('shows the empty text instead of a search for an empty fleet', () => {
