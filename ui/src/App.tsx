@@ -99,6 +99,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   // Selection holds the roster key and resolves against each census, so
   // the session shows fresh values and closes if the soul disappears.
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [metricsRefresh, setMetricsRefresh] = useState(0);
   const selected = selectedKey === null ? null : findSoul(forest, selectedKey);
   useEffect(() => { if (select !== null) setSelectedKey(select); }, [select]);
   const paused = usePageHidden() || isStatic;
@@ -155,6 +156,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
       forest={forest}
       roster={roster}
       paused={paused}
+      metricsRefresh={metricsRefresh}
       chat={chat && openKey !== null ? {
         entries: conversationOf(chat.chat, openKey).entries,
         composer: chat.composers[openKey] ?? emptyComposer,
@@ -219,7 +221,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
           )}
           {cliTools && <CliTools api={cliTools} />}
           {onRemoveServices && !setup?.running && <RemoveServices onRemove={onRemoveServices} />}
-          {onRefresh && <button type="button" className="link" onClick={onRefresh}>{t('refresh')}</button>}
+          {onRefresh && <button type="button" className="link" onClick={() => { setMetricsRefresh((value) => value + 1); onRefresh(); }}>{t('refresh')}</button>}
         </footer>
       )}
     </>
