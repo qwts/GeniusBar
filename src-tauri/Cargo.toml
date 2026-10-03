@@ -1,6 +1,6 @@
 [package]
 name = "geniusbar"
-version = "0.1.6"
+version = "0.1.7"
 description = "GeniusBar's Tauri shell: tray item, popup window, platform calls (ADR-0004)"
 edition = "2021"
 publish = false
