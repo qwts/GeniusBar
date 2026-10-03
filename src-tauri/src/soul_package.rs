@@ -86,4 +86,19 @@ mod tests {
         assert_eq!(pending.take(), paths);
         assert!(pending.take().is_empty());
     }
+
+    #[test]
+    fn declares_soul_folders_as_a_package_type() {
+        // A .soul is a directory. Finder shows it as one shareable item only
+        // when its exported type conforms to com.apple.package.
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let association = &conf["bundle"]["fileAssociations"][0];
+        assert_eq!(association["ext"][0], "soul");
+        let conforms = association["exportedType"]["conformsTo"]
+            .as_array()
+            .unwrap();
+        assert!(conforms.iter().any(|t| t == "com.apple.package"));
+        assert!(!conforms.iter().any(|t| t == "public.data"));
+    }
 }

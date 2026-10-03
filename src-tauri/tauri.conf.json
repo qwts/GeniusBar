@@ -62,7 +62,7 @@
         "rank": "Owner",
         "exportedType": {
           "identifier": "app.geniusbar.soul",
-          "conformsTo": ["public.data"]
+          "conformsTo": ["com.apple.package", "public.composite-content"]
         }
       }
     ]
