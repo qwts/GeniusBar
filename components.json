@@ -11,13 +11,13 @@
   "components": {
     "agent-comms": {
       "repo": "qwts/agent-comms",
-      "tag": "v0.3.6",
-      "ref": "5c70ff6f2d7b59e071beec2523c5fe58fb6125a0"
+      "tag": "v0.3.7",
+      "ref": "fa9f5d9eb3f8e321487253b329b8d0680b7969d7"
     },
     "agent-bot": {
       "repo": "qwts/agent-bot-identity",
-      "tag": "v0.10.9",
-      "ref": "74565ca929d8677827fd4e8c9de849f3dd281e1e"
+      "tag": "v0.10.10",
+      "ref": "d31a9e6acc810072c06bc9afe7b249b84ff95bd9"
     }
   }
 }
