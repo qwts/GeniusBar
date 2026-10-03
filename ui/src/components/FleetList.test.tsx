@@ -24,6 +24,17 @@ describe('FleetList', () => {
     expect(onOpen).toHaveBeenLastCalledWith(left);
   });
 
+  it('keeps left companions openable with their visible explanation, and hints that rows show details', () => {
+    const onOpen = vi.fn();
+    render(<FleetList forest={buildSoulForest([left])} paused onOpen={onOpen} />);
+    expect(screen.getByText(/no longer available/)).toBeTruthy();
+    const row = screen.getByRole('button', { name: /^old,/ });
+    expect(row.getAttribute('title')).toBe('Show details for old');
+    expect(row.getAttribute('aria-description')).toBe('Shows details.');
+    fireEvent.click(row);
+    expect(onOpen).toHaveBeenCalledWith(left);
+  });
+
   it('narrows the list as the owner searches', () => {
     render(<FleetList forest={forest} paused onOpen={() => {}} />);
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search companions…' }), { target: { value: 'agent_c' } });

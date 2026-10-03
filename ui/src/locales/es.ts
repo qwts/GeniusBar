@@ -53,6 +53,8 @@ export const es: Catalog = {
   send: 'Enviar',
   sending: 'Enviando…',
   sendHint: '⌘↩ para enviar',
+  showDetails: 'Mostrar detalles de {name}',
+  showsDetails: 'Muestra los detalles.',
   'tab.chat': 'Chat',
   'tab.tree': 'Delegación',
   'tab.details': 'Detalles',

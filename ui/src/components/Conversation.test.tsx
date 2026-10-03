@@ -39,6 +39,11 @@ describe('Conversation', () => {
     expect(onSend).toHaveBeenCalledTimes(2);
   });
 
+  it('says Sending… on the button while a message is on its way', () => {
+    render(<Conversation name="luna" entries={[]} composer={{ ...emptyComposer, draft: 'hi', sending: true }} onDraft={() => {}} onSend={() => {}} />);
+    expect(screen.getByRole('button', { name: 'Sending…' }).textContent).toBe('Sending…');
+  });
+
   it('shows errors inline under the composer and keeps the draft', () => {
     render(
       <Conversation
