@@ -88,7 +88,7 @@ export const en = {
   'launch.packagePlaceholder': 'Path in that account',
   'launch.name': 'Name',
   'launch.nameOptional': 'Optional',
-  'launch.harnessPick': 'Choose a harness',
+  'launch.harnessPick': 'Choose or type a harness',
   'launch.harnessHint': 'GeniusBar doesn’t run models itself — the harness does.',
   'launch.runsAs': 'Runs as {account}',
   'launch.runsAsNone': 'Choose the account it runs as.',

@@ -68,7 +68,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
   const ids = useId();
   const ready = canLaunch(launcher.state);
   const what = soul ? displayName(soul) : t('launch.aPackage');
-  const options = harnessOptions(harnesses, soul?.harness, harness);
+  const options = harnessOptions(harnesses, soul?.harness);
 
   useEffect(() => setPackageError(initialPackageError), [initialPackageError]);
 
@@ -89,6 +89,8 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
       }}
     >
       <datalist id={`${ids}-accounts`}>{accounts.map((a) => <option key={a} value={a} />)}</datalist>
+      {/* Free text, as before: any harness string can be launched; the list only suggests. */}
+      <datalist id={`${ids}-harnesses`}>{options.map((h) => <option key={h.id} value={h.id}>{h.label}</option>)}</datalist>
       <h3 className="launch-step">{t('launch.step.what')}</h3>
       {/* TODO(#65): offer SOP-provided soul templates here once agent-bot lists them. */}
       {soul ? (
@@ -109,10 +111,8 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
       <h3 className="launch-step">{t('launch.step.harness')}</h3>
       <label>
         <span>{t('field.harness')}</span>
-        <select value={harness} onChange={(e) => setHarness(e.target.value)}>
-          <option value="" disabled>{t('launch.harnessPick')}</option>
-          {options.map((h) => <option key={h.id} value={h.id}>{h.label}</option>)}
-        </select>
+        <input value={harness} list={`${ids}-harnesses`} placeholder={t('launch.harnessPick')}
+          onChange={(e) => setHarness(e.target.value)} />
       </label>
       <p className="muted small">{t('launch.harnessHint')}</p>
       <h3 className="launch-step">{t('launch.step.account')}</h3>

@@ -89,7 +89,7 @@ export const es: Catalog = {
   'launch.packagePlaceholder': 'Ruta en esa cuenta',
   'launch.name': 'Nombre',
   'launch.nameOptional': 'Opcional',
-  'launch.harnessPick': 'Elige un harness',
+  'launch.harnessPick': 'Elige o escribe un harness',
   'launch.harnessHint': 'GeniusBar no ejecuta modelos por sí mismo: lo hace el harness.',
   'launch.runsAs': 'Se ejecuta como {account}',
   'launch.runsAsNone': 'Elige la cuenta con la que se ejecuta.',

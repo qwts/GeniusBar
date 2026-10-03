@@ -58,6 +58,9 @@ describe('FleetList', () => {
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: 'Hide from desktop: agent_c' }));
     expect(onToggle).toHaveBeenCalledWith('user/agent_c', true);
+    // The lead keeps its own eye for hiding just itself.
+    fireEvent.click(screen.getByRole('button', { name: 'Hide from desktop: luna' }));
+    expect(onToggle).toHaveBeenLastCalledWith('user/agent_p', true);
   });
 
   it('shows the empty text instead of a search for an empty fleet', () => {

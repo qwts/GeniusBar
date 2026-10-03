@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Eye, EyeOff, Search } from 'lucide-react';
+import { Eye, EyeOff, Search, Users } from 'lucide-react';
 import { displayHarness, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
 import { deriveDudle } from '../model/dudle';
 import { companionLabel, searchTeams, teamKeys, teamsOf } from '../model/fleet';
@@ -44,7 +44,7 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty }: F
   const teamOf = useMemo(() => new Map(teams.filter((team) => team.members.length > 0)
     .map((team) => [soulKey(team.lead), teamKeys(team)])), [teams]);
 
-  // A lead with subagents hides and shows its whole team; anyone else, just themselves.
+  // Everyone keeps their own eye; a lead with subagents also gets one for the whole team.
   const row = (soul: CensusRow, depth: number, team: readonly string[] | null = null) => {
     const key = soulKey(soul);
     const unread = unreadOf?.(soul) ?? 0;
@@ -77,13 +77,27 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty }: F
           <button
             type="button"
             className="rounded p-1 text-muted-foreground hover:text-foreground"
-            aria-label={`${team ? (hidden ? t('bar.showTeam') : t('bar.hideTeam')) : (hidden ? t('bar.show') : t('bar.hide'))}: ${name}`}
+            aria-label={`${hidden ? t('bar.show') : t('bar.hide')}: ${name}`}
             aria-pressed={!hidden}
-            onClick={() => (team ? hiding.onToggleTeam(team, !hidden) : hiding.onToggle(key, !hidden))}
+            onClick={() => hiding.onToggle(key, !hidden)}
           >
             {hidden ? <EyeOff className="size-3.5" aria-hidden /> : <Eye className="size-3.5 opacity-40 group-hover:opacity-100" aria-hidden />}
           </button>
         )}
+        {hiding && team && (() => {
+          const teamHidden = team.every((k) => hiding.hidden.includes(k));
+          return (
+            <button
+              type="button"
+              className="rounded p-1 text-muted-foreground hover:text-foreground"
+              aria-label={`${teamHidden ? t('bar.showTeam') : t('bar.hideTeam')}: ${name}`}
+              aria-pressed={!teamHidden}
+              onClick={() => hiding.onToggleTeam(team, !teamHidden)}
+            >
+              <Users className={`size-3.5 ${teamHidden ? '' : 'opacity-40 group-hover:opacity-100'}`} aria-hidden />
+            </button>
+          );
+        })()}
       </li>
     );
   };
