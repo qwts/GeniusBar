@@ -18,6 +18,8 @@ interface LaunchFormProps {
   soul?: CensusRow;
   /** The viewer's default harness, used when the soul has none. */
   defaultHarness?: string | null;
+  /** The soul's current agent comms setting, when known; new launches default to on (#71). */
+  initialComms?: boolean;
 }
 
 export function LaunchStatus({ state }: { state: LaunchState }) {
@@ -56,13 +58,14 @@ export function LaunchStatus({ state }: { state: LaunchState }) {
  * One launch at a time; the result stays on screen and is never retried.
  */
 export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness = null, initialPackagePath = '',
-  checkingPackage = false, packageError: initialPackageError = null }: LaunchFormProps) {
+  checkingPackage = false, packageError: initialPackageError = null, initialComms = true }: LaunchFormProps) {
   const { t } = useI18n();
   const [account, setAccount] = useState(soul?.account ?? (accounts.length === 1 ? accounts[0] : ''));
   const [packagePath, setPackagePath] = useState(initialPackagePath);
   const [packageError, setPackageError] = useState(initialPackageError);
   const [harness, setHarness] = useState(soul?.harness ?? defaultHarness ?? '');
   const [name, setName] = useState('');
+  const [comms, setComms] = useState(initialComms);
   // The launcher is shared: show its result only in the form that started it.
   const [started, setStarted] = useState(false);
   const ids = useId();
@@ -85,6 +88,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
           target: soul ? { soul: soul.agentId } : { package: packagePath },
           harness,
           name,
+          comms,
         });
       }}
     >
@@ -108,6 +112,11 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
         <span>{t('launch.name')}</span>
         <input value={name} placeholder={t('launch.nameOptional')} onChange={(e) => setName(e.target.value)} />
       </label>
+      <label>
+        <span>{t('launch.comms')}</span>
+        <input type="checkbox" role="switch" className="justify-self-start" checked={comms} onChange={(e) => setComms(e.target.checked)} />
+      </label>
+      <p className="muted small">{t('launch.commsHint')}</p>
       <h3 className="launch-step">{t('launch.step.harness')}</h3>
       <label>
         <span>{t('field.harness')}</span>

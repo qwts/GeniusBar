@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { ArrowLeft } from 'lucide-react';
-import { runtimeMetrics, type RuntimeMetrics, type RuntimeObservation } from '../bridge';
+import { runtimeMetrics, setSoulComms, soulComms, type RuntimeMetrics, type RuntimeObservation, type SoulComms } from '../bridge';
 import {
   availabilityNote,
   displayHarness,
@@ -146,6 +146,26 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
     void runtimeMetrics().then((result) => { if (active) setMetrics(result); });
     return () => { active = false; };
   }, [soul.agentId, metricsRefresh]);
+  // Managed and agent-comms state (#71) comes from agent-bot, which also
+  // decides whether it may change; this only shows it and relays the toggle.
+  const [comms, setComms] = useState<SoulComms | null>(null);
+  const [commsSaving, setCommsSaving] = useState(false);
+  const [commsError, setCommsError] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    setComms(null);
+    setCommsError(null);
+    void soulComms(soul.agentId).then((result) => { if (active) setComms(result); });
+    return () => { active = false; };
+  }, [soul.agentId, metricsRefresh]);
+  const toggleComms = (on: boolean) => {
+    setCommsSaving(true);
+    setCommsError(null);
+    setSoulComms(soul.agentId, on)
+      .then((result) => setComms(result))
+      .catch((error: unknown) => setCommsError(error instanceof Error ? error.message : String(error)))
+      .finally(() => setCommsSaving(false));
+  };
   const snapshot = 'unavailable' in metrics ? null : metrics;
   const observations = snapshot?.souls[soul.agentId]?.observations ?? [];
   const errors = snapshot?.errors.filter((error) => error.agentId === soul.agentId) ?? [];
@@ -192,6 +212,22 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
   const context = observations.find((observation) => observation.metric === 'context_used_tokens');
   if (model) rows.push([t('field.model'), metricValue(model)]);
   if (context) rows.push([t('field.context'), metricValue(context)]);
+  if (comms) {
+    rows.push([t('field.managed'), comms.managed ? t('comms.managed') : t('comms.unmanaged')]);
+    rows.push([t('field.comms'), (
+      <>
+        <label className="inline-flex items-center gap-2">
+          <input type="checkbox" role="switch" checked={comms.comms} disabled={comms.running || commsSaving}
+            aria-label={t('comms.toggle', { name: displayName(soul) })}
+            onChange={(e) => toggleComms(e.target.checked)} />
+          <span>{comms.comms ? t('comms.on') : t('comms.off')}</span>
+        </label>
+        {comms.running && <span className="block text-[11px] text-muted-foreground">{t('comms.stopFirst')}</span>}
+        {commsSaving && <span className="block text-[11px] text-muted-foreground" role="status">{t('comms.saving')}</span>}
+        {commsError && <span className="error block text-[11px]" role="alert">{t('comms.failed', { message: commsError })}</span>}
+      </>
+    )]);
+  }
 
   return (
     <div className="grid gap-3 p-3">
@@ -208,7 +244,7 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
       {errors.map((error, index) => (
         <p key={index} className="m-0 text-[11px] text-muted-foreground">{t('metrics.collectorError', { source: error.source, message: error.message })}</p>
       ))}
-      {launch && launching && <LaunchForm {...launch} soul={soul} />}
+      {launch && launching && <LaunchForm {...launch} soul={soul} initialComms={comms?.comms} />}
       {launch && !launching && (
         <div className="detail-actions">
           <button type="button" onClick={() => setLaunching(true)}>{t('launch')}</button>

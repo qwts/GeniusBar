@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BridgeError, call, inApp, normalizeRuntimeMetrics } from './bridge';
+import { BridgeError, call, inApp, normalizeRuntimeMetrics, normalizeSoulComms, setSoulComms, soulComms } from './bridge';
 
 describe('bridge', () => {
   it('invokes the shell command with the method and params', async () => {
@@ -18,6 +18,35 @@ describe('bridge', () => {
 
   it('is not in the app under test', () => {
     expect(inApp()).toBe(false);
+  });
+});
+
+describe('soul comms (#71)', () => {
+  const state = { agentId: 'agent_1', name: 'bill', managed: true, comms: false, running: false };
+
+  it('reads agent-bot soul comms show, and is null when it cannot say', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); return state; }) as never;
+    await expect(soulComms('agent_1', fake)).resolves.toEqual({ agentId: 'agent_1', managed: true, comms: false, running: false });
+    expect(calls).toEqual([['soul_comms', { action: 'show', soul: 'agent_1' }]]);
+    const failing = (async () => { throw { code: 'soul-comms-failed', message: 'no record' }; }) as never;
+    await expect(soulComms('agent_1', failing)).resolves.toBeNull();
+    await expect(soulComms('agent_1')).resolves.toBeNull();
+  });
+
+  it('sets on or off and surfaces agent-bot refusals', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); return { ...state, comms: true }; }) as never;
+    await expect(setSoulComms('agent_1', true, fake)).resolves.toMatchObject({ comms: true });
+    expect(calls).toEqual([['soul_comms', { action: 'on', soul: 'agent_1' }]]);
+    const refused = (async () => { throw { code: 'soul-comms-failed', message: 'agent_1 is running' }; }) as never;
+    await expect(setSoulComms('agent_1', false, refused)).rejects.toMatchObject({ code: 'soul-comms-failed', message: 'agent_1 is running' });
+  });
+
+  it('drops malformed states', () => {
+    expect(normalizeSoulComms({ agentId: 'a' })).toBeNull();
+    expect(normalizeSoulComms(null)).toBeNull();
+    expect(normalizeSoulComms({ agentId: 'a', comms: true })).toEqual({ agentId: 'a', managed: false, comms: true, running: false });
   });
 });
 
