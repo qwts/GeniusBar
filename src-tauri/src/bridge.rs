@@ -315,20 +315,29 @@ async fn run_setup<R: Runtime>(app: &AppHandle<R>) -> Result<(), BridgeError> {
 /// The services script's one-line result: `{ok: true, ...}` or
 /// `{ok: false, code, message}`.
 fn parse_services_output(stdout: &[u8]) -> Result<Value, BridgeError> {
+    parse_script_output(
+        stdout,
+        "services-failed",
+        "the services script gave no result",
+    )
+}
+
+/// A one-shot script's last line: `{ok: true, ...}` or `{ok: false, code, message}`.
+fn parse_script_output(stdout: &[u8], fallback: &str, silent: &str) -> Result<Value, BridgeError> {
     let line = stdout
         .split(|b| *b == b'\n')
         .rev()
         .find(|line| !line.iter().all(u8::is_ascii_whitespace))
         .unwrap_or_default();
-    let value: Value = serde_json::from_slice(line)
-        .map_err(|_| BridgeError::new("services-failed", "the services script gave no result"))?;
+    let value: Value =
+        serde_json::from_slice(line).map_err(|_| BridgeError::new(fallback, silent))?;
     if value.get("ok").and_then(Value::as_bool) == Some(true) {
         return Ok(value);
     }
     let field = |name: &str| value.get(name).and_then(Value::as_str).unwrap_or("");
     let code = Some(field("code"))
         .filter(|c| !c.is_empty())
-        .unwrap_or("services-failed");
+        .unwrap_or(fallback);
     Err(BridgeError::new(code, field("message")))
 }
 
@@ -390,6 +399,95 @@ pub async fn remove_services<R: Runtime>(
     outcome
 }
 
+/// Another install's broker and daemon (Homebrew's), so setup can offer to
+/// move them over instead of running beside them (#41). Read-only.
+#[tauri::command]
+pub async fn inspect_services<R: Runtime>(app: AppHandle<R>) -> Result<Value, BridgeError> {
+    run_services(&app, "inspect").await
+}
+
+/// The owner's explicit "Move to GeniusBar" (#41): stops another install's
+/// broker and daemon and starts GeniusBar's in their place, or puts them
+/// back if that fails. Never alongside setup.
+#[tauri::command]
+pub async fn migrate_services<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, Bridge>,
+) -> Result<Value, BridgeError> {
+    if state.setting_up.swap(true, Ordering::SeqCst) {
+        return Err(BridgeError::new(
+            "setup-running",
+            "setup is already running",
+        ));
+    }
+    let outcome = run_services(&app, "migrate").await;
+    state.setting_up.store(false, Ordering::SeqCst);
+    outcome
+}
+
+/// The tools a command-line install may name with `replace`.
+const CLI_TOOLS: &[&str] = &["agent-bot", "agent-comms"];
+
+/// Runs `bridge/cli-tools.mjs ACTION` in the bundled Node (#41).
+async fn run_cli_tools<R: Runtime>(
+    app: &AppHandle<R>,
+    action: &str,
+    replace: &[String],
+) -> Result<Value, BridgeError> {
+    let unavailable = |e: String| BridgeError::new("tools-unavailable", &e);
+    let resources = app
+        .path()
+        .resource_dir()
+        .map_err(|e| unavailable(e.to_string()))?;
+    let mut args = vec![
+        resources
+            .join("bridge")
+            .join("cli-tools.mjs")
+            .into_os_string(),
+        action.into(),
+        tool_path(&resources).into_os_string(),
+    ];
+    for name in replace {
+        args.push("--replace".into());
+        args.push(name.into());
+    }
+    let output = app
+        .shell()
+        .sidecar("node")
+        .map_err(|e| unavailable(e.to_string()))?
+        .args(args)
+        .output()
+        .await
+        .map_err(|e| unavailable(e.to_string()))?;
+    parse_script_output(
+        &output.stdout,
+        "tools-failed",
+        "the tools script gave no result",
+    )
+}
+
+/// "Install command-line tools" (#41): `status`, `install` (with `replace`
+/// naming tools the user agreed to take over), or `uninstall`.
+#[tauri::command]
+pub async fn cli_tools<R: Runtime>(
+    app: AppHandle<R>,
+    action: String,
+    replace: Option<Vec<String>>,
+) -> Result<Value, BridgeError> {
+    let replace = replace.unwrap_or_default();
+    if !["status", "install", "uninstall"].contains(&action.as_str())
+        || replace
+            .iter()
+            .any(|name| !CLI_TOOLS.contains(&name.as_str()))
+    {
+        return Err(BridgeError::new(
+            "usage",
+            "unknown command-line tools action",
+        ));
+    }
+    run_cli_tools(&app, &action, &replace).await
+}
+
 /// At launch, re-registers GeniusBar's services if they still run an older
 /// or moved copy of the app (#9). Release builds only: a development build
 /// lives in `target/` and must not take over the installed app's services.
@@ -407,6 +505,13 @@ pub fn refresh_services<R: Runtime>(app: AppHandle<R>) {
             Err(error) => eprintln!("services: refresh failed: {} {}", error.code, error.message),
         }
         state.setting_up.store(false, Ordering::SeqCst);
+        // Command-line wrappers the user installed follow the app if it moved (#41).
+        if let Err(error) = run_cli_tools(&app, "refresh", &[]).await {
+            eprintln!(
+                "cli tools: refresh failed: {} {}",
+                error.code, error.message
+            );
+        }
     });
 }
 
@@ -502,6 +607,22 @@ mod tests {
                 "services-failed",
                 "the services script gave no result"
             ))
+        );
+    }
+
+    #[test]
+    fn parses_cli_tools_results_with_their_own_fallback() {
+        assert_eq!(
+            parse_script_output(
+                br#"{"ok":false,"code":"tools-conflict","message":"already on PATH"}"#,
+                "tools-failed",
+                "none"
+            ),
+            Err(BridgeError::new("tools-conflict", "already on PATH"))
+        );
+        assert_eq!(
+            parse_script_output(b"{\"ok\":false}\n", "tools-failed", "none"),
+            Err(BridgeError::new("tools-failed", ""))
         );
     }
 }
