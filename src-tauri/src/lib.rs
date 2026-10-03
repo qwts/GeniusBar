@@ -3,6 +3,7 @@
 //! reaches agent-comms through the Node bridge (#7).
 
 mod bridge;
+mod snapshot;
 mod soul_package;
 mod starter;
 mod updates;
@@ -20,19 +21,58 @@ use tauri::{
 use tauri_plugin_positioner::{Position, WindowExt};
 
 /// How the app presents itself, chosen from the command line as in R1.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Mode {
     /// The normal menubar/tray item with a popup.
     Tray,
     /// `--window`: the same UI in a regular titled window, for automation.
     Window,
+    /// `--snapshot PATH [--snapshot-detail AGENT_ID]`: the popup rendered
+    /// to a PNG with no window shown, then exit (#6).
+    Snapshot(snapshot::Request),
 }
 
+/// Reads the launch flags as R1's `parseLaunchOptions` did: a flag takes
+/// the next argument or `=value`, a flag missing its value is ignored,
+/// unknown arguments are ignored, and `--snapshot` wins over `--window`.
 pub fn parse_mode<I: IntoIterator<Item = S>, S: AsRef<str>>(args: I) -> Mode {
-    if args.into_iter().any(|arg| arg.as_ref() == "--window") {
-        Mode::Window
-    } else {
-        Mode::Tray
+    let args: Vec<S> = args.into_iter().collect();
+    let mut path = None;
+    let mut detail = None;
+    let mut window = false;
+    let mut index = 0;
+    while index < args.len() {
+        let arg = args[index].as_ref();
+        let next = args
+            .get(index + 1)
+            .map(AsRef::as_ref)
+            .filter(|next| !next.starts_with("--"));
+        index += 1;
+        if arg == "--window" {
+            window = true;
+        } else if let Some(value) = flag_value(arg, next, "--snapshot") {
+            index += usize::from(!arg.contains('='));
+            path = Some(value).filter(|v| !v.is_empty()).or(path);
+        } else if let Some(value) = flag_value(arg, next, "--snapshot-detail") {
+            index += usize::from(!arg.contains('='));
+            detail = Some(value).filter(|v| !v.is_empty()).or(detail);
+        }
+    }
+    match path {
+        Some(path) => Mode::Snapshot(snapshot::Request {
+            path: path.into(),
+            detail: detail.map(str::to_owned),
+        }),
+        None if window => Mode::Window,
+        None => Mode::Tray,
+    }
+}
+
+/// `FLAG VALUE` or `FLAG=VALUE`; None when `arg` is not `flag` or lacks a value.
+fn flag_value<'a>(arg: &'a str, next: Option<&'a str>, flag: &str) -> Option<&'a str> {
+    match arg.strip_prefix(flag)? {
+        "" => next,
+        rest => rest.strip_prefix('='),
     }
 }
 
@@ -136,9 +176,23 @@ fn install_tray(app: &mut App, window: &WebviewWindow) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Snapshot mode keeps the popup hidden: no Dock icon, no tray, nothing
+/// shown. It also starts no service refresh or update check, so it only
+/// reads.
+fn start_snapshot(app: &mut App, window: &WebviewWindow) {
+    #[cfg(target_os = "macos")]
+    app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    let _ = app;
+    snapshot::start(window.clone());
+}
+
 pub fn run() {
     let mode = parse_mode(std::env::args().skip(1));
     let tray_mode = mode == Mode::Tray;
+    let snapshot = match &mode {
+        Mode::Snapshot(request) => Some(request.clone()),
+        _ => None,
+    };
     tauri::Builder::default()
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_shell::init())
@@ -146,6 +200,7 @@ pub fn run() {
         .manage(soul_package::PendingSoulPackages::default())
         .manage(Dismissed::default())
         .manage(updates::Updates::default())
+        .manage(snapshot::Snapshot::new(snapshot))
         .invoke_handler(tauri::generate_handler![
             bridge::bridge,
             bridge::setup,
@@ -156,11 +211,15 @@ pub fn run() {
             starter::install_dev_tools,
             bridge::harness_auth,
             updates::update_status,
-            updates::update_action
+            updates::update_action,
+            snapshot::snapshot_options,
+            snapshot::snapshot_ready
         ])
         .setup(move |app| {
             bridge::start(app.handle().clone());
-            bridge::refresh_services(app.handle().clone());
+            if !matches!(mode, Mode::Snapshot(_)) {
+                bridge::refresh_services(app.handle().clone());
+            }
             updates::init(app.handle())?;
             let window = app
                 .get_webview_window("main")
@@ -168,6 +227,7 @@ pub fn run() {
             match mode {
                 Mode::Window => show_window_mode(app, &window)?,
                 Mode::Tray => install_tray(app, &window)?,
+                Mode::Snapshot(_) => start_snapshot(app, &window),
             }
             Ok(())
         })
@@ -222,5 +282,64 @@ mod tests {
     fn window_flag_selects_window_mode() {
         assert_eq!(parse_mode(["--window"]), Mode::Window);
         assert_eq!(parse_mode(["--x", "--window"]), Mode::Window);
+    }
+
+    fn snapshot(path: &str, detail: Option<&str>) -> Mode {
+        Mode::Snapshot(snapshot::Request {
+            path: path.into(),
+            detail: detail.map(str::to_owned),
+        })
+    }
+
+    #[test]
+    fn snapshot_flag_takes_a_path() {
+        assert_eq!(
+            parse_mode(["--snapshot", "/tmp/a.png"]),
+            snapshot("/tmp/a.png", None)
+        );
+        assert_eq!(
+            parse_mode(["--snapshot=/tmp/a.png"]),
+            snapshot("/tmp/a.png", None)
+        );
+        // Snapshot wins over --window, in either order.
+        assert_eq!(
+            parse_mode(["--window", "--snapshot", "a.png"]),
+            snapshot("a.png", None)
+        );
+        assert_eq!(
+            parse_mode(["--snapshot", "a.png", "--window"]),
+            snapshot("a.png", None)
+        );
+    }
+
+    #[test]
+    fn snapshot_detail_names_a_soul() {
+        assert_eq!(
+            parse_mode(["--snapshot", "a.png", "--snapshot-detail", "agent_1"]),
+            snapshot("a.png", Some("agent_1"))
+        );
+        assert_eq!(
+            parse_mode(["--snapshot-detail=agent_1", "--snapshot=a.png"]),
+            snapshot("a.png", Some("agent_1"))
+        );
+        // A detail without a snapshot is ignored.
+        assert_eq!(parse_mode(["--snapshot-detail", "agent_1"]), Mode::Tray);
+    }
+
+    #[test]
+    fn a_flag_missing_its_value_is_ignored() {
+        assert_eq!(parse_mode(["--snapshot"]), Mode::Tray);
+        assert_eq!(parse_mode(["--snapshot="]), Mode::Tray);
+        assert_eq!(parse_mode(["--snapshot", "--window"]), Mode::Window);
+        assert_eq!(
+            parse_mode(["--snapshot", "a.png", "--snapshot-detail", "--x"]),
+            snapshot("a.png", None)
+        );
+        assert_eq!(
+            parse_mode(["--snapshot", "a.png", "--snapshot-detail="]),
+            snapshot("a.png", None)
+        );
+        // Lookalike flags are not these flags.
+        assert_eq!(parse_mode(["--snapshots", "a.png"]), Mode::Tray);
     }
 }

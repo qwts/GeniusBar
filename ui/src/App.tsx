@@ -23,6 +23,8 @@ interface AppProps {
   onRefresh?: () => void;
   /** Static renders (snapshots, probes): Dudles stay still, eyes open. */
   isStatic?: boolean;
+  /** Opens this soul's detail (a roster key), for `--snapshot-detail`. */
+  select?: string | null;
   /** First-run setup; offered only when given and the connection needs it. */
   setup?: SetupState;
   onSetup?: () => void;
@@ -61,13 +63,14 @@ const NO_CENSUS: readonly CensusRow[] = [];
 
 // The popup's root: health header, the census nested under parents, and
 // the read-only detail for a selected soul.
-export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, setup, onSetup, chat, launcher, openedPackage, onRemoveServices, starter, harnessAuth, devTools, updates }: AppProps) {
+export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onRemoveServices, starter, harnessAuth, devTools, updates }: AppProps) {
   const forest = useMemo(() => buildSoulForest(census), [census]);
   const roster = useMemo(() => allSouls(forest), [forest]);
   // Selection holds the roster key and resolves against each census, so
   // the detail shows fresh values and closes if the soul disappears.
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const selected = selectedKey === null ? null : findSoul(forest, selectedKey);
+  useEffect(() => { if (select !== null) setSelectedKey(select); }, [select]);
   const paused = usePageHidden() || isStatic;
   // The open conversation is marked read, now and as messages arrive.
   const openKey = selected ? soulKey(selected) : null;

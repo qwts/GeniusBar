@@ -1075,6 +1075,11 @@ dependencies = [
 name = "geniusbar"
 version = "0.1.2"
 dependencies = [
+ "block2",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "objc2-web-kit",
  "serde",
  "serde_json",
  "tauri",

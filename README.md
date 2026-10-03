@@ -18,6 +18,7 @@ npm ci && npm --prefix ui ci
 node scripts/fetch-components.mjs   # pinned Node, agent-comms, agent-bot
 npm run tauri dev               # tray item with its popup
 npm run tauri dev -- -- --window   # the same UI in a regular window
+# --snapshot PATH renders the popup to a PNG; see "Testing the UI"
 npm --prefix ui test            # UI tests
 (cd src-tauri && cargo test)    # shell tests
 npm run build:unsigned          # unsigned GeniusBar.app
@@ -170,6 +171,40 @@ detail sheet exactly as in the menu.
 the same view to a PNG in a temp dir, asserting a nonzero file. The
 render test skips gracefully (and says so) when `ImageRenderer` cannot
 produce an image in the test environment.
+
+### Tauri app
+
+The Tauri app takes the same flags. Run the built binary directly so its
+stdout and exit code reach the caller:
+
+```sh
+APP=src-tauri/target/release/bundle/macos/GeniusBar.app/Contents/MacOS/geniusbar
+$APP --snapshot /tmp/geniusbar.png
+$APP --snapshot /tmp/geniusbar.png --snapshot-detail agent_abc123
+$APP --window
+```
+
+`--snapshot` (`--snapshot=PATH` also works) loads the popup hidden, with
+activation policy `.accessory`, so there is no Dock icon, tray item or
+visible window. The popup fetches the census through the Node bridge
+exactly as when shown (so custody and auth are exercised), retrying until
+the bridge answers. Once a census has settled it renders statically
+(Dudles paused, eyes open) and calls `snapshot_ready`. The shell then
+captures the web view with WebKit's `takeSnapshotWithConfiguration`,
+redraws it at scale 2 (768×1120 for the 384×560 popup), writes the PNG and
+prints `{"snapshot":"<path>","souls":N}`. Unlike R1, the PNG keeps the
+popup's own colour scheme. `--snapshot-detail` takes a bare agent ID or an
+`account/agentId` key and opens that soul's detail beneath the list. A
+snapshot only reads: it polls no inbox, acks nothing, takes no Finder-opened
+package, and starts no service refresh or update check. Failures work as in
+R1: an unpaired or unreachable census, an unknown detail ID, or an
+unwritable path still prints the JSON line, sends the error to stderr and
+exits 1, with the PNG showing what the popup shows wherever it can be
+written. If no census settles within 30 seconds, the shell captures
+whatever is on screen and exits 1.
+
+`cargo test` covers the flag parsing (`parse_mode`), and the UI tests cover
+the readiness report (`useSnapshot`).
 
 ## Layout
 
