@@ -195,6 +195,23 @@ jobs:
           # V8 needs JIT, so this fails if the entitlements did not apply.
           "$node_bin" -e 'process.exit(0)'
 
+      # agent-bot-keyd (agent-bot-identity #397): the Keychain trusts its
+      # signature, so it must be universal, signed by the app's team under
+      # the hardened runtime.
+      - name: Verify bundled agent-bot-keyd
+        env:
+          APP: ${{ steps.bundles.outputs.app }}
+        run: |
+          set -euo pipefail
+          keyd="$APP/Contents/MacOS/agent-bot-keyd"
+          lipo "$keyd" -verify_arch arm64 x86_64
+          codesign --verify --strict --verbose=2 "$keyd"
+          details=$(codesign --display --verbose=2 "$keyd" 2>&1)
+          grep -Eq '^CodeDirectory .*flags=.*runtime' <<<"$details"
+          team() { codesign --display --verbose=2 "$1" 2>&1 | sed -n 's/^TeamIdentifier=//p'; }
+          test "$(team "$keyd")" = "$(team "$APP")"
+          "$keyd" --version
+
       - name: Verify Developer ID signature, Gatekeeper, and notarization
         if: steps.signing.outputs.signed == 'true'
         env:

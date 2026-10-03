@@ -59,6 +59,29 @@ test('an existing broker is reused, never replaced', async () => {
   assert.deepEqual(calls, ['broker pairings', 'account status', 'census']);
 });
 
+test('setup starts agent-bot-keyd beside the daemon, and an older agent-bot never fails it (agent-bot-identity #397)', async () => {
+  const keyd = '/Applications/GeniusBar.app/Contents/MacOS/agent-bot-keyd';
+  const script = {
+    'broker pairings': [live],
+    'account status': [{ ok: true, account: 'me', state: 'approved' }],
+    census: [{ ok: true, souls: [] }],
+  };
+  for (const [answer, detail] of [
+    [{ label: 'app.geniusbar.keyd', changed: true, loaded: true }, 'agent-bot-keyd is running'],
+    [null, 'agent-bot-keyd was not set up'],
+  ]) {
+    const bot = fakeCli({
+      'daemon status --json': [{ running: true, comms: { paired: true, connected: true } }],
+      [`keyd install --bin ${keyd} --json`]: [answer],
+    });
+    const reports = [];
+    await runSetup({ cli: fakeCli(script).cli, bot: bot.cli, report: (r) => reports.push(r), keyd });
+    assert.deepEqual(bot.calls, ['daemon status --json', `keyd install --bin ${keyd} --json`]);
+    assert.ok(reports.some((r) => r.detail === detail));
+    assert.equal(reports.at(-1).state, 'done');
+  }
+});
+
 // #56: on a Mac moved over from Homebrew, the CLI's census answers as the
 // owner's principal while GeniusBar has none of its own; setup must pair it.
 test('pairs GeniusBar when the CLI answers as another principal but GeniusBar has none', async () => {

@@ -3,7 +3,8 @@
 // It uses the bundled agent-comms CLI to make sure a broker is answering,
 // pair and approve this account, and pair and approve GeniusBar as a
 // principal, then the bundled agent-bot to make sure an identity daemon is
-// running and paired with the broker. Approval is the owner's authority,
+// running and paired with the broker, and that agent-bot-keyd, which keeps
+// souls' GitHub App keys (agent-bot-identity #397), runs beside it. Approval is the owner's authority,
 // used here on the owner's click; the long-lived bridge never approves
 // anything.
 //
@@ -13,6 +14,7 @@
 // usage: node setup.mjs AGENT_COMMS_DIR AGENT_BOT_DIR
 
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -31,6 +33,12 @@ export function parseOutput(text) {
   return null;
 }
 
+/** agent-bot-keyd beside the bundled Node in GeniusBar.app/Contents/MacOS, if any. */
+export function bundledKeyd(node = process.execPath) {
+  const keyd = path.join(path.dirname(node), 'agent-bot-keyd');
+  return existsSync(keyd) ? keyd : null;
+}
+
 export class SetupError extends Error {
   constructor(code, message) {
     super(message);
@@ -47,7 +55,7 @@ function failed(result, fallback) {
 // bridge will load (#56). The CLI's census is not that question: it answers
 // as whichever principal the CLI's credential file holds, which on a Mac moved
 // over from Homebrew is the owner's, not GeniusBar's.
-export async function runSetup({ cli, bot, report, principal = () => cli(['census']), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now }) {
+export async function runSetup({ cli, bot, report, keyd = null, principal = () => cli(['census']), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now }) {
   // 1. A broker. Use whichever one already answers on the shared socket;
   // install ours only when none does, so two brokers never compete. A
   // socket file proves nothing (a crashed broker leaves one), so ask the
@@ -123,6 +131,13 @@ export async function runSetup({ cli, bot, report, principal = () => cli(['censu
       daemon = await bot(['daemon', 'status', '--json']);
     } while (!daemon?.running);
   }
+  // The key custodian GeniusBar ships. agent-bot owns its unit; a bundled
+  // agent-bot without `keyd` leaves keys where they are, so it never fails
+  // setup.
+  if (keyd) {
+    const installed = await bot(['keyd', 'install', '--bin', keyd, '--json']);
+    report({ step: 'daemon', state: 'running', detail: installed?.label ? 'agent-bot-keyd is running' : 'agent-bot-keyd was not set up' });
+  }
   report({ step: 'daemon', state: 'done' });
 }
 
@@ -151,7 +166,7 @@ async function main() {
   };
   const write = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
   try {
-    await runSetup({ cli, bot, principal, report: write });
+    await runSetup({ cli, bot, principal, report: write, keyd: bundledKeyd() });
     write({ done: true });
   } catch (error) {
     write({ done: false, code: error.code ?? 'setup-failed', message: String(error.message ?? error) });

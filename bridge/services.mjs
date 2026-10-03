@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // GeniusBar's login services (#9, ADR-0004 decision 4): the broker and the
-// identity daemon that setup registered under GeniusBar's own labels.
+// identity daemon that setup registered under GeniusBar's own labels, and
+// agent-bot-keyd beside the daemon (agent-bot-identity #397), whose unit
+// agent-bot writes and owns.
 //
 //   refresh  At app start: re-register a service whose unit still runs an
 //            older or moved copy of the app, so updates and moves take
@@ -24,6 +26,8 @@
 // Result: one JSON line, {ok: true, broker, daemon} with each one of
 // 'absent' | 'current' | 'reinstalled' | 'restarted' | 'removed' |
 // 'migrated' | 'unsupported' (inspect: null or {label, program, version, state}),
+// and, from refresh and remove when the app bundles agent-bot-keyd, keyd:
+// 'absent' | 'current' | 'reinstalled' | 'restarted' | 'removed' | 'unavailable',
 // or {ok: false, code, message}.
 //
 // usage: node services.mjs refresh|remove|inspect|migrate AGENT_COMMS_DIR AGENT_BOT_DIR
@@ -33,7 +37,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { parseOutput, SetupError } from './setup.mjs';
+import { bundledKeyd, parseOutput, SetupError } from './setup.mjs';
 
 const xmlEscape = (value) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;')
   .replaceAll('>', '&gt;').replaceAll('"', '&quot;');
@@ -61,7 +65,7 @@ function failed(result, fallback) {
  * stamped version differs from the running one, the bundle was swapped under
  * unchanged unit paths, so current units are restarted onto the new files.
  */
-export async function refreshServices({ units, read, node, commsEntry, cli, bot, version, stamp, kickstart }) {
+export async function refreshServices({ units, read, node, commsEntry, cli, bot, version, stamp, kickstart, keyd = null }) {
   const result = {};
   const reconciled = stamp ? await stamp.read() : null;
   const stale = version !== undefined && reconciled !== version;
@@ -94,12 +98,25 @@ export async function refreshServices({ units, read, node, commsEntry, cli, bot,
     // install just ran, so a kickstart failure here is real, not "unloaded".
     else throw new SetupError('daemon-restart-failed', 'launchctl would not restart the identity daemon');
   }
+  // keyd runs wherever GeniusBar's daemon does, from this copy of the app.
+  // A bundled agent-bot that predates `keyd install` leaves it unavailable,
+  // never failing the refresh: keys then stay in the soul's own store.
+  if (keyd && result.daemon === 'absent') result.keyd = 'absent';
+  else if (keyd) {
+    const installed = await bot(['keyd', 'install', '--bin', keyd, '--json']);
+    if (!installed?.label) result.keyd = 'unavailable';
+    else if (installed.changed) result.keyd = 'reinstalled';
+    else if (stale && kickstart && await kickstart('keyd')) result.keyd = 'restarted';
+    else result.keyd = 'current';
+  }
   if (stamp && version !== undefined) await stamp.write(version);
   return result;
 }
 
-export async function removeServices({ units, read, cli, bot, stamp }) {
+export async function removeServices({ units, read, cli, bot, stamp, keyd = null }) {
   const result = {};
+  // keyd first: it serves the daemon's souls. Its Keychain items stay.
+  if (keyd) result.keyd = (await bot(['keyd', 'uninstall', '--json']))?.unloaded ? 'removed' : 'absent';
   if (read(units.daemon) === null) result.daemon = 'absent';
   else {
     const disabled = await bot(['daemon', 'disable', '--json']);
@@ -243,6 +260,7 @@ async function main() {
   const labels = {
     broker: process.env.AGENT_COMMS_SERVICE_LABEL,
     daemon: process.env.AGENT_BOT_SERVICE_LABEL,
+    keyd: process.env.AGENT_BOT_KEYD_SERVICE_LABEL,
   };
   const units = {
     broker: path.join(agents, `${labels.broker}.plist`),
@@ -266,7 +284,7 @@ async function main() {
       { timeout: 15_000 }, (error) => resolve(error === null));
   });
   const version = process.env.GENIUSBAR_APP_VERSION || undefined;
-  const ports = { units, read, cli: runner(commsEntry), bot: runner(botEntry), version, stamp, kickstart };
+  const ports = { units, read, cli: runner(commsEntry), bot: runner(botEntry), version, stamp, kickstart, keyd: bundledKeyd() };
   const foreign = Object.fromEntries(Object.entries(FOREIGN_LABELS)
     .map(([which, label]) => [which, { label, plist: path.join(agents, `${label}.plist`) }]));
   const launchctl = (args) => new Promise((resolve) => {
