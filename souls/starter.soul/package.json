@@ -1,8 +1,9 @@
 {
   "name": "starter-soul",
   "private": true,
-  "description": "The harnesses the Starter soul runs on (ADR-0276).",
+  "description": "The harnesses the Starter soul runs on (ADR-0276): the Claude and Codex ACP adapters.",
   "dependencies": {
+    "@agentclientprotocol/codex-acp": "2.1.1",
     "@zed-industries/claude-code-acp": "0.16.2"
   }
 }
