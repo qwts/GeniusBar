@@ -39,13 +39,18 @@ function cargoBuild(triple) {
   return path.join(CRATE, 'target', triple, 'release', 'agent-bot-keyd');
 }
 
-export function buildKeyd(triple) {
+// A universal Tauri build compiles the app once per slice, and each slice's
+// build checks for its own sidecar, so universal also leaves one per slice
+// beside the lipo'd one (fetch-components.mjs leaves node the same way).
+export function buildKeyd(triple, { build = cargoBuild, copy = copyFileSync, lipo = (args) => execFileSync('lipo', args), binaries = BINARIES } = {}) {
   if (!triple.endsWith('-apple-darwin')) throw new Error(`agent-bot-keyd builds only for macOS targets, not ${triple}`);
-  mkdirSync(BINARIES, { recursive: true });
-  const out = path.join(BINARIES, keydSidecarName(triple));
+  mkdirSync(binaries, { recursive: true });
+  const out = path.join(binaries, keydSidecarName(triple));
   const parts = UNIVERSAL_TARGETS[triple];
-  if (parts) execFileSync('lipo', ['-create', ...parts.map(cargoBuild), '-output', out]);
-  else copyFileSync(cargoBuild(triple), out);
+  if (!parts) { copy(build(triple), out); return out; }
+  const slices = parts.map(build);
+  parts.forEach((part, i) => copy(slices[i], path.join(binaries, keydSidecarName(part))));
+  lipo(['-create', ...slices, '-output', out]);
   return out;
 }
 
