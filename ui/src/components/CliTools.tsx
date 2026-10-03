@@ -4,6 +4,8 @@ export type ToolState = 'absent' | 'installed' | 'stale' | 'other';
 export interface ToolsStatus {
   dir: string;
   tools: { name: string; state: ToolState; target?: string }[];
+  /** Whether a new terminal finds `dir`, and the profile GeniusBar added it to. */
+  path?: { onPath: boolean; profile: string | null };
 }
 export interface CliToolsApi {
   status: () => Promise<ToolsStatus>;
@@ -48,8 +50,14 @@ export function CliTools({ api }: { api: CliToolsApi }) {
     <div className="confirm" role="group" aria-label="Command-line tools">
       <p className="small">
         Put <code>agent-bot</code> and <code>agent-comms</code> on your PATH so agents you start yourself can join.
-        {status && <> They go in <code>{status.dir}</code>, which must be on your PATH.</>}
+        {status && <> They go in <code>{status.dir}</code>.</>}
       </p>
+      {status?.path?.profile && (
+        <p className="small">Added to your PATH in <code>{status.path.profile}</code>. Open a new terminal to use them.</p>
+      )}
+      {status?.path && !status.path.onPath && status.tools.some((tool) => tool.state === 'installed') && (
+        <p className="small">Add <code>{status.dir}</code> to your PATH so a terminal finds them.</p>
+      )}
       {status && (
         <ul className="small">
           {status.tools.map((tool) => (

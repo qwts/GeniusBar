@@ -17,12 +17,18 @@
 //   uninstall  remove GeniusBar's wrappers and restore what they replaced
 //   refresh    at app start: rewrite GeniusBar's wrappers if the app moved
 //
-// Result: one JSON line, {ok: true, dir, tools: [{name, state, target?}]}
-// with state 'absent' | 'installed' | 'stale' | 'other', or
-// {ok: false, code, message}. Never needs admin rights.
+// A stock Mac's PATH has no ~/.local/bin, so install also adds it to the
+// login shell's profile (~/.zprofile for zsh, ~/.bash_profile for bash) when
+// a new terminal would not find it, as a marked block that uninstall
+// removes. Other shells are reported, not edited.
+//
+// Result: one JSON line, {ok: true, dir, tools: [{name, state, target?}],
+// path: {onPath, profile}} with state 'absent' | 'installed' | 'stale' |
+// 'other', or {ok: false, code, message}. Never needs admin rights.
 //
 // usage: node cli-tools.mjs status|install|uninstall|refresh TOOL_DIR [--replace NAME]...
 
+import { execFileSync } from 'node:child_process';
 import { lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -131,7 +137,71 @@ export function refresh({ dir, shims }) {
   return status({ dir, shims });
 }
 
+/** The profile a login shell of this kind reads, or null for a shell GeniusBar does not edit. */
+export function profileFor(shell, home) {
+  const name = path.basename(shell ?? '');
+  if (name === 'zsh') return path.join(home, '.zprofile');
+  if (name === 'bash') return path.join(home, '.bash_profile');
+  return null;
+}
+
+/** The marked lines that put `dir` on PATH; null when `dir` cannot be written safely. */
+export function pathBlock(dir, home) {
+  const shown = dir === path.join(home, '.local', 'bin') ? '$HOME/.local/bin' : dir;
+  if (/["$`\\\n]/.test(shown.replace(/^\$HOME/, ''))) return null;
+  return `${MARKER}: added by GeniusBar. "Uninstall command-line tools" removes it.\nexport PATH="${shown}:$PATH"\n`;
+}
+
+function readText(file) {
+  try { return readFileSync(file, 'utf8'); } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+}
+
+/**
+ * Whether a new terminal finds `dir`: already on the login shell's PATH, or
+ * added by GeniusBar's block in its profile (which takes effect in new
+ * terminals). `profile` names the file GeniusBar edits, or is null;
+ * `loginPath` is the login shell's PATH, or a function that reads it.
+ */
+export function pathStatus({ dir, home, profile, loginPath }) {
+  const text = profile ? readText(profile) : null;
+  const added = Boolean(text && pathBlock(dir, home) && text.includes(pathBlock(dir, home)));
+  // Read after any profile change, so a block just removed is not counted.
+  const listed = ((typeof loginPath === 'function' ? loginPath() : loginPath) ?? '').split(':').includes(dir);
+  return { onPath: listed || added, profile: added ? profile : null };
+}
+
+/** Adds the PATH block to the profile unless `dir` is already found. */
+export function ensurePath({ dir, home, profile, loginPath }) {
+  const current = pathStatus({ dir, home, profile, loginPath });
+  const block = pathBlock(dir, home);
+  if (current.onPath || !profile || !block) return current;
+  const text = readText(profile) ?? '';
+  writeFileSync(profile, `${text}${text && !text.endsWith('\n') ? '\n' : ''}${block}`, { mode: 0o644 });
+  return pathStatus({ dir, home, profile, loginPath });
+}
+
+/** Removes GeniusBar's PATH block from the profile, and nothing else. */
+export function removePath({ dir, home, profile, loginPath }) {
+  const text = profile ? readText(profile) : null;
+  const block = pathBlock(dir, home);
+  if (text && block && text.includes(block)) writeFileSync(profile, text.replace(block, ''));
+  return pathStatus({ dir, home, profile, loginPath });
+}
+
 const ACTIONS = { status, install, uninstall, refresh };
+const PATH_ACTIONS = { status: pathStatus, install: ensurePath, uninstall: removePath, refresh: pathStatus };
+
+/** The PATH a new terminal gets, from the user's login shell; '' if it cannot be read. */
+function readLoginPath(shell) {
+  if (!shell || !path.isAbsolute(shell)) return '';
+  const mark = 'GENIUSBAR_PATH=';
+  try {
+    const out = execFileSync(shell, ['-ilc', `printf '%s%s\\n' '${mark}' "$PATH"`], { encoding: 'utf8', timeout: 5_000, stdio: ['ignore', 'pipe', 'ignore'] });
+    return out.split('\n').reverse().find((line) => line.startsWith(mark))?.slice(mark.length) ?? '';
+  } catch {
+    return '';
+  }
+}
 
 async function main() {
   const [action, toolDir, ...rest] = process.argv.slice(2);
@@ -148,10 +218,14 @@ async function main() {
     process.stderr.write('usage: cli-tools.mjs status|install|uninstall|refresh TOOL_DIR [--replace NAME]...\n');
     process.exit(2);
   }
-  const dir = process.env.GENIUSBAR_CLI_DIR || path.join(os.homedir(), '.local', 'bin');
+  const home = os.homedir();
+  const dir = process.env.GENIUSBAR_CLI_DIR || path.join(home, '.local', 'bin');
   const shims = Object.fromEntries(TOOLS.map((name) => [name, path.join(path.resolve(toolDir), name)]));
+  const shell = process.env.SHELL || os.userInfo().shell;
+  const where = { dir, home, profile: profileFor(shell, home), loginPath: () => readLoginPath(shell) };
   try {
-    write({ ok: true, dir, tools: ACTIONS[action]({ dir, shims, replace }) });
+    const tools = ACTIONS[action]({ dir, shims, replace });
+    write({ ok: true, dir, tools, path: PATH_ACTIONS[action](where) });
   } catch (error) {
     write({ ok: false, code: error.code ?? 'tools-failed', message: String(error.message ?? error) });
     process.exitCode = 1;

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { ASIDE, install, refresh, status, uninstall, wrapper, wrapperTarget } from './cli-tools.mjs';
+import { ASIDE, ensurePath, install, pathBlock, pathStatus, profileFor, refresh, removePath, status, uninstall, wrapper, wrapperTarget } from './cli-tools.mjs';
 
 const script = fileURLToPath(new URL('./cli-tools.mjs', import.meta.url));
 
@@ -73,8 +73,11 @@ test('refresh repoints wrappers after the app moved, and leaves other files alon
   assert.equal(spawnSync(path.join(dir, 'agent-bot'), [], { encoding: 'utf8' }).stdout, 'agent-bot from the app: \n');
 }));
 
-test('the script reports one JSON line and takes --replace only for known tools', () => withDirs(({ dir, app }) => {
-  const env = { ...process.env, GENIUSBAR_CLI_DIR: dir };
+test('the script reports one JSON line and takes --replace only for known tools', () => withDirs(({ root, dir, app }) => {
+  // A throwaway HOME: install edits the login profile under it, never the developer's own.
+  const home = path.join(root, 'home');
+  mkdirSync(home, { recursive: true });
+  const env = { ...process.env, HOME: home, SHELL: '/bin/zsh', GENIUSBAR_CLI_DIR: '' };
   const run = (...args) => spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', env });
   let result = run('install', app);
   assert.equal(result.status, 0, result.stderr);
@@ -82,6 +85,42 @@ test('the script reports one JSON line and takes --replace only for known tools'
   assert.equal(parsed.ok, true);
   assert.equal(parsed.dir, dir);
   assert.deepEqual(states(parsed.tools), { 'agent-bot': 'installed', 'agent-comms': 'installed' });
+  assert.deepEqual(parsed.path, { onPath: true, profile: path.join(home, '.zprofile') });
+  assert.match(readFileSync(path.join(home, '.zprofile'), 'utf8'), /\$HOME\/\.local\/bin/);
+  result = run('uninstall', app);
+  assert.deepEqual(JSON.parse(result.stdout).path, { onPath: false, profile: null });
   result = run('install', app, '--replace', '../../etc/passwd');
   assert.equal(result.status, 2);
+}));
+
+test('a new terminal is given ~/.local/bin through a marked block in the login profile', () => withDirs(({ root }) => {
+  const home = path.join(root, 'home');
+  const dir = path.join(home, '.local', 'bin');
+  mkdirSync(home, { recursive: true });
+  const profile = profileFor('/bin/zsh', home);
+  assert.equal(profile, path.join(home, '.zprofile'));
+  assert.equal(profileFor('/opt/homebrew/bin/bash', home), path.join(home, '.bash_profile'));
+  assert.equal(profileFor('/usr/local/bin/fish', home), null);
+  const stock = '/usr/local/bin:/usr/bin:/bin';
+  writeFileSync(profile, 'eval "$(/opt/homebrew/bin/brew shellenv)"');
+  assert.deepEqual(pathStatus({ dir, home, profile, loginPath: stock }), { onPath: false, profile: null });
+  assert.deepEqual(ensurePath({ dir, home, profile, loginPath: stock }), { onPath: true, profile });
+  assert.equal(readFileSync(profile, 'utf8'), `eval "$(/opt/homebrew/bin/brew shellenv)"\n${pathBlock(dir, home)}`);
+  assert.match(readFileSync(profile, 'utf8'), /^export PATH="\$HOME\/\.local\/bin:\$PATH"$/m);
+  // Idempotent, and the block is all uninstall takes out.
+  ensurePath({ dir, home, profile, loginPath: stock });
+  assert.equal(readFileSync(profile, 'utf8').split('geniusbar-cli-tool').length, 2);
+  assert.deepEqual(removePath({ dir, home, profile, loginPath: stock }), { onPath: false, profile: null });
+  assert.equal(readFileSync(profile, 'utf8'), 'eval "$(/opt/homebrew/bin/brew shellenv)"\n');
+}));
+
+test('a directory already on PATH, or a shell GeniusBar does not edit, leaves profiles alone', () => withDirs(({ root }) => {
+  const home = path.join(root, 'home');
+  const dir = path.join(home, '.local', 'bin');
+  mkdirSync(home, { recursive: true });
+  const profile = path.join(home, '.zprofile');
+  assert.deepEqual(ensurePath({ dir, home, profile, loginPath: `${dir}:/usr/bin` }), { onPath: true, profile: null });
+  assert.deepEqual(ensurePath({ dir, home, profile: null, loginPath: '/usr/bin' }), { onPath: false, profile: null });
+  assert.throws(() => readFileSync(profile), /ENOENT/);
+  assert.equal(pathBlock('/tmp/odd"dir', home), null);
 }));

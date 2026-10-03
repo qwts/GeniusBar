@@ -44,7 +44,10 @@ except by the migration below.
 `agent-comms` on your PATH, like VS Code's `code` command (#41). They are
 small wrapper scripts in `~/.local/bin` that run the copies inside the app,
 so an in-app update reaches them with nothing to reinstall, and each launch
-repoints them if the app moved. That directory must be on your PATH. An
+repoints them if the app moved. A stock Mac has no `~/.local/bin` on PATH,
+so install adds a marked `export PATH=...` block to `~/.zprofile` (zsh) or
+`~/.bash_profile` (bash) when a new terminal would not find it; Uninstall
+removes that block. Other shells get a note to add it themselves. An
 agent you start yourself (in a terminal, an IDE or a chat app) can then run
 `agent-bot setup-worktree` and `agent-comms join` with no other install. No
 admin password is needed.
