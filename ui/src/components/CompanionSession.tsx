@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { ArrowLeft } from 'lucide-react';
+import { runtimeMetrics, type RuntimeMetrics, type RuntimeObservation } from '../bridge';
 import {
   availabilityNote,
   displayHarness,
@@ -49,6 +50,7 @@ interface CompanionSessionProps {
   onClose: () => void;
   /** The popup's back button; a desktop window has its own close button. */
   showBack?: boolean;
+  metricsRefresh?: number;
 }
 
 /**
@@ -56,7 +58,7 @@ interface CompanionSessionProps {
  * tree, and the read-only details with Launch. Without chat it opens on
  * the details.
  */
-export function CompanionSession({ soul, forest, roster, paused = false, chat, launch, onOpen, onClose, showBack = false }: CompanionSessionProps) {
+export function CompanionSession({ soul, forest, roster, paused = false, chat, launch, onOpen, onClose, showBack = false, metricsRefresh = 0 }: CompanionSessionProps) {
   const { t } = useI18n();
   const ids = useId();
   const back = useRef<HTMLButtonElement>(null);
@@ -121,7 +123,7 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
             dudle={deriveDudle(soul.agentId)} paused={paused} />
         )}
         {active === 'tree' && <DelegationTree forest={forest} focus={soulKey(soul)} paused={paused} onOpen={onOpen} />}
-        {active === 'details' && <CompanionDetails soul={soul} roster={roster} launch={launch} />}
+        {active === 'details' && <CompanionDetails soul={soul} roster={roster} launch={launch} metricsRefresh={metricsRefresh} />}
       </div>
     </section>
   );
@@ -132,9 +134,31 @@ function yesNo(value: boolean | null | undefined, t: Translate): string {
 }
 
 /** The read-only fields, with Launch… when launching is available. */
-export function CompanionDetails({ soul, roster = [], launch }: { soul: CensusRow; roster?: readonly CensusRow[]; launch?: LaunchProps }) {
-  const { t } = useI18n();
+export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0 }: { soul: CensusRow; roster?: readonly CensusRow[]; launch?: LaunchProps; metricsRefresh?: number }) {
+  const { t, lang } = useI18n();
   const [launching, setLaunching] = useState(false);
+  const [metrics, setMetrics] = useState<RuntimeMetrics>({ unavailable: true });
+  useEffect(() => {
+    let active = true;
+    setMetrics({ unavailable: true });
+    void runtimeMetrics().then((result) => { if (active) setMetrics(result); });
+    return () => { active = false; };
+  }, [soul.agentId, metricsRefresh]);
+  const snapshot = 'unavailable' in metrics ? null : metrics;
+  const observations = snapshot?.souls[soul.agentId]?.observations ?? [];
+  const errors = snapshot?.errors.filter((error) => error.agentId === soul.agentId) ?? [];
+  const metricValue = (observation: RuntimeObservation): ReactNode => {
+    const value = observation.metric === 'context_used_tokens' && typeof observation.value === 'number'
+      ? t('metrics.tokens', { count: observation.value.toLocaleString(lang) })
+      : observation.value === 'unknown' ? t('unknown') : String(observation.value);
+    const elapsed = (Date.now() - Date.parse(observation.observedAt)) / 1000;
+    const unit = elapsed < 60 ? 'second' : elapsed < 3600 ? 'minute' : elapsed < 86400 ? 'hour' : 'day';
+    const seconds = { second: 1, minute: 60, hour: 3600, day: 86400 }[unit];
+    const age = Number.isFinite(elapsed)
+      ? new Intl.RelativeTimeFormat(lang, { numeric: 'auto' }).format(-Math.floor(Math.max(0, elapsed) / seconds), unit)
+      : null;
+    return <>{value}{age && <span className="ml-2 text-[11px] text-muted-foreground">{t('metrics.asOf', { source: observation.source, age })}</span>}</>;
+  };
   const note = availabilityNote(soul);
   const parentName = parentDisplayName(soul, roster);
   let parent: ReactNode = t('none');
@@ -162,6 +186,10 @@ export function CompanionDetails({ soul, roster = [], launch }: { soul: CensusRo
   if (soul.verification !== undefined) rows.push([t('field.verification'), soul.verification ?? t('none')]);
   if (soul.hardened !== undefined) rows.push([t('field.hardened'), yesNo(soul.hardened, t)]);
   if (soul.daemonWatching !== undefined) rows.push([t('field.daemonWatching'), yesNo(soul.daemonWatching, t)]);
+  const model = observations.find((observation) => observation.metric === 'model_reported');
+  const context = observations.find((observation) => observation.metric === 'context_used_tokens');
+  if (model) rows.push([t('field.model'), metricValue(model)]);
+  if (context) rows.push([t('field.context'), metricValue(context)]);
 
   return (
     <div className="grid gap-3 p-3">
@@ -175,6 +203,9 @@ export function CompanionDetails({ soul, roster = [], launch }: { soul: CensusRo
           </div>
         ))}
       </dl>
+      {errors.map((error, index) => (
+        <p key={index} className="m-0 text-[11px] text-muted-foreground">{t('metrics.collectorError', { source: error.source, message: error.message })}</p>
+      ))}
       {launch && launching && <LaunchForm {...launch} soul={soul} />}
       {launch && !launching && (
         <div className="detail-actions">

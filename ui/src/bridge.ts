@@ -17,6 +17,33 @@ export class BridgeError extends Error {
 /** True inside the Tauri app; false in a plain browser or a test. */
 export const inApp = (): boolean => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
+export interface RuntimeObservation {
+  metric: string;
+  value: string | number;
+  unit: string;
+  scope: string;
+  source: string;
+  kind: 'reported' | 'configured';
+  method?: string;
+  observedAt: string;
+}
+
+export type RuntimeMetrics = { unavailable: true } | {
+  collectedAt: string | null;
+  souls: Record<string, { lastCallAt: string | null; observations: RuntimeObservation[] }>;
+  errors: { agentId: string; source: string; code: string; message: string }[];
+  missing: { agentId: string; source: string }[];
+};
+
+export async function runtimeMetrics(): Promise<RuntimeMetrics> {
+  if (!inApp()) return { unavailable: true };
+  try {
+    return await invoke<RuntimeMetrics>('runtime_metrics');
+  } catch {
+    return { unavailable: true };
+  }
+}
+
 export async function call<T>(method: BridgeMethod, params: Record<string, unknown> = {},
   invokeImpl: typeof invoke = invoke): Promise<T> {
   try {
