@@ -67,12 +67,12 @@ describe('Health header', () => {
     const never = healthHeader({ ...connected, brokerUnreachable: true, health });
     expect(never.tone).toBe('bad');
     expect(never.title).toBe('Can’t reach the background service');
-    expect(never.detail).toBe('Your souls will appear here once GeniusBar connects.');
-    expect(never.label).toBe('Can’t reach the background service. Your souls will appear here once GeniusBar connects.');
+    expect(never.detail).toBe('Your companions will appear here once GeniusBar connects.');
+    expect(never.label).toBe('Can’t reach the background service. Your companions will appear here once GeniusBar connects.');
     const known = healthHeader({ ...connected, brokerUnreachable: true, lastRefresh: refreshed });
     expect(known.detail).toBe(`Last updated · ${formatTime(refreshed)}`);
     expect(known.label).toBe(`Can’t reach the background service. Last updated ${formatTime(refreshed)}.`);
-    expect(emptyRosterText({ ...connected, brokerUnreachable: true })).toBe('Your souls will appear here once GeniusBar connects.');
+    expect(emptyRosterText({ ...connected, brokerUnreachable: true })).toBe('Your companions will appear here once GeniusBar connects.');
   });
 
   it('summarises a healthy broker', () => {
@@ -80,7 +80,7 @@ describe('Health header', () => {
     expect(header.tone).toBe('ok');
     expect(header.title).toBe('Connected');
     expect(header.detail).toBeNull();
-    expect(emptyRosterText({ ...connected, health })).toBe('No souls yet. Your first soul will appear here.');
+    expect(emptyRosterText({ ...connected, health })).toBe('No companions yet. Your first companion will appear here.');
   });
 
   it('says unknown when connected with no health yet', () => {

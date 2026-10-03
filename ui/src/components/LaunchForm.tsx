@@ -62,7 +62,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, initialPackage
   const [started, setStarted] = useState(false);
   const ids = useId();
   const ready = canLaunch(launcher.state);
-  const what = soul ? displayName(soul) : 'a soul package';
+  const what = soul ? displayName(soul) : 'a companion package';
 
   useEffect(() => setPackageError(initialPackageError), [initialPackageError]);
 
@@ -105,7 +105,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, initialPackage
         <span>Name</span>
         <input value={name} placeholder="Optional" onChange={(e) => setName(e.target.value)} />
       </label>
-      {checkingPackage && <p className="muted small" role="status">Checking this soul package…</p>}
+      {checkingPackage && <p className="muted small" role="status">Checking this companion package…</p>}
       {packageError && <p className="error small" role="alert">{packageError}</p>}
       {started ? <LaunchStatus state={launcher.state} />
         : !ready && <p className="muted small">Another launch is still waiting for its result.</p>}

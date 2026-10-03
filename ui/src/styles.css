@@ -1,88 +1,163 @@
+@import "tailwindcss";
+
+/*
+ * The Lovable design's tokens (R6): a warm dark palette in oklch, mapped
+ * to Tailwind colours by @theme inline (bg-card, text-muted-foreground…).
+ * Fonts are bundled from @fontsource (main.tsx); nothing loads remotely.
+ */
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
 :root {
-  color-scheme: light dark;
-  --bg: #ffffff;
-  --fg: #1d1d1f;
-  --muted: #6e6e73;
-  --line: #e5e5ea;
-  font: 13px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color-scheme: dark;
+  --radius: 0.5rem;
+  --background: oklch(0.175 0.008 70);
+  --foreground: oklch(0.94 0.015 85);
+  --card: oklch(0.215 0.009 70);
+  --card-foreground: oklch(0.94 0.015 85);
+  --popover: oklch(0.235 0.01 70);
+  --popover-foreground: oklch(0.94 0.015 85);
+  --primary: oklch(0.8 0.15 72);
+  --primary-foreground: oklch(0.2 0.02 60);
+  --secondary: oklch(0.26 0.01 70);
+  --secondary-foreground: oklch(0.94 0.015 85);
+  --muted: oklch(0.25 0.008 70);
+  --muted-foreground: oklch(0.72 0.02 80);
+  --accent: oklch(0.29 0.012 70);
+  --accent-foreground: oklch(0.96 0.015 85);
+  --destructive: oklch(0.68 0.19 28);
+  --destructive-foreground: oklch(0.98 0 0);
+  --success: oklch(0.76 0.14 155);
+  --warning: oklch(0.72 0.18 45);
+  --warning-foreground: oklch(0.18 0.03 45);
+  --info: oklch(0.75 0.09 200);
+  --border: oklch(0.32 0.01 70);
+  --input: oklch(0.34 0.01 70);
+  --ring: oklch(0.8 0.15 72);
+  --sidebar: oklch(0.155 0.007 70);
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
 }
-@media (prefers-color-scheme: dark) {
-  :root { --bg: #1e1e1e; --fg: #f5f5f7; --muted: #a1a1a6; --line: #38383a; }
+
+@layer base {
+  * { border-color: var(--color-border); }
+  html, body, #root { height: 100%; margin: 0; }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font: 13px/1.45 var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  button:not(:disabled), select { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--color-ring); outline-offset: 1px; }
 }
-html, body, #root { height: 100%; margin: 0; }
-body { background: var(--bg); color: var(--fg); }
-.popup { display: flex; flex-direction: column; height: 100%; }
-.health { padding: 12px 14px; border-bottom: 1px solid var(--line); }
-.health h1 { font-size: 13px; font-weight: 600; margin: 0; }
-.health p { color: var(--muted); margin: 2px 0 0; }
-.roster { flex: 1; overflow-y: auto; }
-:root { --ok: #34c759; --bad: #ff3b30; --unknown: #8e8e93; --warn: #ff9500; --accent: #0a84ff; }
-.muted { color: var(--muted); }
-.small { font-size: 11px; }
-.block { display: block; }
-.error { color: var(--bad); }
-.health-title { display: flex; align-items: center; gap: 6px; font-weight: 600; color: var(--fg); }
-.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.dot-ok { background: var(--ok); }
-.dot-bad { background: var(--bad); }
-.dot-unknown { background: var(--unknown); }
-.note { color: var(--muted); }
-.empty { padding: 8px 14px; margin: 0; }
-.soul-row {
-  display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 4px 14px; border: 0; background: none; color: inherit;
-  font: inherit; text-align: left; cursor: pointer;
+
+.gb-wallpaper {
+  background:
+    radial-gradient(65% 55% at 18% 8%, color-mix(in oklab, var(--primary) 13%, transparent), transparent 70%),
+    radial-gradient(55% 65% at 88% 85%, color-mix(in oklab, var(--info) 9%, transparent), transparent 70%),
+    radial-gradient(40% 40% at 60% 40%, color-mix(in oklab, var(--accent) 45%, transparent), transparent 75%),
+    var(--background);
 }
-.soul-row:hover, .soul-row:focus-visible { background: var(--line); }
-.soul-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.soul-line { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
-.presence { padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--unknown) 20%, transparent); }
-.presence-joined { background: color-mix(in srgb, var(--ok) 20%, transparent); }
-.presence-watching { background: color-mix(in srgb, var(--accent) 20%, transparent); }
-.unacked { color: var(--warn); }
-.dudle { flex: none; }
-.detail { padding: 12px 14px; border-top: 1px solid var(--line); }
-.detail-head { display: flex; gap: 12px; align-items: center; }
-.detail h2 { font-size: 13px; margin: 0; }
-.detail p { margin: 2px 0; }
-.selectable { user-select: text; }
-.detail dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 8px 0; }
-.detail dl > div { display: contents; }
-.detail dt { color: var(--muted); }
-.detail dd { margin: 0; }
-.detail-actions { display: flex; justify-content: flex-end; }
-.status { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid var(--line); }
-.link { border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; padding: 0; margin-left: auto; }
-/* Updates (#34): the popup line mirrors the tray item's state. */
-.update { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 14px; border-bottom: 1px solid var(--line); }
-.setup { padding: 12px 14px; border-bottom: 1px solid var(--line); }
-.setup p { margin: 0 0 8px; }
-.setup ol { list-style: none; padding: 0; margin: 0 0 10px; }
-.setup li { padding: 2px 0; color: var(--muted); }
-.setup li.done, .setup li.running { color: var(--fg); }
-/* Chat (#17). Bodies are plain text; pre-wrap keeps their whitespace. */
-.unread-badge { padding: 0 6px; border-radius: 999px; background: var(--accent); color: #fff; }
-.chat { margin: 8px 0; border-top: 1px solid var(--line); padding-top: 8px; }
-.chat-log { list-style: none; margin: 0 0 8px; padding: 0; max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
-.chat-msg { max-width: 85%; padding: 4px 8px; border-radius: 8px; background: var(--line); }
-.chat-in { align-self: flex-start; }
-.chat-out { align-self: flex-end; background: color-mix(in srgb, var(--accent) 22%, transparent); }
-.chat .chat-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.chat-composer { display: flex; gap: 6px; align-items: flex-end; }
-.chat-composer textarea { flex: 1; min-width: 0; resize: vertical; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
-.chat .error { margin: 4px 0 0; }
-/* Launch (#18). */
-.first-launch { display: grid; gap: 6px; padding: 8px 0; }
-.first-launch p { margin: 0; }
-.first-launch label, .first-launch label > span { color: var(--muted); }
-.first-launch input { min-width: 0; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
-.launch { display: grid; gap: 6px; margin: 8px 0; border-top: 1px solid var(--line); padding-top: 8px; }
-.launch label { display: grid; grid-template-columns: 64px 1fr; gap: 8px; align-items: center; }
-.launch label > span { color: var(--muted); }
-.launch input { min-width: 0; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
-.launch input[readonly] { border-color: transparent; padding-left: 0; }
-.launch p { margin: 0; }
-.detail-actions { gap: 8px; }
-.confirm { flex-basis: 100%; display: grid; gap: 6px; }
-.confirm p { margin: 0; }
-.status { flex-wrap: wrap; }
+
+/*
+ * Shared pieces the setup, launch and update views use. They keep their
+ * class names from before the redesign and take the tokens here.
+ */
+@layer components {
+  .muted { color: var(--muted-foreground); }
+  .small { font-size: 11px; }
+  .block { display: block; }
+  .error { color: var(--destructive); }
+  .selectable { user-select: text; }
+  .note { color: var(--muted-foreground); margin: 2px 0 0; }
+  .empty { padding: 12px 14px; margin: 0; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+  .dot-ok { background: var(--success); }
+  .dot-bad { background: var(--destructive); }
+  .dot-unknown { background: var(--muted-foreground); }
+  .health-title { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12px; color: var(--muted-foreground); }
+  .health-title.small { font-size: 11px; }
+  .link {
+    border: 0; background: none; padding: 0; font: inherit; font-size: 12px;
+    color: var(--info);
+  }
+  .link:hover { text-decoration: underline; }
+  .panel { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .panel h2 { font-size: 13px; font-weight: 600; margin: 0 0 6px; }
+  .panel p { margin: 0 0 6px; }
+  .detail-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+  .confirm { flex-basis: 100%; display: grid; gap: 6px; }
+  .confirm p, .confirm ul { margin: 0; }
+  .update {
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    padding: 6px 14px; border-bottom: 1px solid var(--border);
+    background: color-mix(in oklab, var(--primary) 12%, transparent);
+  }
+  .setup { padding: 14px; border-bottom: 1px solid var(--border); }
+  .setup p { margin: 0 0 10px; font-weight: 500; }
+  .setup ol { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 6px; }
+  .setup li { display: flex; align-items: center; gap: 8px; color: var(--muted-foreground); }
+  .setup li.done, .setup li.running { color: var(--foreground); }
+  .setup li.done svg { color: var(--success); }
+  .setup li.running svg { color: var(--primary); }
+  .first-launch, .launch { display: grid; gap: 8px; }
+  .first-launch p, .launch p { margin: 0; }
+  .launch label, .first-launch label { display: grid; grid-template-columns: 64px 1fr; gap: 8px; align-items: center; }
+  .launch label > span, .first-launch label > span { color: var(--muted-foreground); font-size: 12px; }
+  .launch input[readonly] { border-color: transparent; background: transparent; padding-left: 0; }
+
+  /* Form controls and plain buttons get the design's look by default. */
+  .gb input:not([type]), .gb input[type="text"], .gb input[type="search"], .gb textarea, .gb select {
+    min-width: 0; font: inherit; color: inherit;
+    background: var(--muted); border: 1px solid var(--input); border-radius: var(--radius-md);
+    padding: 4px 8px;
+  }
+  .gb button:not([class]) {
+    font: inherit; font-size: 12px; color: var(--secondary-foreground);
+    background: var(--secondary); border: 1px solid var(--border); border-radius: var(--radius-md);
+    padding: 3px 10px;
+  }
+  .gb button:not([class]):hover:not(:disabled) { background: var(--accent); }
+  .gb button:not([class])[type="submit"] { background: var(--primary); color: var(--primary-foreground); border-color: transparent; }
+  .gb button:disabled { opacity: 0.5; }
+  .gb code { font-family: var(--font-mono); font-size: 11px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
