@@ -94,8 +94,8 @@ function writeWrapper(dir, name, shim) {
 }
 
 /**
- * Writes every wrapper it may. A conflict not named in `replace` stops the
- * whole install before anything is written, so the result is all or nothing.
+ * Writes every wrapper it may. Conflicts and occupied aside destinations
+ * stop the whole install before anything is renamed or written.
  */
 export function install({ dir, shims, replace = [] }) {
   const before = status({ dir, shims });
@@ -104,12 +104,15 @@ export function install({ dir, shims, replace = [] }) {
     const list = conflicts.map((tool) => `${tool.name} (${tool.target})`).join(', ');
     throw new ToolsError('tools-conflict', `already on PATH: ${list}`);
   }
+  for (const tool of before.filter((tool) => tool.state === 'other')) {
+    const aside = path.join(dir, `${tool.name}${ASIDE}`);
+    if (lstat(aside)) throw new ToolsError('tools-aside-exists', `${aside} already exists; move it before replacing ${tool.name}`);
+  }
   mkdirSync(dir, { recursive: true });
   for (const tool of before) {
     if (tool.state === 'installed') continue;
     if (tool.state === 'other') {
       const aside = path.join(dir, `${tool.name}${ASIDE}`);
-      if (lstat(aside)) throw new ToolsError('tools-aside-exists', `${aside} already exists; move it before replacing ${tool.name}`);
       renameSync(path.join(dir, tool.name), aside);
     }
     writeWrapper(dir, tool.name, shims[tool.name]);

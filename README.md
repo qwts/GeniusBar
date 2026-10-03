@@ -61,8 +61,9 @@ only the wrappers GeniusBar wrote; each one carries a
 
 ### Moving from a Homebrew install
 
-On a Mac that already runs Homebrew's broker (`dev.qwts.agent-comms.broker`)
-or daemon (`dev.qwts.agent-bot.daemon`), setup names what is running and
+On a Mac with a Homebrew broker plist (`dev.qwts.agent-comms.broker`)
+or daemon plist (`dev.qwts.agent-bot.daemon`), setup checks launchd and names
+each service as running (loaded) or stopped (unloaded), then
 offers two choices:
 
 - **Move to GeniusBar** stops those services, starts GeniusBar's own in
@@ -71,9 +72,12 @@ offers two choices:
   login. Both installs keep their state in the same directories, so your
   agents, inboxes, unread messages, pairings and daemon settings
   (`cold-wake.json`, `wake-sessions.json`) carry over unchanged. If anything
-  fails, GeniusBar removes what it installed and starts the Homebrew services
-  again.
-- **Keep them** sets GeniusBar up on the services that are already running.
+  fails, GeniusBar restores any renamed plists, removes what it installed and
+  starts the previously loaded Homebrew services again. Stopped plists are
+  renamed aside without attempting to stop them, and stay unloaded if the
+  move fails.
+- **Keep them** leaves the Homebrew plists in place and sets GeniusBar up
+  using any services already running, starting its own where needed.
 
 After moving, install the command-line tools above. You can then run
 `brew uninstall agent-bot agent-comms` whenever you like. Don't run

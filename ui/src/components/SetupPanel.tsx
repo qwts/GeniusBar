@@ -4,7 +4,7 @@ const MARK = { pending: '○', running: '…', done: '✓' } as const;
 
 /**
  * First-run setup, shown in place of the roster until GeniusBar is paired.
- * When another install's broker and daemon already run (Homebrew's), setup
+ * When another install's broker or daemon has a plist (Homebrew's), setup
  * says so and offers to move them over, or to keep them as they are (#41).
  */
 export function SetupPanel({ setup, onSetup, existing }: {
@@ -25,8 +25,9 @@ export function SetupPanel({ setup, onSetup, existing }: {
       </ol>
       {found && !setup.running && (
         <p className="small" role="note">
-          {found} is already running. GeniusBar can take over its services, keeping your agents, messages and
-          pairings. If that fails, the current services are started again. Or keep using them as they are.
+          {found} is already installed. GeniusBar can take over its services, keeping your agents, messages and
+          pairings. Stopped services are moved without trying to stop them again. If that fails, previously
+          running services are started again. Or keep the existing services and continue setup.
         </p>
       )}
       {setup.error && <p className="error small" role="alert">{setup.error}</p>}

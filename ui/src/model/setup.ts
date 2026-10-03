@@ -24,6 +24,7 @@ export interface ExistingService {
   program: string[];
   version: string | null;
   homebrew: boolean;
+  state: 'running' | 'stopped';
 }
 export interface ExistingServices {
   broker: ExistingService | null;
@@ -35,8 +36,8 @@ export function describeExisting(existing: ExistingServices | null | undefined):
   if (!existing || (!existing.broker && !existing.daemon)) return null;
   const from = existing.broker?.homebrew || existing.daemon?.homebrew ? ' from Homebrew' : '';
   const parts = [
-    existing.broker && `agent-comms${existing.broker.version ? ` ${existing.broker.version}` : ''}`,
-    existing.daemon && `agent-bot${existing.daemon.version ? ` ${existing.daemon.version}` : ''}`,
+    existing.broker && `agent-comms${existing.broker.version ? ` ${existing.broker.version}` : ''} (${existing.broker.state})`,
+    existing.daemon && `agent-bot${existing.daemon.version ? ` ${existing.daemon.version}` : ''} (${existing.daemon.state})`,
   ].filter(Boolean);
   return `${parts.join(' and ')}${from}`;
 }

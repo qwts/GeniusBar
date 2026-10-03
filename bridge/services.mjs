@@ -23,7 +23,7 @@
 // souls, inboxes, pairings and daemon settings carry over as they are.
 // Result: one JSON line, {ok: true, broker, daemon} with each one of
 // 'absent' | 'current' | 'reinstalled' | 'restarted' | 'removed' |
-// 'migrated' | 'unsupported' (inspect: null or {label, program, version}),
+// 'migrated' | 'unsupported' (inspect: null or {label, program, version, state}),
 // or {ok: false, code, message}.
 //
 // usage: node services.mjs refresh|remove|inspect|migrate AGENT_COMMS_DIR AGENT_BOT_DIR
@@ -146,12 +146,15 @@ export function describeUnit(label, plist) {
   };
 }
 
-/** Another install's broker and daemon units, each null when absent. */
-export function inspectServices({ foreign, read }) {
+/** Another install's units: null when absent, running when loaded in launchd. */
+export async function inspectServices({ foreign, read, loaded }) {
   const found = {};
   for (const which of ['broker', 'daemon']) {
     const plist = read(foreign[which].plist);
-    found[which] = plist === null ? null : describeUnit(foreign[which].label, plist);
+    found[which] = plist === null ? null : {
+      ...describeUnit(foreign[which].label, plist),
+      state: await loaded(foreign[which].label) ? 'running' : 'stopped',
+    };
   }
   return found;
 }
@@ -160,14 +163,17 @@ export function inspectServices({ foreign, read }) {
  * Moves another install's broker and daemon over to GeniusBar's own units.
  * Its units are stopped (`bootout`), GeniusBar's are installed and must
  * answer, and only then are the old units renamed aside. Any failure
- * removes what was installed and starts the old units again (`bootstrap`),
+ * restores renamed plists, removes what was installed and starts the old
+ * loaded units again (`bootstrap`). Present but unloaded plists are renamed
+ * aside without bootout, and remain unloaded on rollback,
  * so a failed or cancelled move leaves the machine running as before.
  */
-export async function migrateServices({ foreign, read, cli, bot, bootout, bootstrap, rename, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now }) {
-  const found = inspectServices({ foreign, read });
+export async function migrateServices({ foreign, read, loaded, cli, bot, bootout, bootstrap, rename, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now }) {
+  const found = await inspectServices({ foreign, read, loaded });
   if (!found.broker && !found.daemon) return { broker: 'absent', daemon: 'absent' };
   const stopped = [];
   const installed = [];
+  const renamed = [];
   const waitFor = async (probe, code, message) => {
     const deadline = now() + MIGRATE_WAIT_MS;
     while (!(await probe())) {
@@ -178,7 +184,7 @@ export async function migrateServices({ foreign, read, cli, bot, bootout, bootst
   try {
     // The daemon talks to the broker, so it stops first and starts last.
     for (const which of ['daemon', 'broker']) {
-      if (!found[which]) continue;
+      if (found[which]?.state !== 'running') continue;
       if (!(await bootout(foreign[which].label))) throw new SetupError('migrate-stop-failed', `launchctl would not stop ${foreign[which].label}`);
       stopped.push(which);
     }
@@ -191,23 +197,30 @@ export async function migrateServices({ foreign, read, cli, bot, bootout, bootst
     if (!daemon?.label) throw failed(daemon, 'daemon-install-failed');
     installed.push('daemon');
     await waitFor(async () => (await bot(['daemon', 'status', '--json']))?.running, 'daemon-not-ready', 'GeniusBar’s identity daemon did not start');
+    const result = {};
+    for (const which of ['broker', 'daemon']) {
+      if (!found[which]) { result[which] = 'absent'; continue; }
+      rename(foreign[which].plist, `${foreign[which].plist}${MIGRATED}`);
+      renamed.push(which);
+      result[which] = 'migrated';
+    }
+    return result;
   } catch (error) {
+    const unrestored = [];
+    for (const which of renamed.reverse()) {
+      try { rename(`${foreign[which].plist}${MIGRATED}`, foreign[which].plist); }
+      catch { unrestored.push(which); }
+    }
     if (installed.includes('daemon')) await bot(['daemon', 'disable', '--json']);
     if (installed.includes('broker')) await cli(['broker', 'uninstall']);
     const restored = [];
     for (const which of ['broker', 'daemon']) {
-      if (stopped.includes(which) && await bootstrap(foreign[which].plist)) restored.push(which);
+      if (stopped.includes(which) && !unrestored.includes(which) && await bootstrap(foreign[which].plist)) restored.push(which);
     }
     const back = restored.length === stopped.length ? 'the previous services were started again' : 'the previous services could not all be started again';
-    throw new SetupError(error.code ?? 'migrate-failed', `${error.message}; ${back}`);
+    const files = unrestored.length ? '; some previous plists could not be restored' : '';
+    throw new SetupError(error.code ?? 'migrate-failed', `${error.message}; ${back}${files}`);
   }
-  const result = {};
-  for (const which of ['broker', 'daemon']) {
-    if (!found[which]) { result[which] = 'absent'; continue; }
-    rename(foreign[which].plist, `${foreign[which].plist}${MIGRATED}`);
-    result[which] = 'migrated';
-  }
-  return result;
 }
 
 async function main() {
@@ -261,6 +274,7 @@ async function main() {
   });
   const migration = {
     foreign,
+    loaded: (label) => launchctl(['print', `gui/${process.getuid()}/${label}`]),
     bootout: (label) => launchctl(['bootout', `gui/${process.getuid()}/${label}`]),
     bootstrap: (plist) => launchctl(['bootstrap', `gui/${process.getuid()}`, plist]),
     rename: renameSync,
@@ -268,7 +282,7 @@ async function main() {
   try {
     const result = action === 'refresh'
       ? await refreshServices({ ...ports, node: process.execPath, commsEntry })
-      : action === 'inspect' ? inspectServices({ foreign, read })
+      : action === 'inspect' ? await inspectServices({ ...migration, read })
         : action === 'migrate' ? await migrateServices({ ...ports, ...migration })
           : await removeServices(ports);
     write({ ok: true, ...result });

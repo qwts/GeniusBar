@@ -124,3 +124,17 @@ test('a directory already on PATH, or a shell GeniusBar does not edit, leaves pr
   assert.throws(() => readFileSync(profile), /ENOENT/);
   assert.equal(pathBlock('/tmp/odd"dir', home), null);
 }));
+
+test('an occupied later aside stops every replacement before anything changes', () => withDirs(({ dir, shims }) => {
+  mkdirSync(dir, { recursive: true });
+  symlinkSync('/old/agent-bot', path.join(dir, 'agent-bot'));
+  symlinkSync('/old/agent-comms', path.join(dir, 'agent-comms'));
+  // Even a dangling symlink occupies an aside destination.
+  const aside = path.join(dir, `agent-comms${ASIDE}`);
+  symlinkSync('/earlier/agent-comms', aside);
+  assert.throws(() => install({ dir, shims, replace: ['agent-bot', 'agent-comms'] }), { code: 'tools-aside-exists' });
+  assert.equal(readlinkSync(path.join(dir, 'agent-bot')), '/old/agent-bot');
+  assert.equal(readlinkSync(path.join(dir, 'agent-comms')), '/old/agent-comms');
+  assert.equal(readlinkSync(aside), '/earlier/agent-comms');
+  assert.throws(() => lstatSync(path.join(dir, `agent-bot${ASIDE}`)), { code: 'ENOENT' });
+}));
