@@ -377,3 +377,31 @@ describe('App language', () => {
     expect(card.textContent).not.toMatch(/luna|codex/i);
   });
 });
+
+
+describe('CLI tools and migration in the rebuilt shell', () => {
+  it.each(['tray', 'window'] as const)('keeps both actions and translates them in %s mode', async (mode) => {
+    const onSetup = vi.fn();
+    const cliTools = {
+      status: vi.fn(async () => ({ dir: '/Users/me/.local/bin', tools: [{ name: 'agent-bot', state: 'absent' as const }] })),
+      install: vi.fn(), uninstall: vi.fn(),
+    };
+    render(<App mode={mode} connection={{ ...disconnected, bridgeConnected: true, unpaired: true }}
+      setup={idleSetup} onSetup={onSetup} cliTools={cliTools} existingServices={{
+        broker: { label: 'broker', program: [], version: '0.3.1', homebrew: true, state: 'stopped' },
+        daemon: { label: 'daemon', program: [], version: null, homebrew: true, state: 'running' },
+      }} />);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Language' }), { target: { value: 'es' } });
+    expect(screen.getByRole('region', { name: 'Configuración' })).toBeTruthy();
+    expect(screen.getByRole('note').textContent).toContain('agent-comms 0.3.1 (detenido) y agent-bot (en ejecución) de Homebrew');
+    expect(screen.getByRole('note').textContent).toContain('se reinician los servicios que estaban en ejecución');
+    expect(screen.getByText('Iniciar tus agentes')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Trasladar a GeniusBar' }));
+    expect(onSetup).toHaveBeenLastCalledWith(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Conservarlos' }));
+    expect(onSetup).toHaveBeenLastCalledWith(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Herramientas de línea de comandos…' }));
+    await screen.findByRole('button', { name: 'Instalar' });
+    expect(cliTools.status).toHaveBeenCalledOnce();
+  });
+});

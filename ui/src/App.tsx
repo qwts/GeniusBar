@@ -6,13 +6,14 @@ import { FirstLaunch, type DevTools, type HarnessAuth, type Starter } from './co
 import { FleetList, type Hiding } from './components/FleetList';
 import { HealthHeader } from './components/HealthHeader';
 import { LaunchForm } from './components/LaunchForm';
+import { CliTools, type CliToolsApi } from './components/CliTools';
 import { RemoveServices } from './components/RemoveServices';
 import { SetupPanel } from './components/SetupPanel';
 import { UpdateNotice } from './components/UpdateNotice';
 import { I18nProvider, LANGS, useI18n, type Lang } from './lib/i18n';
 import { conversationOf, emptyComposer, unreadOf } from './model/chat';
 import { allSouls, buildSoulForest, displayName, findSoul, soulKey, type CensusRow } from './model/census';
-import { needsSetup, type SetupState } from './model/setup';
+import { needsSetup, type ExistingServices, type SetupState } from './model/setup';
 import { disconnected, emptyRosterText, footerStatus, healthHeader, type ConnectionSnapshot } from './model/status';
 import { updateNotice } from './model/updates';
 import { layoutActions, useLayout } from './state/layout';
@@ -35,7 +36,9 @@ interface AppProps {
   select?: string | null;
   /** First-run setup; offered only when given and the connection needs it. */
   setup?: SetupState;
-  onSetup?: () => void;
+  onSetup?: (migrate?: boolean) => void;
+  existingServices?: ExistingServices | null;
+  cliTools?: CliToolsApi;
   /** Chat with souls (#17); without it the session has no conversation. */
   chat?: ChatApi;
   /** Launching souls and packages (#18); without it there is no Launch. */
@@ -89,7 +92,7 @@ function LanguageSelect() {
 
 // The GeniusBar menu (the tray popup's content, and the toolbar popover in
 // window mode) and, from it, one companion's session.
-function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onRemoveServices, starter, harnessAuth, devTools, updates }: AppProps) {
+function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools }: AppProps) {
   const { t } = useI18n();
   const forest = useMemo(() => buildSoulForest(census), [census]);
   const roster = useMemo(() => allSouls(forest), [forest]);
@@ -181,7 +184,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
       )}
       {/* The setup panel replaces the fleet, which has nothing true to say yet. */}
       {showSetup && setup && onSetup ? (
-        <SetupPanel setup={setup} onSetup={onSetup} />
+        <SetupPanel setup={setup} onSetup={onSetup} existing={existingServices} />
       ) : (
         <FleetList forest={forest} paused={paused} unreadOf={unread} onOpen={open} hiding={hiding}
           empty={!showStarter && empty && <p className="muted empty">{empty}</p>} />
@@ -203,7 +206,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
           </div>
         </section>
       )}
-      {(footer || onRefresh || onRemoveServices || (launch && !showSetup) || canCheckUpdates) && (
+      {(footer || onRefresh || onRemoveServices || cliTools || (launch && !showSetup) || canCheckUpdates) && (
         <footer className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border px-3.5 py-2">
           {footer && <span className={`mr-auto ${footer.isError ? 'error small' : 'muted small'}`}>{footer.text}</span>}
           {canCheckUpdates && (
@@ -214,6 +217,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
               {t('launchPackage')}
             </button>
           )}
+          {cliTools && <CliTools api={cliTools} />}
           {onRemoveServices && !setup?.running && <RemoveServices onRemove={onRemoveServices} />}
           {onRefresh && <button type="button" className="link" onClick={onRefresh}>{t('refresh')}</button>}
         </footer>

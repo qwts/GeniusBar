@@ -3,6 +3,7 @@ import { listen } from '@tauri-apps/api/event';
 import { StrictMode, useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App, type AppMode } from './App';
+import type { CliToolsApi } from './components/CliTools';
 import type { DevTools, HarnessAuth, Starter } from './components/FirstLaunch';
 import { inApp } from './bridge';
 import { useCensus } from './useCensus';
@@ -23,7 +24,7 @@ import './styles.css';
 function Live({ snapshot }: { snapshot: SnapshotOptions | null }) {
   const { census, connection, refresh } = useCensus();
   const select = useSnapshot(snapshot, census, connection, refresh);
-  const { setup, runSetup } = useSetup(() => { void refresh?.(); });
+  const { setup, existing, runSetup } = useSetup(() => { void refresh?.(); });
   const chat = useChat({ enabled: inApp() && !snapshot });
   const launcher = useLaunch();
   const updates = useUpdates();
@@ -65,12 +66,17 @@ function Live({ snapshot }: { snapshot: SnapshotOptions | null }) {
   const loadStarter = () => { invoke<Starter>('starter_soul').then(setStarter, () => {}); };
   const devTools: DevTools = { install: () => invoke('install_dev_tools'), recheck: loadStarter };
   useEffect(loadStarter, []);
+  const cliTools: CliToolsApi = {
+    status: () => invoke('cli_tools', { action: 'status' }),
+    install: (replace) => invoke('cli_tools', { action: 'install', replace }),
+    uninstall: () => invoke('cli_tools', { action: 'uninstall' }),
+  };
   // The shell's --window flag picks the desktop; the popup is the default.
   const [mode, setMode] = useState<AppMode>('tray');
   useEffect(() => { invoke<AppMode>('app_mode').then(setMode, () => {}); }, []);
   return (
     <App mode={mode} census={census} connection={connection} onRefresh={refresh} setup={setup} isStatic={Boolean(snapshot)} select={select}
-      onSetup={() => { void runSetup(); }} chat={snapshot ? undefined : chat} launcher={launcher} starter={starter} harnessAuth={harnessAuth}
+      onSetup={(migrate) => { void runSetup(migrate); }} existingServices={existing} cliTools={cliTools} chat={snapshot ? undefined : chat} launcher={launcher} starter={starter} harnessAuth={harnessAuth}
       devTools={devTools} openedPackage={openedPackage} updates={updates}
       onRemoveServices={async () => { await invoke('remove_services'); void refresh?.(); }} />
   );

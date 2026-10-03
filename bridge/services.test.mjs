@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { refreshServices, removeServices, runsCopy } from './services.mjs';
+import { describeUnit, inspectServices, MIGRATED, migrateServices, programArgs, refreshServices, removeServices, runsCopy } from './services.mjs';
 
 const node = '/Applications/Genius Bar.app/Contents/MacOS/node';
 const entry = '/Applications/Genius Bar.app/Contents/Resources/components/agent-comms/bin/agent-comms.mjs';
@@ -136,4 +136,154 @@ test('remove unloads and deletes both GeniusBar units, skipping absent ones', as
   assert.deepEqual(await removeServices({ units, read: () => null, cli: none.run, bot: none.run }), { daemon: 'absent', broker: 'absent' });
   const stuck = fake({ 'daemon disable --json': { ok: false, error: { code: 'launchctl-failed', message: 'busy' } } });
   await assert.rejects(removeServices({ units, read: () => 'x', cli: none.run, bot: stuck.run }), { code: 'launchctl-failed' });
+});
+
+// Homebrew's units, as the host has them (#41).
+const brewBroker = `<plist><dict><key>Label</key><string>dev.qwts.agent-comms.broker</string>
+<key>ProgramArguments</key><array>
+  <string>/opt/homebrew/Cellar/node/26.10.0_1/bin/node</string>
+  <string>/opt/homebrew/Cellar/agent-comms/0.3.1/libexec/bin/agent-comms.mjs</string>
+  <string>broker</string><string>run</string><string>--single-account</string>
+</array></dict></plist>`;
+const brewDaemon = `<plist><dict><key>ProgramArguments</key><array>
+  <string>/opt/homebrew/opt/node/bin/node</string><string>/opt/homebrew/opt/agent-bot/libexec/agent-bot.mjs</string>
+  <string>daemon</string><string>run</string>
+</array></dict></plist>`;
+const foreign = {
+  broker: { label: 'dev.qwts.agent-comms.broker', plist: '/LA/dev.qwts.agent-comms.broker.plist' },
+  daemon: { label: 'dev.qwts.agent-bot.daemon', plist: '/LA/dev.qwts.agent-bot.daemon.plist' },
+};
+
+function launchd(files, { bootoutOk = true, bootstrapOk = true, loaded = true } = {}) {
+  const log = [];
+  return {
+    log,
+    read: (file) => files[file] ?? null,
+    loaded: async () => loaded,
+    bootout: async (label) => { log.push(`bootout ${label}`); return bootoutOk; },
+    bootstrap: async (plist) => { log.push(`bootstrap ${plist}`); return bootstrapOk; },
+    rename: (from, to) => { log.push(`rename ${from} -> ${to}`); files[to] = files[from]; delete files[from]; },
+  };
+}
+const fast = { sleep: async () => {}, now: (() => { let t = 0; return () => (t += 1000); })() };
+
+test('reads a unit’s program and its Homebrew version', async () => {
+  assert.deepEqual(programArgs(brewBroker).slice(2), ['broker', 'run', '--single-account']);
+  assert.deepEqual(describeUnit('dev.qwts.agent-comms.broker', brewBroker),
+    { label: 'dev.qwts.agent-comms.broker', program: programArgs(brewBroker), version: '0.3.1', homebrew: true });
+  assert.equal(describeUnit('x', brewDaemon).version, null);
+  assert.equal(describeUnit('x', plist('/n', '/e').replace('<string>run</string>', '<string>run</string><string>--group</string><string>agents</string>')).group, 'agents');
+  assert.deepEqual(await inspectServices({ foreign, read: () => null }), { broker: null, daemon: null });
+});
+
+test('migrate stops Homebrew’s units, starts GeniusBar’s, then renames the old units aside', async () => {
+  const files = { [foreign.broker.plist]: brewBroker, [foreign.daemon.plist]: brewDaemon };
+  const host = launchd(files);
+  const cli = fake({ 'broker install': { installed: true }, 'broker pairings': { ok: true, pairings: [] } });
+  const bot = fake({ 'daemon install --json': { label: 'app.geniusbar.agent-bot' }, 'daemon status --json': { running: true } });
+  assert.deepEqual(await migrateServices({ foreign, ...host, cli: cli.run, bot: bot.run, ...fast }), { broker: 'migrated', daemon: 'migrated' });
+  assert.deepEqual(host.log, [
+    'bootout dev.qwts.agent-bot.daemon',
+    'bootout dev.qwts.agent-comms.broker',
+    `rename ${foreign.broker.plist} -> ${foreign.broker.plist}${MIGRATED}`,
+    `rename ${foreign.daemon.plist} -> ${foreign.daemon.plist}${MIGRATED}`,
+  ]);
+  assert.deepEqual(cli.calls, ['broker install', 'broker pairings']);
+  assert.deepEqual(bot.calls, ['daemon install --json', 'daemon status --json']);
+  // Nothing left to move: a second run changes nothing.
+  assert.deepEqual(await migrateServices({ foreign, ...host, cli: cli.run, bot: bot.run, ...fast }), { broker: 'absent', daemon: 'absent' });
+});
+
+test('a group broker keeps its group when it moves', async () => {
+  const grouped = brewBroker.replace('<string>--single-account</string>', '<string>--group</string><string>agents</string>');
+  const host = launchd({ [foreign.broker.plist]: grouped });
+  const cli = fake({ 'broker install --group agents': { installed: true }, 'broker pairings': { ok: true } });
+  const bot = fake({ 'daemon install --json': { label: 'l' }, 'daemon status --json': { running: true } });
+  assert.deepEqual(await migrateServices({ foreign, ...host, cli: cli.run, bot: bot.run, ...fast }), { broker: 'migrated', daemon: 'absent' });
+});
+
+test('a failed migration removes GeniusBar’s units and starts the old ones again', async () => {
+  const files = { [foreign.broker.plist]: brewBroker, [foreign.daemon.plist]: brewDaemon };
+  const host = launchd(files);
+  const cli = fake({ 'broker install': { installed: true }, 'broker pairings': { ok: true }, 'broker uninstall': { installed: false } });
+  const bot = fake({ 'daemon install --json': { label: 'l' }, 'daemon status --json': { running: false }, 'daemon disable --json': { unloaded: true } });
+  await assert.rejects(migrateServices({ foreign, ...host, cli: cli.run, bot: bot.run, ...fast }), (error) => {
+    assert.equal(error.code, 'daemon-not-ready');
+    assert.match(error.message, /previous services were started again/);
+    return true;
+  });
+  assert.ok(cli.calls.includes('broker uninstall'));
+  assert.ok(bot.calls.includes('daemon disable --json'));
+  assert.deepEqual(host.log.filter((line) => line.startsWith('bootstrap')), [`bootstrap ${foreign.broker.plist}`, `bootstrap ${foreign.daemon.plist}`]);
+  // The old units were never renamed.
+  assert.ok(files[foreign.broker.plist] && files[foreign.daemon.plist]);
+});
+
+test('a unit launchd will not stop ends the migration before anything is installed', async () => {
+  const host = launchd({ [foreign.daemon.plist]: brewDaemon }, { bootoutOk: false });
+  const cli = fake({});
+  const bot = fake({});
+  await assert.rejects(migrateServices({ foreign, ...host, cli: cli.run, bot: bot.run, ...fast }), /would not stop dev\.qwts\.agent-bot\.daemon/);
+  assert.deepEqual([...cli.calls, ...bot.calls], []);
+  assert.deepEqual(host.log, ['bootout dev.qwts.agent-bot.daemon']);
+});
+
+test('inspect checks launchd for present units and distinguishes stopped plists', async () => {
+  const checked = [];
+  const files = { [foreign.broker.plist]: brewBroker, [foreign.daemon.plist]: brewDaemon };
+  const found = await inspectServices({ foreign, read: (file) => files[file] ?? null,
+    loaded: async (label) => { checked.push(label); return label === foreign.broker.label; } });
+  assert.equal(found.broker.state, 'running');
+  assert.equal(found.daemon.state, 'stopped');
+  assert.deepEqual(checked, [foreign.broker.label, foreign.daemon.label]);
+  checked.length = 0;
+  assert.deepEqual(await inspectServices({ foreign, read: () => null,
+    loaded: async (label) => { checked.push(label); return true; } }), { broker: null, daemon: null });
+  assert.deepEqual(checked, []);
+});
+
+test('migration renames stopped plists without trying to bootout unloaded units', async () => {
+  const files = { [foreign.broker.plist]: brewBroker, [foreign.daemon.plist]: brewDaemon };
+  const host = launchd(files, { loaded: false, bootoutOk: false });
+  const cli = fake({ 'broker install': { installed: true }, 'broker pairings': { ok: true } });
+  const bot = fake({ 'daemon install --json': { label: 'l' }, 'daemon status --json': { running: true } });
+  assert.deepEqual(await migrateServices({ foreign, ...host, cli: cli.run, bot: bot.run, ...fast }),
+    { broker: 'migrated', daemon: 'migrated' });
+  assert.deepEqual(host.log, [
+    `rename ${foreign.broker.plist} -> ${foreign.broker.plist}${MIGRATED}`,
+    `rename ${foreign.daemon.plist} -> ${foreign.daemon.plist}${MIGRATED}`,
+  ]);
+});
+
+test('failure on the second plist rename restores files and rolls services back', async () => {
+  const files = { [foreign.broker.plist]: brewBroker, [foreign.daemon.plist]: brewDaemon };
+  const original = { ...files };
+  const host = launchd(files);
+  const cli = fake({ 'broker install': { installed: true }, 'broker pairings': { ok: true }, 'broker uninstall': { installed: false } });
+  const bot = fake({ 'daemon install --json': { label: 'l' }, 'daemon status --json': { running: true }, 'daemon disable --json': { unloaded: true } });
+  const rename = (from, to) => {
+    if (from === foreign.daemon.plist) throw Object.assign(new Error('rename denied'), { code: 'EACCES' });
+    host.rename(from, to);
+  };
+  await assert.rejects(migrateServices({ foreign, ...host, rename, cli: cli.run, bot: bot.run, ...fast }),
+    { code: 'EACCES', message: 'rename denied; the previous services were started again' });
+  assert.deepEqual(files, original);
+  assert.deepEqual(cli.calls, ['broker install', 'broker pairings', 'broker uninstall']);
+  assert.deepEqual(bot.calls, ['daemon install --json', 'daemon status --json', 'daemon disable --json']);
+  assert.deepEqual(host.log.slice(2), [
+    `rename ${foreign.broker.plist} -> ${foreign.broker.plist}${MIGRATED}`,
+    `rename ${foreign.broker.plist}${MIGRATED} -> ${foreign.broker.plist}`,
+    `bootstrap ${foreign.broker.plist}`,
+    `bootstrap ${foreign.daemon.plist}`,
+  ]);
+});
+
+test('failed migration leaves stopped foreign units unloaded', async () => {
+  const files = { [foreign.broker.plist]: brewBroker };
+  const host = launchd(files, { loaded: false });
+  const cli = fake({ 'broker install': { installed: true }, 'broker pairings': { ok: true }, 'broker uninstall': { installed: false } });
+  const bot = fake({ 'daemon install --json': { error: { code: 'denied', message: 'no' } } });
+  await assert.rejects(migrateServices({ foreign, ...host, cli: cli.run, bot: bot.run, ...fast }), { code: 'denied' });
+  assert.deepEqual(host.log, []);
+  assert.deepEqual(files, { [foreign.broker.plist]: brewBroker });
 });
