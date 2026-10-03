@@ -1,5 +1,6 @@
 // First-run setup state (#9): which steps are done, and whether the
 // connection calls for setup at all.
+import { translate, type Translate } from '../lib/i18n';
 import type { ConnectionSnapshot } from './status';
 
 export type SetupStep = 'broker' | 'account' | 'principal' | 'daemon';
@@ -17,6 +18,30 @@ export const SETUP_STEPS: readonly { step: SetupStep; label: string }[] = [
   { step: 'principal', label: 'Connect GeniusBar' },
   { step: 'daemon', label: 'Start your agents' },
 ];
+
+/** One service from another install, as `inspect_services` reports it. */
+export interface ExistingService {
+  label: string;
+  program: string[];
+  version: string | null;
+  homebrew: boolean;
+  state: 'running' | 'stopped';
+}
+export interface ExistingServices {
+  broker: ExistingService | null;
+  daemon: ExistingService | null;
+}
+
+/** A short description of another install's services, or null when there are none. */
+export function describeExisting(existing: ExistingServices | null | undefined, t: Translate = (key, vars) => translate('en', key, vars)): string | null {
+  if (!existing || (!existing.broker && !existing.daemon)) return null;
+  const parts = [
+    existing.broker && `agent-comms${existing.broker.version ? ` ${existing.broker.version}` : ''} (${t(`setup.${existing.broker.state}`)})`,
+    existing.daemon && `agent-bot${existing.daemon.version ? ` ${existing.daemon.version}` : ''} (${t(`setup.${existing.daemon.state}`)})`,
+  ].filter(Boolean);
+  const services = parts.join(t('list.and'));
+  return existing.broker?.homebrew || existing.daemon?.homebrew ? t('setup.homebrew', { services }) : services;
+}
 
 export const idleSetup: SetupState = {
   running: false,

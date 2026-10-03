@@ -92,8 +92,8 @@ export function healthHeader(s: ConnectionSnapshot): HeaderState {
     return {
       tone: 'bad',
       title,
-      detail: 'Your souls will appear here once GeniusBar connects.',
-      label: 'Can’t reach the background service. Your souls will appear here once GeniusBar connects.',
+      detail: 'Your companions will appear here once GeniusBar connects.',
+      label: 'Can’t reach the background service. Your companions will appear here once GeniusBar connects.',
     };
   }
   if (s.health) {
@@ -122,7 +122,7 @@ export function credentialNote(s: ConnectionSnapshot): string | null {
  */
 export function emptyRosterText(s: ConnectionSnapshot): string | null {
   if (!s.bridgeConnected) return null;
-  return s.brokerUnreachable ? 'Your souls will appear here once GeniusBar connects.' : 'No souls yet. Your first soul will appear here.';
+  return s.brokerUnreachable ? 'Your companions will appear here once GeniusBar connects.' : 'No companions yet. Your first companion will appear here.';
 }
 
 export interface FooterState {
