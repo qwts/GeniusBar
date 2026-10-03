@@ -48,7 +48,7 @@ export function shortAgentId(soul: Pick<CensusRow, 'agentId'>): string {
 export function displayName(soul: Pick<CensusRow, 'agentId' | 'name'>): string {
   if (soul.name) return soul.name;
   const short = shortAgentId(soul);
-  return short === '' ? 'unknown soul' : short;
+  return short === '' ? 'unknown companion' : short;
 }
 
 /** Harness label with an explicit fallback instead of a bare dash. */
@@ -62,7 +62,7 @@ export function displayHarness(soul: Pick<CensusRow, 'harness'>): string {
  */
 export function availabilityNote(soul: Pick<CensusRow, 'presence'>): string | null {
   return soul.presence === 'left'
-    ? 'Left — no longer available. Kept in the roster for reference.'
+    ? 'Left — no longer available. Kept in the fleet for reference.'
     : null;
 }
 

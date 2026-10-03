@@ -1,0 +1,266 @@
+import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react';
+import { ChevronDown, EyeOff, Users, X } from 'lucide-react';
+import { displayHarness, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
+import { companionLabel, teamsOf, type Team } from '../model/fleet';
+import { useI18n } from '../lib/i18n';
+import { layoutActions, type DesktopLayout } from '../state/layout';
+import { SoulDudle } from './FleetList';
+
+const CARD_W = 300;
+const GAP = 16;
+
+interface DesktopProps {
+  forest: readonly SoulNode[];
+  layout: DesktopLayout;
+  paused: boolean;
+  unreadOf?: (soul: CensusRow) => number;
+  selectedKey: string | null;
+  onOpen: (soul: CensusRow) => void;
+  /** Shown in place of the teams: setup hints and the empty fleet. */
+  notice?: ReactNode;
+  /** The open companion's window. */
+  children?: ReactNode;
+}
+
+/**
+ * Window mode's desktop (R6): every team as a card the user can drag,
+ * collapse, and hide companions from. Teams nobody moved fill columns.
+ */
+export function Desktop({ forest, layout, paused, unreadOf, selectedKey, onOpen, notice, children }: DesktopProps) {
+  const { t } = useI18n();
+  const ref = useRef<HTMLElement>(null);
+  const [width, setWidth] = useState(1100);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(([entry]) => entry && setWidth(entry.contentRect.width));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const teams = useMemo(() => teamsOf(forest), [forest]);
+  // Shortest column first, as masonry, for teams without a saved position.
+  const placed = useMemo(() => {
+    const column = CARD_W + GAP;
+    const heights = Array<number>(Math.max(1, Math.floor((width - GAP) / column))).fill(GAP);
+    return teams.map((team) => {
+      const key = soulKey(team.lead);
+      const visible = team.members.filter((m) => !layout.hidden.includes(soulKey(m.soul)));
+      const collapsed = layout.collapsed.includes(key);
+      const height = 64 + (collapsed || !visible.length ? 0 : Math.ceil(visible.length / 4) * 68 + 12);
+      const col = heights.indexOf(Math.min(...heights));
+      const fallback = { x: GAP + col * column, y: heights[col] };
+      heights[col] += height + GAP;
+      return { team, id: key, visible, collapsed, leadHidden: layout.hidden.includes(key), pos: layout.pos[key] ?? fallback };
+    });
+  }, [teams, layout, width]);
+
+  return (
+    <main ref={ref} className="gb-wallpaper relative min-h-0 flex-1 overflow-auto" aria-label={t('fleet')}>
+      {notice ? (
+        <div className="absolute inset-x-0 top-1/3 mx-auto grid max-w-sm justify-items-center gap-3 px-4 text-center text-sm text-muted-foreground">
+          {notice}
+        </div>
+      ) : (
+        placed.map(({ id, ...p }) => p.leadHidden && !p.visible.length ? null : (
+          <TeamCluster key={id} {...p} paused={paused} unreadOf={unreadOf} selectedKey={selectedKey} onOpen={onOpen} />
+        ))
+      )}
+      {!notice && <p className="pointer-events-none fixed inset-x-0 bottom-2 m-0 text-center text-xs text-muted-foreground/70">{t('desktopHint')}</p>}
+      {children}
+    </main>
+  );
+}
+
+interface ClusterProps {
+  team: Team;
+  visible: Team['members'];
+  collapsed: boolean;
+  leadHidden: boolean;
+  pos: { x: number; y: number };
+  paused: boolean;
+  unreadOf?: (soul: CensusRow) => number;
+  selectedKey: string | null;
+  onOpen: (soul: CensusRow) => void;
+}
+
+/**
+ * One team's card. A hidden lead shows nothing of itself — no avatar, name
+ * or harness — just a neutral placeholder with the subagent and hidden
+ * counts, so hiding a team root hides it even when the team has visible
+ * subagents to reach. Only the controls those subagents need stay.
+ */
+function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unreadOf, selectedKey, onOpen }: ClusterProps) {
+  const { t } = useI18n();
+  const key = soulKey(team.lead);
+  const drag = useRef<{ dx: number; dy: number } | null>(null);
+  const [live, setLive] = useState<{ x: number; y: number } | null>(null);
+  const at = live ?? pos;
+  const count = team.members.length;
+  const hiddenCount = count - visible.length;
+  const subagents = count > 0 ? (count === 1 ? t('team.countOne') : t('team.countMany', { count })) : null;
+  const hidden = hiddenCount > 0
+    ? (hiddenCount === 1 ? t('team.hiddenOne') : t('team.hiddenMany', { count: hiddenCount }))
+    : null;
+
+  const onDown = (e: PointerEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest('button')) return;
+    drag.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onMove = (e: PointerEvent<HTMLDivElement>) => {
+    if (!drag.current) return;
+    setLive({ x: Math.max(0, e.clientX - drag.current.dx), y: Math.max(0, e.clientY - drag.current.dy) });
+  };
+  const onUp = () => {
+    if (drag.current && live) layoutActions.move(key, live.x, live.y);
+    drag.current = null;
+    setLive(null);
+  };
+
+  return (
+    <section
+      aria-label={leadHidden ? t('team.placeholder') : displayName(team.lead)}
+      style={{ left: at.x, top: at.y, width: CARD_W }}
+      className={`absolute rounded-xl border border-border bg-card/80 shadow-lg backdrop-blur-md ${live ? 'z-20' : ''}`}
+    >
+      <div onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
+        className={`flex touch-none items-center gap-2 p-2 ${live ? 'cursor-grabbing' : 'cursor-grab'}`}>
+        {leadHidden ? (
+          <>
+            <span className="grid size-10 shrink-0 place-items-center rounded-lg border border-dashed border-border text-muted-foreground" aria-hidden>
+              <Users className="size-5" />
+            </span>
+            <div className="min-w-0 flex-1 select-none">
+              <p className="m-0 truncate text-sm font-semibold">{t('team.placeholder')}</p>
+              <p className="m-0 truncate font-mono text-[10px] text-muted-foreground">
+                {[subagents, hidden].filter((part): part is string => part !== null).join(' · ')}
+              </p>
+            </div>
+          </>
+        ) : (
+          <>
+            <CompanionButton soul={team.lead} size={40} paused={paused} unread={unreadOf?.(team.lead) ?? 0}
+              selected={selectedKey === key} onOpen={onOpen} bare />
+            <div className="min-w-0 flex-1 select-none">
+              <p className="m-0 truncate text-sm font-semibold">{displayName(team.lead)}</p>
+              <p className="m-0 truncate font-mono text-[10px] text-muted-foreground">
+                {displayHarness(team.lead)}{subagents && <> · {subagents}</>}
+              </p>
+            </div>
+          </>
+        )}
+        {count > 0 && (
+          <button
+            type="button"
+            aria-label={collapsed ? t('team.expand') : t('team.collapse')}
+            aria-expanded={!collapsed}
+            onClick={() => layoutActions.setCollapsed(key, !collapsed)}
+            className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <ChevronDown className={`size-4 transition-transform ${collapsed ? '-rotate-90' : ''}`} aria-hidden />
+          </button>
+        )}
+      </div>
+      {!collapsed && visible.length > 0 && (
+        <ul className="m-0 grid list-none grid-cols-4 gap-1 border-t border-border/60 p-2">
+          {visible.map((m) => (
+            <li key={soulKey(m.soul)}>
+              <CompanionButton soul={m.soul} size={32} paused={paused} unread={unreadOf?.(m.soul) ?? 0}
+                selected={selectedKey === soulKey(m.soul)} onOpen={onOpen} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = false }: {
+  soul: CensusRow; size: number; paused: boolean; unread: number; selected: boolean;
+  onOpen: (soul: CensusRow) => void; bare?: boolean;
+}) {
+  const { t } = useI18n();
+  const [menu, setMenu] = useState(false);
+  const first = useRef<HTMLButtonElement>(null);
+  const label = companionLabel(soul, t, unread);
+  useEffect(() => { if (menu) first.current?.focus(); }, [menu]);
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        aria-label={label}
+        title={label}
+        aria-current={selected ? 'true' : undefined}
+        aria-haspopup="menu"
+        onClick={() => onOpen(soul)}
+        onContextMenu={(e) => { e.preventDefault(); setMenu(true); }}
+        className={`flex flex-col items-center gap-0.5 rounded-lg p-1 ${bare ? 'shrink-0' : 'w-full'} ${selected ? 'bg-accent' : 'hover:bg-accent/50'}`}
+      >
+        <span className="relative">
+          <SoulDudle soul={soul} size={size} paused={paused} />
+          {unread > 0 && <span className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-primary ring-2 ring-card" aria-hidden />}
+        </span>
+        {!bare && (
+          <span className={`max-w-full truncate text-[10px] ${soul.presence === 'left' ? 'text-muted-foreground' : ''}`}>
+            {displayName(soul)}
+          </span>
+        )}
+      </button>
+      {menu && (
+        <div role="menu" aria-label={displayName(soul)}
+          className="absolute top-full left-1/2 z-30 mt-1 grid min-w-40 -translate-x-1/2 rounded-md border border-border bg-popover p-1 text-sm shadow-xl"
+          onKeyDown={(e) => { if (e.key === 'Escape') setMenu(false); }}
+          onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setMenu(false); }}>
+          <button ref={first} type="button" role="menuitem" className="rounded px-2 py-1 text-left hover:bg-accent"
+            onClick={() => { setMenu(false); onOpen(soul); }}>
+            {t('bar.open')}
+          </button>
+          <button type="button" role="menuitem" className="flex items-center gap-2 rounded px-2 py-1 text-left hover:bg-accent"
+            onClick={() => { setMenu(false); layoutActions.setHidden(soulKey(soul), true); }}>
+            <EyeOff className="size-3.5" aria-hidden /> {t('bar.hide')}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A movable window over the desktop, hosting one companion's session. */
+export function CompanionWindow({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  const { t } = useI18n();
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const drag = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
+  const close = useRef<HTMLButtonElement>(null);
+  useEffect(() => close.current?.focus(), []);
+  return (
+    <section
+      role="dialog"
+      aria-label={title}
+      className="absolute top-1/2 left-1/2 z-30 flex h-[min(620px,calc(100%-3rem))] w-[min(720px,calc(100%-1rem))] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
+      style={{ transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px))` }}
+      onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
+    >
+      <div
+        className="flex cursor-grab touch-none items-center gap-2 border-b border-border bg-sidebar px-3 py-1.5 select-none active:cursor-grabbing"
+        onPointerDown={(e) => {
+          if ((e.target as HTMLElement).closest('button')) return;
+          e.currentTarget.setPointerCapture(e.pointerId);
+          drag.current = { sx: e.clientX, sy: e.clientY, ox: offset.x, oy: offset.y };
+        }}
+        onPointerMove={(e) => {
+          const d = drag.current;
+          if (d) setOffset({ x: d.ox + e.clientX - d.sx, y: d.oy + e.clientY - d.sy });
+        }}
+        onPointerUp={() => { drag.current = null; }}
+      >
+        <button ref={close} type="button" onClick={onClose} aria-label={t('closeWindow')} title={t('closeWindow')}
+          className="grid size-3.5 place-items-center rounded-full bg-destructive/80 text-destructive-foreground hover:bg-destructive">
+          <X className="size-2.5" aria-hidden />
+        </button>
+        <span className="truncate font-mono text-[11px] text-muted-foreground">{title}</span>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+    </section>
+  );
+}

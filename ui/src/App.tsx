@@ -1,22 +1,30 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { LayoutGrid } from 'lucide-react';
+import { CompanionSession } from './components/CompanionSession';
+import { CompanionWindow, Desktop } from './components/Desktop';
 import { FirstLaunch, type DevTools, type HarnessAuth, type Starter } from './components/FirstLaunch';
+import { FleetList, type Hiding } from './components/FleetList';
 import { HealthHeader } from './components/HealthHeader';
 import { LaunchForm } from './components/LaunchForm';
 import { RemoveServices } from './components/RemoveServices';
 import { SetupPanel } from './components/SetupPanel';
-import { SoulDetail } from './components/SoulDetail';
-import { SoulRow } from './components/SoulRow';
 import { UpdateNotice } from './components/UpdateNotice';
+import { I18nProvider, LANGS, useI18n, type Lang } from './lib/i18n';
 import { conversationOf, emptyComposer, unreadOf } from './model/chat';
-import { allSouls, buildSoulForest, findSoul, soulKey, type CensusRow } from './model/census';
+import { allSouls, buildSoulForest, displayName, findSoul, soulKey, type CensusRow } from './model/census';
 import { needsSetup, type SetupState } from './model/setup';
-import { disconnected, emptyRosterText, footerStatus, type ConnectionSnapshot } from './model/status';
+import { disconnected, emptyRosterText, footerStatus, healthHeader, type ConnectionSnapshot } from './model/status';
 import { updateNotice } from './model/updates';
+import { layoutActions, useLayout } from './state/layout';
 import type { ChatApi } from './useChat';
 import type { LaunchApi } from './useLaunch';
 import type { UpdateApi } from './useUpdates';
 
+/** The tray's popup, or `--window`'s desktop; the shell picks (app_mode). */
+export type AppMode = 'tray' | 'window';
+
 interface AppProps {
+  mode?: AppMode;
   /** Census rows from the principal client; absent until the bridge (#7). */
   census?: readonly CensusRow[];
   connection?: ConnectionSnapshot;
@@ -28,7 +36,7 @@ interface AppProps {
   /** First-run setup; offered only when given and the connection needs it. */
   setup?: SetupState;
   onSetup?: () => void;
-  /** Chat with souls (#17); without it the detail has no conversation. */
+  /** Chat with souls (#17); without it the session has no conversation. */
   chat?: ChatApi;
   /** Launching souls and packages (#18); without it there is no Launch. */
   launcher?: LaunchApi;
@@ -61,13 +69,32 @@ function usePageHidden(): boolean {
 // Stable default so the forest memo does not rebuild on every render.
 const NO_CENSUS: readonly CensusRow[] = [];
 
-// The popup's root: health header, the census nested under parents, and
-// the read-only detail for a selected soul.
-export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onRemoveServices, starter, harnessAuth, devTools, updates }: AppProps) {
+export function App(props: AppProps) {
+  return (
+    <I18nProvider>
+      <Shell {...props} />
+    </I18nProvider>
+  );
+}
+
+function LanguageSelect() {
+  const { lang, setLang, t } = useI18n();
+  return (
+    <select aria-label={t('language')} value={lang} onChange={(e) => setLang(e.target.value as Lang)}
+      className="h-6 rounded border border-input bg-muted px-1 text-[11px] text-muted-foreground">
+      {LANGS.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
+    </select>
+  );
+}
+
+// The GeniusBar menu (the tray popup's content, and the toolbar popover in
+// window mode) and, from it, one companion's session.
+function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onRemoveServices, starter, harnessAuth, devTools, updates }: AppProps) {
+  const { t } = useI18n();
   const forest = useMemo(() => buildSoulForest(census), [census]);
   const roster = useMemo(() => allSouls(forest), [forest]);
   // Selection holds the roster key and resolves against each census, so
-  // the detail shows fresh values and closes if the soul disappears.
+  // the session shows fresh values and closes if the soul disappears.
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const selected = selectedKey === null ? null : findSoul(forest, selectedKey);
   useEffect(() => { if (select !== null) setSelectedKey(select); }, [select]);
@@ -89,10 +116,13 @@ export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, 
   // manual launch starts empty rather than reusing its path and error.
   const [dismissedPackage, setDismissedPackage] = useState<number | null>(null);
   const activePackage = openedPackage && openedPackage.id !== dismissedPackage ? openedPackage : undefined;
+  // Window mode's menu is a popover; it opens itself when it has news.
+  const [menuOpen, setMenuOpen] = useState(false);
   useEffect(() => {
     if (openedPackage) {
       setSelectedKey(null);
       setLaunchingPackage(true);
+      setMenuOpen(true);
     }
   }, [openedPackage?.id]);
   // The first launch stays open from the click until closed, so its result
@@ -103,98 +133,161 @@ export function App({ census = NO_CENSUS, connection = disconnected, onRefresh, 
   // the panel carries the whole update flow when there is no tray (#34).
   const canCheckUpdates = Boolean(updates && !updateNotice(updates.status) && updates.status.state !== 'disabled');
   const showStarter = canOfferStarter && (starterOpen || forest.length === 0);
+  useEffect(() => { if (showSetup || showStarter) setMenuOpen(true); }, [showSetup, showStarter]);
   const launch = useMemo(() => launcher && {
     launcher,
     accounts: [...new Set(roster.map((s) => s.account))].sort(),
     harnesses: [...new Set(roster.flatMap((s) => (s.harness ? [s.harness] : [])))].sort(),
   }, [launcher, roster]);
+  const layout = useLayout();
 
-  return (
-    <main className="popup">
-      <HealthHeader connection={connection} />
+  const open = (soul: CensusRow) => {
+    setSelectedKey(soulKey(soul));
+    setMenuOpen(false);
+  };
+
+  const session = selected && (
+    <CompanionSession
+      soul={selected}
+      forest={forest}
+      roster={roster}
+      paused={paused}
+      chat={chat && openKey !== null ? {
+        entries: conversationOf(chat.chat, openKey).entries,
+        composer: chat.composers[openKey] ?? emptyComposer,
+        onDraft: (draft) => chat.setDraft(openKey, draft),
+        onSend: () => { void chat.send(openKey); },
+      } : undefined}
+      launch={launch}
+      onOpen={open}
+      onClose={() => setSelectedKey(null)}
+      showBack={mode === 'tray'}
+    />
+  );
+
+  const menu = (hiding?: Hiding) => (
+    <>
+      <HealthHeader connection={connection}><LanguageSelect /></HealthHeader>
       {updates && <UpdateNotice status={updates.status} onAction={updates.act} />}
       {showStarter && starter && launcher && (
-        <section className="detail" aria-label="Your first soul">
+        <section className="panel" aria-label={t('firstCompanion')}>
           <FirstLaunch starter={starter} launcher={launcher} auth={harnessAuth} devTools={devTools} onStart={() => setStarterOpen(true)} />
           {starterOpen && launcher.state.phase !== 'requesting' && launcher.state.phase !== 'pending' && (
             <div className="detail-actions">
-              <button type="button" onClick={() => setStarterOpen(false)}>Close</button>
+              <button type="button" onClick={() => setStarterOpen(false)}>{t('close')}</button>
             </div>
           )}
         </section>
       )}
-      {/* The setup panel replaces the roster, which has nothing true to say yet. */}
+      {/* The setup panel replaces the fleet, which has nothing true to say yet. */}
       {showSetup && setup && onSetup ? (
         <SetupPanel setup={setup} onSetup={onSetup} />
       ) : (
-        <section className="roster" aria-label="Souls">
-          {forest.length === 0
-            ? !showStarter && empty && <p className="muted empty">{empty}</p>
-            : forest.map((node) => (
-                <SoulRow
-                  key={soulKey(node.soul)}
-                  node={node}
-                  depth={0}
-                  paused={paused}
-                  unreadOf={unread}
-                  onSelect={(soul) => setSelectedKey(soulKey(soul))}
-                />
-              ))}
-        </section>
-      )}
-      {selected && (
-        <SoulDetail
-          soul={selected}
-          roster={roster}
-          paused={paused}
-          chat={chat && openKey !== null ? {
-            entries: conversationOf(chat.chat, openKey).entries,
-            composer: chat.composers[openKey] ?? emptyComposer,
-            onDraft: (draft) => chat.setDraft(openKey, draft),
-            onSend: () => { void chat.send(openKey); },
-          } : undefined}
-          launch={launch}
-          onDone={() => setSelectedKey(null)}
-        />
+        <FleetList forest={forest} paused={paused} unreadOf={unread} onOpen={open} hiding={hiding}
+          empty={!showStarter && empty && <p className="muted empty">{empty}</p>} />
       )}
       {launch && launchingPackage && !showSetup && (
-        <section className="detail" aria-label="Launch a soul package">
-          <h2>Launch a soul package</h2>
+        <section className="panel border-t" aria-label={t('launchPackageTitle')}>
+          <h2>{t('launchPackageTitle')}</h2>
           <LaunchForm key={activePackage?.id ?? 'manual'} {...launch}
             initialPackagePath={activePackage?.path}
             checkingPackage={activePackage?.checking}
             packageError={activePackage?.error} />
-          <div className="detail-actions">
+          <div className="detail-actions mt-2">
             <button type="button" onClick={() => {
               setLaunchingPackage(false);
               if (openedPackage) setDismissedPackage(openedPackage.id);
             }}>
-              Close
+              {t('close')}
             </button>
           </div>
         </section>
       )}
       {(footer || onRefresh || onRemoveServices || (launch && !showSetup) || canCheckUpdates) && (
-        <footer className="status">
-          {footer && <span className={footer.isError ? 'error small' : 'muted small'}>{footer.text}</span>}
+        <footer className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border px-3.5 py-2">
+          {footer && <span className={`mr-auto ${footer.isError ? 'error small' : 'muted small'}`}>{footer.text}</span>}
           {canCheckUpdates && (
-            <button type="button" className="link" onClick={() => updates?.act()}>
-              Check for Updates…
-            </button>
+            <button type="button" className="link" onClick={() => updates?.act()}>{t('checkUpdates')}</button>
           )}
           {launch && !showSetup && !launchingPackage && (
             <button type="button" className="link" onClick={() => { setSelectedKey(null); setLaunchingPackage(true); }}>
-              Launch package…
+              {t('launchPackage')}
             </button>
           )}
           {onRemoveServices && !setup?.running && <RemoveServices onRemove={onRemoveServices} />}
-          {onRefresh && (
-            <button type="button" className="link" onClick={onRefresh}>
-              Refresh
-            </button>
-          )}
+          {onRefresh && <button type="button" className="link" onClick={onRefresh}>{t('refresh')}</button>}
         </footer>
       )}
-    </main>
+    </>
+  );
+
+  if (mode === 'tray') {
+    return <main className="gb flex h-full flex-col bg-popover">{session || menu()}</main>;
+  }
+
+  const header = healthHeader(connection);
+  const notice = showSetup ? t('setupHint')
+    : forest.length === 0 ? (showStarter ? t('setupHint') : empty ?? header.title)
+    : null;
+  return (
+    <div className="gb flex h-full flex-col">
+      <Toolbar open={menuOpen} onOpenChange={setMenuOpen} tone={header.tone} title={header.title}
+        onReset={layoutActions.reset}>
+        {menu({ hidden: layout.hidden, onToggle: layoutActions.setHidden, onShowAll: layoutActions.showAll })}
+      </Toolbar>
+      <Desktop forest={forest} layout={layout} paused={paused} unreadOf={unread} selectedKey={openKey} onOpen={open}
+        notice={notice}>
+        {selected && session && (
+          <CompanionWindow title={displayName(selected)} onClose={() => setSelectedKey(null)}>{session}</CompanionWindow>
+        )}
+      </Desktop>
+    </div>
+  );
+}
+
+/**
+ * Window mode's slim toolbar: the GeniusBar item, whose menu drops down as
+ * a popover, plus the desktop's own controls. Escape or a click outside
+ * closes the menu.
+ */
+function Toolbar({ open, onOpenChange, tone, title, onReset, children }: {
+  open: boolean; onOpenChange: (open: boolean) => void; tone: string; title: string; onReset: () => void; children: ReactNode;
+}) {
+  const { t } = useI18n();
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: PointerEvent) => { if (!root.current?.contains(e.target as Node)) onOpenChange(false); };
+    document.addEventListener('pointerdown', away);
+    return () => document.removeEventListener('pointerdown', away);
+  }, [open, onOpenChange]);
+  return (
+    <div className="relative z-40 flex h-9 shrink-0 items-center gap-2 border-b border-border bg-sidebar px-2">
+      <div ref={root} onKeyDown={(e) => { if (e.key === 'Escape') onOpenChange(false); }}>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-haspopup="dialog"
+          aria-label={t('bar.menu')}
+          title={title}
+          onClick={() => onOpenChange(!open)}
+          className={`flex h-7 items-center gap-1.5 rounded px-1.5 hover:bg-accent ${open ? 'bg-accent' : ''}`}
+        >
+          <span className="grid size-4.5 place-items-center rounded-[4px] bg-foreground text-[10px] font-bold text-background" aria-hidden>G</span>
+          <span className="text-xs font-semibold">GeniusBar</span>
+          <span className={`dot dot-${tone}`} aria-hidden />
+        </button>
+        {open && (
+          <div role="dialog" aria-label={t('bar.menu')}
+            className="absolute top-full left-2 mt-1 flex max-h-[calc(100vh-3rem)] w-[22rem] flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-2xl">
+            {children}
+          </div>
+        )}
+      </div>
+      <button type="button" onClick={onReset} title={t('menu.resetLayout')} aria-label={t('menu.resetLayout')}
+        className="ml-auto rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground">
+        <LayoutGrid className="size-4" aria-hidden />
+      </button>
+    </div>
   );
 }

@@ -76,6 +76,26 @@ fn flag_value<'a>(arg: &'a str, next: Option<&'a str>, flag: &str) -> Option<&'a
     }
 }
 
+impl Mode {
+    /// The name the web view branches on: the popup, or the desktop. A
+    /// snapshot draws the popup, so it names that.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Mode::Tray | Mode::Snapshot(_) => "tray",
+            Mode::Window => "window",
+        }
+    }
+}
+
+/// Which layout the web view draws; the mode itself stays the shell's choice.
+#[tauri::command]
+fn app_mode(mode: tauri::State<'_, Mode>) -> &'static str {
+    mode.as_str()
+}
+
+/// The desktop's size in window mode; the popup keeps tauri.conf.json's.
+const WINDOW_SIZE: (f64, f64) = (1100.0, 720.0);
+
 /// A tray click that arrives this soon after the popup hid for losing focus
 /// is the click that took the focus: it closes the popup, not reopens it.
 const DISMISS_GRACE: Duration = Duration::from_millis(300);
@@ -124,6 +144,7 @@ fn show_window_mode(app: &mut App, window: &WebviewWindow) -> tauri::Result<()> 
     window.set_always_on_top(false)?;
     window.set_skip_taskbar(false)?;
     window.set_resizable(true)?;
+    window.set_size(tauri::LogicalSize::new(WINDOW_SIZE.0, WINDOW_SIZE.1))?;
     window.center()?;
     window.show()?;
     window.set_focus()
@@ -201,8 +222,11 @@ pub fn run() {
         .manage(soul_package::PendingSoulPackages::default())
         .manage(Dismissed::default())
         .manage(updates::Updates::default())
+        // A copy: the closure below matches on the original.
+        .manage(mode.clone())
         .manage(snapshot::Snapshot::new(snapshot))
         .invoke_handler(tauri::generate_handler![
+            app_mode,
             bridge::bridge,
             bridge::setup,
             bridge::remove_services,
@@ -285,6 +309,8 @@ mod tests {
     fn window_flag_selects_window_mode() {
         assert_eq!(parse_mode(["--window"]), Mode::Window);
         assert_eq!(parse_mode(["--x", "--window"]), Mode::Window);
+        assert_eq!(Mode::Window.as_str(), "window");
+        assert_eq!(Mode::Tray.as_str(), "tray");
     }
 
     fn snapshot(path: &str, detail: Option<&str>) -> Mode {

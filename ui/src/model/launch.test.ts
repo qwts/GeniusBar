@@ -60,6 +60,6 @@ describe('launch lifecycle', () => {
 
   it('explains a missing daemon for the account', () => {
     expect(launchErrorText('daemon-unavailable', '', 'persona')).toMatch(/can’t reach the agents on account persona/);
-    expect(launchErrorText('weird', 'x')).toBe('GeniusBar couldn’t start this soul. Try again, and ask for help if the problem continues.');
+    expect(launchErrorText('weird', 'x')).toBe('GeniusBar couldn’t start this companion. Try again, and ask for help if the problem continues.');
   });
 });
