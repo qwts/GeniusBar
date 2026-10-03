@@ -23,6 +23,15 @@ describe('desktop layout', () => {
     expect(JSON.parse(localStorage.getItem(LAYOUT_KEY)!)).toEqual({ hidden: [], pos: {}, collapsed: [] });
   });
 
+  it('hides and shows a whole team at once, keeping other hidden companions', () => {
+    layoutActions.setHidden('user/x', true);
+    layoutActions.setHidden('user/a', true);
+    layoutActions.setTeamHidden(['user/p', 'user/a', 'user/b'], true);
+    expect(JSON.parse(localStorage.getItem(LAYOUT_KEY)!).hidden).toEqual(['user/x', 'user/a', 'user/p', 'user/b']);
+    layoutActions.setTeamHidden(['user/p', 'user/a', 'user/b'], false);
+    expect(JSON.parse(localStorage.getItem(LAYOUT_KEY)!).hidden).toEqual(['user/x']);
+  });
+
   it('keeps working when storage throws', () => {
     vi.spyOn(localStorage, 'getItem').mockImplementation(() => { throw new Error('denied'); });
     vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('denied'); });

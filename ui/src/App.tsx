@@ -17,6 +17,8 @@ import { needsSetup, type ExistingServices, type SetupState } from './model/setu
 import { disconnected, emptyRosterText, footerStatus, healthHeader, type ConnectionSnapshot } from './model/status';
 import { updateNotice } from './model/updates';
 import { layoutActions, useLayout } from './state/layout';
+import { usePreferences } from './state/preferences';
+import { DefaultHarness } from './components/DefaultHarness';
 import type { ChatApi } from './useChat';
 import type { LaunchApi } from './useLaunch';
 import type { UpdateApi } from './useUpdates';
@@ -138,11 +140,13 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const canCheckUpdates = Boolean(updates && !updateNotice(updates.status) && updates.status.state !== 'disabled');
   const showStarter = canOfferStarter && (starterOpen || forest.length === 0);
   useEffect(() => { if (showSetup || showStarter) setMenuOpen(true); }, [showSetup, showStarter]);
+  const { defaultHarness } = usePreferences();
   const launch = useMemo(() => launcher && {
     launcher,
     accounts: [...new Set(roster.map((s) => s.account))].sort(),
     harnesses: [...new Set(roster.flatMap((s) => (s.harness ? [s.harness] : [])))].sort(),
-  }, [launcher, roster]);
+    defaultHarness,
+  }, [launcher, roster, defaultHarness]);
   const layout = useLayout();
 
   const open = (soul: CensusRow) => {
@@ -191,6 +195,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
         <FleetList forest={forest} paused={paused} unreadOf={unread} onOpen={open} hiding={hiding}
           empty={!showStarter && empty && <p className="muted empty">{empty}</p>} />
       )}
+      {launch && !showSetup && <DefaultHarness harnesses={launch.harnesses} />}
       {launch && launchingPackage && !showSetup && (
         <section className="panel border-t" aria-label={t('launchPackageTitle')}>
           <h2>{t('launchPackageTitle')}</h2>
@@ -239,7 +244,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     <div className="gb flex h-full flex-col">
       <Toolbar open={menuOpen} onOpenChange={setMenuOpen} tone={header.tone} title={header.title}
         onReset={layoutActions.reset}>
-        {menu({ hidden: layout.hidden, onToggle: layoutActions.setHidden, onShowAll: layoutActions.showAll })}
+        {menu({ hidden: layout.hidden, onToggle: layoutActions.setHidden, onToggleTeam: layoutActions.setTeamHidden, onShowAll: layoutActions.showAll })}
       </Toolbar>
       <Desktop forest={forest} layout={layout} paused={paused} unreadOf={unread} selectedKey={openKey} onOpen={open}
         notice={notice}>

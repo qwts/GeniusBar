@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 import { ChevronDown, EyeOff, Users, X } from 'lucide-react';
 import { displayHarness, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
-import { companionLabel, teamsOf, type Team } from '../model/fleet';
+import { companionLabel, teamKeys, teamsOf, type Team } from '../model/fleet';
 import { useI18n } from '../lib/i18n';
 import { layoutActions, type DesktopLayout } from '../state/layout';
 import { SoulDudle } from './FleetList';
@@ -141,7 +141,7 @@ function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unread
         ) : (
           <>
             <CompanionButton soul={team.lead} size={40} paused={paused} unread={unreadOf?.(team.lead) ?? 0}
-              selected={selectedKey === key} onOpen={onOpen} bare />
+              selected={selectedKey === key} onOpen={onOpen} bare team={count > 0 ? teamKeys(team) : undefined} />
             <div className="min-w-0 flex-1 select-none">
               <p className="m-0 truncate text-sm font-semibold">{displayName(team.lead)}</p>
               <p className="m-0 truncate font-mono text-[10px] text-muted-foreground">
@@ -176,9 +176,11 @@ function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unread
   );
 }
 
-function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = false }: {
+function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = false, team }: {
   soul: CensusRow; size: number; paused: boolean; unread: number; selected: boolean;
   onOpen: (soul: CensusRow) => void; bare?: boolean;
+  /** A lead's whole team: hiding it hides the team card. */
+  team?: readonly string[];
 }) {
   const { t } = useI18n();
   const [menu, setMenu] = useState(false);
@@ -220,6 +222,12 @@ function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = 
             onClick={() => { setMenu(false); layoutActions.setHidden(soulKey(soul), true); }}>
             <EyeOff className="size-3.5" aria-hidden /> {t('bar.hide')}
           </button>
+          {team && (
+            <button type="button" role="menuitem" className="flex items-center gap-2 rounded px-2 py-1 text-left hover:bg-accent"
+              onClick={() => { setMenu(false); layoutActions.setTeamHidden(team, true); }}>
+              <EyeOff className="size-3.5" aria-hidden /> {t('bar.hideTeam')}
+            </button>
+          )}
         </div>
       )}
     </div>

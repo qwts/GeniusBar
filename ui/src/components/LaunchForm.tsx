@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from 'react';
 import { displayName, type CensusRow } from '../model/census';
-import { canLaunch, type LaunchState } from '../model/launch';
+import { canLaunch, harnessOptions, type LaunchState } from '../model/launch';
+import { useI18n } from '../lib/i18n';
 import type { LaunchApi } from '../useLaunch';
 
 interface LaunchFormProps {
@@ -15,6 +16,8 @@ interface LaunchFormProps {
   packageError?: string | null;
   /** Launch this existing soul; without it, the form launches a package. */
   soul?: CensusRow;
+  /** The viewer's default harness, used when the soul has none. */
+  defaultHarness?: string | null;
 }
 
 export function LaunchStatus({ state }: { state: LaunchState }) {
@@ -48,28 +51,31 @@ export function LaunchStatus({ state }: { state: LaunchState }) {
 }
 
 /**
- * Launch form for an existing soul or a soul package. One launch at a time;
- * the result stays on screen and is never retried by the app.
+ * Launch form for an existing soul or a soul package, in three steps:
+ * what to launch, the harness that runs it, and the account it runs as.
+ * One launch at a time; the result stays on screen and is never retried.
  */
-export function LaunchForm({ launcher, accounts, harnesses, soul, initialPackagePath = '', checkingPackage = false,
-  packageError: initialPackageError = null }: LaunchFormProps) {
+export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness = null, initialPackagePath = '',
+  checkingPackage = false, packageError: initialPackageError = null }: LaunchFormProps) {
+  const { t } = useI18n();
   const [account, setAccount] = useState(soul?.account ?? (accounts.length === 1 ? accounts[0] : ''));
   const [packagePath, setPackagePath] = useState(initialPackagePath);
   const [packageError, setPackageError] = useState(initialPackageError);
-  const [harness, setHarness] = useState(soul?.harness ?? '');
+  const [harness, setHarness] = useState(soul?.harness ?? defaultHarness ?? '');
   const [name, setName] = useState('');
   // The launcher is shared: show its result only in the form that started it.
   const [started, setStarted] = useState(false);
   const ids = useId();
   const ready = canLaunch(launcher.state);
-  const what = soul ? displayName(soul) : 'a companion package';
+  const what = soul ? displayName(soul) : t('launch.aPackage');
+  const options = harnessOptions(harnesses, soul?.harness);
 
   useEffect(() => setPackageError(initialPackageError), [initialPackageError]);
 
   return (
     <form
       className="launch"
-      aria-label={`Launch ${what}`}
+      aria-label={t('launch.formLabel', { what })}
       onSubmit={(e) => {
         e.preventDefault();
         if (!ready || checkingPackage || packageError) return;
@@ -83,34 +89,45 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, initialPackage
       }}
     >
       <datalist id={`${ids}-accounts`}>{accounts.map((a) => <option key={a} value={a} />)}</datalist>
-      <datalist id={`${ids}-harnesses`}>{harnesses.map((h) => <option key={h} value={h} />)}</datalist>
-      <label>
-        <span>Account</span>
-        <input value={account} readOnly={Boolean(soul)} list={`${ids}-accounts`} onChange={(e) => setAccount(e.target.value)} />
-      </label>
-      {!soul && (
+      {/* Free text, as before: any harness string can be launched; the list only suggests. */}
+      <datalist id={`${ids}-harnesses`}>{options.map((h) => <option key={h.id} value={h.id}>{h.label}</option>)}</datalist>
+      <h3 className="launch-step">{t('launch.step.what')}</h3>
+      {/* TODO(#65): offer SOP-provided soul templates here once agent-bot lists them. */}
+      {soul ? (
+        <p className="text-sm">{displayName(soul)}</p>
+      ) : (
         <label>
-          <span>Package</span>
-          <input value={packagePath} placeholder="Path in that account" onChange={(e) => {
+          <span>{t('launch.package')}</span>
+          <input value={packagePath} placeholder={t('launch.packagePlaceholder')} onChange={(e) => {
             setPackagePath(e.target.value);
             setPackageError(null);
           }} />
         </label>
       )}
       <label>
-        <span>Harness</span>
-        <input value={harness} list={`${ids}-harnesses`} onChange={(e) => setHarness(e.target.value)} />
+        <span>{t('launch.name')}</span>
+        <input value={name} placeholder={t('launch.nameOptional')} onChange={(e) => setName(e.target.value)} />
       </label>
+      <h3 className="launch-step">{t('launch.step.harness')}</h3>
       <label>
-        <span>Name</span>
-        <input value={name} placeholder="Optional" onChange={(e) => setName(e.target.value)} />
+        <span>{t('field.harness')}</span>
+        <input value={harness} list={`${ids}-harnesses`} placeholder={t('launch.harnessPick')}
+          onChange={(e) => setHarness(e.target.value)} />
       </label>
-      {checkingPackage && <p className="muted small" role="status">Checking this companion package…</p>}
+      <p className="muted small">{t('launch.harnessHint')}</p>
+      <h3 className="launch-step">{t('launch.step.account')}</h3>
+      <label>
+        <span>{t('field.account')}</span>
+        <input value={account} readOnly={Boolean(soul)} list={`${ids}-accounts`} onChange={(e) => setAccount(e.target.value)} />
+      </label>
+      {/* TODO(#66): sandboxing through persona accounts; until then this states who it runs as. */}
+      <p className="muted small">{account.trim() ? t('launch.runsAs', { account: account.trim() }) : t('launch.runsAsNone')}</p>
+      {checkingPackage && <p className="muted small" role="status">{t('launch.checking')}</p>}
       {packageError && <p className="error small" role="alert">{packageError}</p>}
       {started ? <LaunchStatus state={launcher.state} />
-        : !ready && <p className="muted small">Another launch is still waiting for its result.</p>}
+        : !ready && <p className="muted small">{t('launch.busy')}</p>}
       <div className="detail-actions">
-        <button type="submit" disabled={!ready || checkingPackage || Boolean(packageError)}>Launch</button>
+        <button type="submit" disabled={!ready || checkingPackage || Boolean(packageError)}>{t('launch.go')}</button>
       </div>
     </form>
   );
