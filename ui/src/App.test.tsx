@@ -209,6 +209,45 @@ describe('App setup', () => {
     expect(launcher.launch).toHaveBeenCalledWith({ account: 'friend', target: { package: '/App/souls/starter.soul' }, harness: 'claude', name: 'Starter', comms: false });
   });
 
+  it('opens the companion, not a new launch, for an installed soul opened from Finder (#80)', () => {
+    const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher}
+      openedPackage={{ id: 1, path: '/souls/Luna - Starter.soul', checking: false, error: null, agentId: 'agent_p' }} isStatic />);
+    expect(screen.getByRole('region', { name: /^luna,/ })).toBeTruthy();
+    expect(screen.queryByRole('form', { name: 'Launch a companion package' })).toBeNull();
+    expect(launcher.launch).not.toHaveBeenCalled();
+  });
+
+  it('switches from the package form to the companion once the opened folder is located (#80)', () => {
+    const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    const path = '/souls/Luna - Starter.soul';
+    const { rerender } = render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher}
+      openedPackage={{ id: 1, path, checking: true, error: null }} isStatic />);
+    expect(screen.getByRole('form', { name: 'Launch a companion package' })).toBeTruthy();
+    rerender(<App census={sampleCensus} connection={sampleConnection} launcher={launcher}
+      openedPackage={{ id: 1, path, checking: false, error: null, agentId: 'agent_p' }} isStatic />);
+    expect(screen.getByRole('region', { name: /^luna,/ })).toBeTruthy();
+    expect(screen.queryByRole('form', { name: 'Launch a companion package' })).toBeNull();
+  });
+
+  it('refuses to launch a copied soul folder and says why (#80)', () => {
+    const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher}
+      openedPackage={{ id: 1, path: '/souls/Luna copy.soul', checking: false,
+        error: '/souls/Luna copy.soul is a copy of soul agent_p, whose folder is /souls/Luna.soul; open that soul instead and remove the copy' }} isStatic />);
+    expect(screen.getByRole('alert').textContent).toMatch(/is a copy of soul agent_p/);
+    expect((screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.submit(screen.getByRole('form', { name: 'Launch a companion package' }));
+    expect(launcher.launch).not.toHaveBeenCalled();
+  });
+
+  it('keeps contact AutoFill off the launch name field (#80)', () => {
+    const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'Launch package…' }));
+    expect(screen.getByLabelText('Name').getAttribute('autocomplete')).toBe('off');
+  });
+
   it('opens an empty manual form after an opened package is closed', () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher}

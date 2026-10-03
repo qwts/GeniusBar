@@ -240,6 +240,7 @@ pub fn run() {
             bridge::harness_auth,
             bridge::runtime_metrics,
             bridge::soul_comms,
+            bridge::locate_soul_package,
             updates::update_status,
             updates::update_action,
             snapshot::snapshot_options,
