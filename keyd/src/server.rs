@@ -8,7 +8,11 @@
 //!   A call returns an installation token, never key material.
 //! - `owner.sock`, the owner's channel: `owner/import`, `owner/remove` and
 //!   `owner/pin` each need the owner's consent, asked by keyd itself;
-//!   `owner/status` says only whether an item exists.
+//!   `owner/status` says only whether an item exists. `owner/presence`
+//!   asks the owner to approve one agent-bot action and returns keyd's
+//!   signed assertion of it (presence.rs, agent-bot-identity #416); when no
+//!   one can be asked here it fails with PRESENCE_UNAVAILABLE, so agent-bot
+//!   may fall back to its own dialog, and never after a person declined.
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -21,16 +25,19 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use crate::audit::{Audit, Receipt};
-use crate::consent::Consent;
+use crate::consent::{Consent, Refusal};
 use crate::github::{self, Http};
 use crate::grant::{self, Replay};
 use crate::ids::{is_agent_id, is_app_slug};
 use crate::paths::Paths;
+use crate::presence;
 use crate::store::{Credential, Store};
 
 pub const PROTOCOL_VERSION: &str = "2025-06-18";
 pub const GRANT_META: &str = "agent-bot/grant";
 const MAX_LINE_BYTES: u64 = 1 << 20;
+/// JSON-RPC error code: nobody could be asked here (no GUI session).
+pub const PRESENCE_UNAVAILABLE: i64 = -32001;
 
 pub struct Keyd {
     pub store: Store,
@@ -236,6 +243,7 @@ impl Keyd {
         let params = message.get("params").cloned().unwrap_or(json!({}));
         let now = (self.now)();
         let outcome = match method {
+            "owner/presence" => return Some(self.owner_presence(&id, &params, now)),
             "owner/status" => self.owner_status(&params),
             "owner/import" | "owner/remove" | "owner/pin" => {
                 let _one_prompt_at_a_time = self.owner_lock.lock().unwrap();
@@ -270,6 +278,62 @@ impl Keyd {
             Ok(result) => reply(&id, result),
             Err(message) => failure(&id, -32000, &message),
         })
+    }
+
+    /// One approval for one agent-bot action, signed for agent-bot.
+    fn owner_presence(&self, id: &Value, params: &Value, now: u64) -> Value {
+        let action = params.get("action").and_then(Value::as_str);
+        let nonce = params.get("nonce").and_then(Value::as_str);
+        let (Some(action), Some(nonce)) = (action, nonce) else {
+            return failure(id, -32602, "presence needs an action and a nonce");
+        };
+        if !presence::action_ok(action) {
+            return failure(
+                id,
+                -32602,
+                "the action must be one line of 1 to 400 characters",
+            );
+        }
+        if !presence::nonce_ok(nonce) {
+            return failure(id, -32602, "the nonce is not 16 to 64 base64url characters");
+        }
+        let _one_prompt_at_a_time = self.owner_lock.lock().unwrap();
+        let outcome = self
+            .store
+            .presence_seed()
+            .map_err(Refusal::Declined)
+            .and_then(|seed| {
+                self.consent.ask(&presence::reason(action))?;
+                Ok(presence::sign(&seed, action, nonce, now))
+            });
+        let (decision, detail) = match &outcome {
+            Ok(_) => ("granted", None),
+            Err(Refusal::Unavailable(message)) => ("unavailable", Some(message.as_str())),
+            Err(Refusal::Declined(message)) => ("refused", Some(message.as_str())),
+        };
+        // The receipt names the action by digest only: agent-bot's own audit
+        // records the words.
+        let digest = presence::digest(action);
+        let detail = match detail {
+            None => format!("action {digest}"),
+            Some(message) => format!("action {digest}: {message}"),
+        };
+        self.audit.record(
+            Receipt {
+                event: "keyd-owner",
+                agent_id: None,
+                app: None,
+                operation: "owner/presence",
+                decision,
+                detail: Some(&detail),
+            },
+            now,
+        );
+        match outcome {
+            Ok(assertion) => reply(id, json!({ "assertion": assertion })),
+            Err(Refusal::Unavailable(message)) => failure(id, PRESENCE_UNAVAILABLE, &message),
+            Err(Refusal::Declined(message)) => failure(id, -32000, &message),
+        }
     }
 
     fn soul_and_app(params: &Value) -> Result<(String, String), String> {
@@ -819,5 +883,63 @@ mod tests {
             .credential(second, "qwts-grok-agent")
             .unwrap()
             .is_some());
+    }
+
+    fn presence(keyd: &Keyd, params: Value) -> Value {
+        keyd.handle_owner(
+            &json!({ "jsonrpc": "2.0", "id": 9, "method": "owner/presence", "params": params }),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn signs_presence_only_when_the_owner_approves() {
+        let consent = Arc::new(Consenting::new(true));
+        let mut approving = keyd(true);
+        approving.consent = Box::new(Arc::clone(&consent));
+        let action =
+            "turn agent comms off for Bill - Starter (agent_121b5b35-0000-4000-8000-000000000000)";
+        let nonce = "abcdefghijklmnopqrstuvwx";
+        let answer = presence(&approving, json!({ "action": action, "nonce": nonce }));
+        let token = answer["result"]["assertion"].as_str().unwrap();
+        let seed = approving.store.presence_seed().unwrap();
+        let payload = crate::presence::tests::open(token, &seed);
+        assert_eq!(payload["action"], crate::presence::digest(action));
+        assert_eq!(payload["nonce"], nonce);
+        assert_eq!(payload["iat"].as_u64(), Some(NOW));
+        assert_eq!(
+            consent.asked.lock().unwrap().clone(),
+            vec![format!("agent-bot wants to {action}")]
+        );
+
+        let declined = presence(&keyd(false), json!({ "action": action, "nonce": nonce }));
+        assert_eq!(declined["error"]["code"], -32000);
+        assert!(declined.get("result").is_none());
+
+        let mut nobody = keyd(true);
+        nobody.consent = Box::new(Consenting::unavailable());
+        let unavailable = presence(&nobody, json!({ "action": action, "nonce": nonce }));
+        assert_eq!(unavailable["error"]["code"], PRESENCE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn refuses_malformed_presence_requests_without_asking() {
+        let consent = Arc::new(Consenting::new(true));
+        let mut keyd = keyd(true);
+        keyd.consent = Box::new(Arc::clone(&consent));
+        for params in [
+            json!({ "action": "x" }),
+            json!({ "action": "two\nlines", "nonce": "abcdefghijklmnopqrstuvwx" }),
+            json!({ "action": "x".repeat(401), "nonce": "abcdefghijklmnopqrstuvwx" }),
+            json!({ "action": "ok", "nonce": "short" }),
+        ] {
+            assert_eq!(presence(&keyd, params)["error"]["code"], -32602);
+        }
+        assert!(consent.asked.lock().unwrap().is_empty());
+        // Presence is for the owner channel only.
+        let soul = keyd
+            .handle_soul(&json!({ "jsonrpc": "2.0", "id": 1, "method": "owner/presence", "params": { "action": "ok", "nonce": "abcdefghijklmnopqrstuvwx" } }))
+            .unwrap();
+        assert!(soul.get("result").is_none());
     }
 }

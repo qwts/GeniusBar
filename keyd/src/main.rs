@@ -9,6 +9,10 @@
 //!       The harness side: an MCP server on stdio that relays to keyd.sock
 //!       and adds a daemon grant, fetched with the soul's binding, to each
 //!       tool call. It holds no key.
+//!   agent-bot-keyd presence-key [--keychain FILE]
+//!       Prints the public half of keyd's presence key (made on first use),
+//!       which agent-bot pins from this code-signed binary before trusting
+//!       an `owner/presence` assertion (agent-bot-identity #416).
 //!   agent-bot-keyd --version
 //!
 //! Keys live only in Keychain items keyd created, so their access lists
@@ -22,6 +26,7 @@ mod github;
 mod grant;
 mod ids;
 mod paths;
+mod presence;
 mod relay;
 mod server;
 mod store;
@@ -30,7 +35,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 
-const USAGE: &str = "usage: agent-bot-keyd serve [--state-dir DIR] [--keychain FILE] | mcp [--state-dir DIR] | --version";
+const USAGE: &str = "usage: agent-bot-keyd serve [--state-dir DIR] [--keychain FILE] | mcp [--state-dir DIR] | presence-key [--keychain FILE] | --version";
 
 struct Options {
     command: String,
@@ -54,7 +59,9 @@ fn parse(args: &[String]) -> Result<Options, String> {
         };
         match arg.as_str() {
             "--state-dir" => options.state_dir = Some(value()?),
-            "--keychain" if options.command == "serve" => options.keychain = Some(value()?),
+            "--keychain" if matches!(options.command.as_str(), "serve" | "presence-key") => {
+                options.keychain = Some(value()?)
+            }
             _ => return Err(USAGE.into()),
         }
     }
@@ -62,11 +69,28 @@ fn parse(args: &[String]) -> Result<Options, String> {
 }
 
 #[cfg(target_os = "macos")]
-fn serve(options: &Options, paths: &paths::Paths) -> Result<(), String> {
-    let items: Box<dyn store::Items> = match &options.keychain {
+fn items(options: &Options) -> Box<dyn store::Items> {
+    match &options.keychain {
         Some(path) => Box::new(store::keychain::Keychain::at(path.clone())),
         None => Box::new(store::keychain::Keychain::login()),
-    };
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn presence_key(options: &Options) -> Result<(), String> {
+    let seed = store::Store::new(items(options)).presence_seed()?;
+    println!("{}", presence::public_key(&seed));
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn presence_key(_: &Options) -> Result<(), String> {
+    Err("agent-bot-keyd keeps a presence key only on macOS".into())
+}
+
+#[cfg(target_os = "macos")]
+fn serve(options: &Options, paths: &paths::Paths) -> Result<(), String> {
+    let items = items(options);
     let listeners = server::listen(paths)?;
     let keyd = Arc::new(server::Keyd {
         store: store::Store::new(items),
@@ -106,6 +130,7 @@ fn main() -> ExitCode {
         match options.command.as_str() {
             "serve" => serve(&options, &paths),
             "mcp" => relay::run(&paths.socket),
+            "presence-key" => presence_key(&options),
             _ => Err(USAGE.into()),
         }
     });

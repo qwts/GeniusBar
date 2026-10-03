@@ -13,6 +13,10 @@
 //!   needs access to an item it did not create.
 //! - the daemon's grant key the owner pinned: service `agent-bot.keyd`,
 //!   account `daemon-grant-key`, value base64 of the raw Ed25519 public key.
+//! - keyd's own presence key (agent-bot-identity #416), which signs the
+//!   owner's presence for agent-bot: service `agent-bot.keyd`, account
+//!   `presence-key`, value base64 of the 32-byte Ed25519 seed. keyd makes it
+//!   on first use; only keyd's code can read it.
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -67,6 +71,7 @@ pub fn decode(text: &[u8]) -> Result<Credential, &'static str> {
 
 pub const PIN_SERVICE: &str = "agent-bot.keyd";
 pub const PIN_ACCOUNT: &str = "daemon-grant-key";
+pub const PRESENCE_ACCOUNT: &str = "presence-key";
 
 pub fn item(agent_id: &str, app: &str) -> Result<(String, String), &'static str> {
     if !is_agent_id(agent_id) || !is_app_slug(app) {
@@ -139,6 +144,25 @@ impl Store {
     pub fn pin_key(&self, key: &[u8; 32]) -> Result<(), String> {
         self.items
             .write(PIN_SERVICE, PIN_ACCOUNT, STANDARD.encode(key).as_bytes())
+    }
+
+    /// keyd's presence signing seed, made and kept on first use.
+    pub fn presence_seed(&self) -> Result<[u8; 32], String> {
+        if let Some(mut value) = self.items.read(PIN_SERVICE, PRESENCE_ACCOUNT)? {
+            let decoded = STANDARD.decode(value.trim_ascii());
+            value.fill(0);
+            let mut raw = decoded.map_err(|_| "presence key is malformed".to_owned())?;
+            let seed: Result<[u8; 32], _> = raw.as_slice().try_into();
+            raw.fill(0);
+            return seed.map_err(|_| "presence key is malformed".to_owned());
+        }
+        let mut seed = [0u8; 32];
+        getrandom::fill(&mut seed).map_err(|_| "no randomness for the presence key".to_owned())?;
+        let mut value = STANDARD.encode(seed).into_bytes();
+        let written = self.items.write(PIN_SERVICE, PRESENCE_ACCOUNT, &value);
+        value.fill(0);
+        written?;
+        Ok(seed)
     }
 }
 
@@ -286,6 +310,9 @@ pub mod tests {
         assert!(store.pinned_key().unwrap().is_none());
         store.pin_key(&[3u8; 32]).unwrap();
         assert_eq!(store.pinned_key().unwrap(), Some([3u8; 32]));
+        let seed = store.presence_seed().unwrap();
+        assert_eq!(store.presence_seed().unwrap(), seed, "made once, then kept");
+        assert_ne!(seed, [0u8; 32]);
         assert!(store.credential("agent_../x", "qwts-claude-agent").is_err());
     }
 

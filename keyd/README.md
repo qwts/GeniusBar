@@ -31,7 +31,7 @@ sockets are 0600, and keyd checks each peer's user ID.
 | socket | speaks | for |
 | --- | --- | --- |
 | `keyd.sock` | MCP (newline-delimited JSON-RPC) | `credential`, `git_credential` |
-| `owner.sock` | JSON-RPC | `owner/status`, `owner/import`, `owner/remove`, `owner/pin` |
+| `owner.sock` | JSON-RPC | `owner/status`, `owner/import`, `owner/remove`, `owner/pin`, `owner/presence` |
 
 Each call leaves a receipt in `keyd/audit.jsonl` (0600). Receipts never hold a
 secret.
@@ -105,6 +105,39 @@ prompt. A key keyd cannot sign with is refused before the owner is asked.
 The first import must carry `daemonKey`, which keyd pins.
 
 agent-bot's `identity migrate-credentials --to keyd` drives this.
+
+## The owner's presence for agent-bot
+
+agent-bot's owner-only commands (`soul comms`, `soul cold-wake`,
+`identity migrate-credentials`, and the rest of its owner gate) ask keyd
+instead of the macOS administrator dialog
+([agent-bot-identity #416](https://github.com/qwts/agent-bot-identity/issues/416)).
+The owner approves with Touch ID where the Mac has it, otherwise with the
+login password. No administrator account is needed.
+
+agent-bot sends `owner/presence {action, nonce}`. `action` is one line naming
+the soul (name and Agent ID) and the change. `nonce` is agent-bot's own
+random value. keyd shows "agent-bot wants to <action>". Only if the owner
+approves does it sign:
+
+```
+p1.<base64url(payload)>.<base64url(Ed25519 signature of the payload segment)>
+payload: { v: 1, aud: "agent-bot-owner", kind: "presence",
+           action: hex(sha256(action)), nonce, iat, exp }
+```
+
+`exp` is 60 seconds after `iat`. The signing seed is keyd's own Keychain item
+(service `agent-bot.keyd`, account `presence-key`), made on first use, so
+only keyd's code reads it.
+
+agent-bot pins the public half by running the code-signed binary,
+`agent-bot-keyd presence-key`, not by asking the socket. A process that
+stands up a socket of its own therefore cannot answer for the owner.
+
+When nobody can be asked here (no GUI session, or no login password), keyd
+answers error `-32001`, and agent-bot falls back to its administrator dialog.
+A person's cancel, failure or timeout is error `-32000`, and agent-bot does
+not ask again.
 
 ## Build and test
 
