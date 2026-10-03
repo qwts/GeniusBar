@@ -18,6 +18,8 @@ interface DudleProps {
   paused?: boolean;
   /** Accessible name; omitted keeps the avatar decorative in a labelled row. */
   label?: string;
+  /** Faded, for a companion that has left (R6). */
+  dim?: boolean;
 }
 
 /**
@@ -25,7 +27,7 @@ interface DudleProps {
  * as SVG from the derived spec. The idle blink stops under reduced motion
  * or while paused.
  */
-export function Dudle({ spec, diameter = 28, paused = false, label }: DudleProps) {
+export function Dudle({ spec, diameter = 28, paused = false, label, dim = false }: DudleProps) {
   const gradientId = useId();
   const [blink, setBlink] = useState(1);
   const animates = !paused && !prefersReducedMotion();
@@ -61,6 +63,7 @@ export function Dudle({ spec, diameter = 28, paused = false, label }: DudleProps
       height={diameter}
       viewBox={`0 0 ${diameter} ${diameter}`}
       overflow="visible"
+      opacity={dim ? 0.45 : undefined}
       {...a11y}
     >
       <defs>

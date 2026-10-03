@@ -43,7 +43,7 @@ function HarnessSignIn({ auth, harness, soul }: { auth: HarnessAuth; harness: st
     case 'checking':
       return <p className="muted small" role="status">Checking the {harness} sign-in…</p>;
     case 'signed-in':
-      return <p className="small" role="status">Ready. Open the soul in the roster to chat.</p>;
+      return <p className="small" role="status">Ready. Open the companion in the fleet to chat.</p>;
     case 'signing-in':
       return <p className="muted small" role="status">Finish signing in to {harness} in your browser…</p>;
     case 'signed-out':
@@ -63,7 +63,7 @@ function DevToolsNeeded({ devTools }: { devTools?: DevTools }) {
   const [error, setError] = useState<string>();
   return (
     <div role="status">
-      <p>Your soul needs Apple's command line developer tools first. It's a free install from Apple and takes a few minutes.</p>
+      <p>Your companion needs Apple's command line developer tools first. It's a free install from Apple and takes a few minutes.</p>
       {error && <p className="error small" role="alert">{error}</p>}
       {devTools && (
         <div className="detail-actions">
@@ -100,7 +100,7 @@ export function FirstLaunch({ starter, launcher, auth, devTools, onStart }:
         void launcher.launch({ account: starter.account, target: { package: starter.package }, harness, name: starter.name });
       }}
     >
-      {!started && <p>No souls yet. Start with {starter.name}, a friendly first soul you can chat with.</p>}
+      {!started && <p>No companions yet. Start with {starter.name}, a friendly first companion you can chat with.</p>}
       <datalist id={`${ids}-harnesses`}>{starter.harnesses.map((h) => <option key={h} value={h} />)}</datalist>
       <label>
         <span>Harness</span>
