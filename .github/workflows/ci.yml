@@ -1,5 +1,5 @@
-# GeniusBar CI on macOS runners: the Tauri app (UI tests, Rust checks, an
-# unsigned bundle) and, until #11 removes it, the R1 Swift package.
+# GeniusBar CI on macOS runners: the Tauri app (bridge and UI tests, Rust
+# checks, an unsigned bundle).
 #
 # Every action is pinned to a 40-hex commit, never a branch or tag (ENG-0355,
 # ENG-0282). The governed lifecycle lanes from qwts-agent-ci (ci-policy,
@@ -25,20 +25,6 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
-  swift:
-    name: Swift
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    runs-on: macos-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Build
-        run: swift build
-      - name: Test
-        run: swift test
-
   tauri:
     name: Tauri
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
@@ -78,8 +64,8 @@ jobs:
   gate:
     name: CI
     if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
-    needs: [swift, tauri]
+    needs: [tauri]
     runs-on: ubuntu-latest
     steps:
       - name: All jobs passed
-        run: test "${{ needs.swift.result }}" = success && test "${{ needs.tauri.result }}" = success
+        run: test "${{ needs.tauri.result }}" = success

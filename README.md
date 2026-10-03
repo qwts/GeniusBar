@@ -1,17 +1,16 @@
 # GeniusBar
 macOS menubar for the agent-comms hub
 
-Display-only menubar app (SwiftUI `MenuBarExtra`): lists souls from the
-broker `census` operation nested under their parents, each with a
-deterministic Dudle avatar, plus a broker `health` header. No routing, no
-authority, no chat (chat comes in R3).
+A Tauri 2 menubar app with a bundled Node sidecar
+([ADR-0004](docs/decisions/ADR-0004-tauri-menubar-app-with-a-node-sidecar.md)).
+It lists souls from the broker census, nested under their parents, each with
+a deterministic Dudle avatar, and lets you chat with them and launch new ones.
 
-## Tauri app (R3)
+## Building and running
 
-GeniusBar is moving to a Tauri 2 menubar/tray app with a bundled Node
-sidecar ([ADR-0004](docs/decisions/ADR-0004-tauri-menubar-app-with-a-node-sidecar.md)).
-The shell lives in `src-tauri/` and the web UI in `ui/`. Requirements: Node
-24 and the Rust toolchain from `rust-toolchain.toml`.
+The shell lives in `src-tauri/`, the web UI in `ui/`, and the Node bridge in
+`bridge/`. Requirements: Node 24 and the Rust toolchain from
+`rust-toolchain.toml`.
 
 ```sh
 npm ci && npm --prefix ui ci
@@ -86,9 +85,6 @@ After moving, install the command-line tools above. You can then run
 copy afterwards: that would start a second broker or daemon next to
 GeniusBar's.
 
-The Swift app below remains the specification until the Tauri app reaches
-parity (#11).
-
 ## Releases
 
 Pushing a `vX.Y.Z` tag on `main` (matching the version in
@@ -131,99 +127,31 @@ build:unsigned`, runs with updates off and shows "Updates Off in This Build"
 in the tray menu. With them, the app checks at startup and from the tray's
 "Check for Updates…" item; the web view has no updater permissions.
 
-## Building and running (Swift, R1)
-
-Requirements: macOS 14+, Swift 6 toolchain (Xcode 16+ or swift.org), no
-third-party dependencies.
-
-```sh
-swift build
-swift test
-```
-
-To run the menubar app from a checkout:
-
-```sh
-swift run GeniusBar
-```
-
-The app speaks the newline-delimited JSON protocol over the broker Unix
-socket and applies the same custody checks as the CLI (socket and state
-directories must belong to the pinned broker account). It reads the
-principal credential from the login keychain — pair first with the
-agent-comms CLI, which stores the credential for us (GeniusBar never
-sends pair requests itself):
-
-```sh
-agent-comms principal pair
-```
-
-The broker holds the new principal as pending until the owner approves
-it on the admin socket:
-
-```sh
-agent-comms admin principal-approve <code>
-```
-
-Until then census/health fail as not approved and the menubar says so.
-
-Environment overrides (tests, isolated brokers):
-
-- `AGENT_COMMS_SHARED_DIR` — rendezvous dir (default
-  `/Users/Shared/Public/agent-comms`)
-- `AGENT_COMMS_BROKER_STATE_DIR` — broker state dir
-- `AGENT_COMMS_CLIENT_STATE_DIR` — client state dir (keychain is used
-  instead of the credential file on macOS)
-
-CI (`.github/workflows/ci.yml`) runs `swift build` and `swift test` on
-`macos-latest`.
-
 ## Testing the UI
 
-The menubar itself is invisible to computer-use agents and CI (status
-items are not capturable without Screen Recording permission), so two
-launch flags expose the same menu content. A launch with neither flag is
-an unchanged menubar launch.
+The menubar itself is invisible to computer-use agents and CI (status items
+are not capturable without Screen Recording permission), so two launch
+flags expose the same popup content: `--window` shows it in a regular window
+for desktop automation, and `--snapshot` renders it to a PNG (below). A
+launch with neither flag is an unchanged menubar launch.
 
-```sh
-# Render the menu content offscreen to a PNG and exit 0.
-swift run GeniusBar -- --snapshot /tmp/geniusbar.png
+The R1 Swift app was the specification for this one (ADR-0004 decision 7)
+and was removed in #11. Its behaviour lives on in these tests:
 
-# Render the menu content with one soul's detail panel beneath it.
-swift run GeniusBar -- --snapshot /tmp/geniusbar.png --snapshot-detail agent_abc123
+- census nesting and cycle handling: `ui/src/model/census.test.ts`;
+- Dudle derivation, matching the Swift app's values exactly:
+  `ui/src/model/dudle.test.ts`;
+- launch options (`--window`, `--snapshot`, `--snapshot-detail`):
+  `parse_mode` tests in `src-tauri/src/lib.rs`;
+- wire framing and custody: the broker protocol and custody checks belong
+  to the bundled agent-comms principal client, which the bridge uses rather
+  than reimplementing, and which agent-comms tests itself.
+  `bridge/bridge.test.mjs` covers the shell-to-bridge framing.
 
-# Show the menu content in a regular titled window for desktop automation.
-swift run GeniusBar -- --window
-```
+### Launch flags
 
-`--snapshot` loads the keychain credential and fetches census+health
-once through the same `AppState`/`BrokerClient` path as the menubar (so
-custody and auth are exercised), renders the menu content view offscreen
-with SwiftUI `ImageRenderer` at scale 2, writes the PNG, prints
-`{"snapshot":"<path>","souls":N}` on stdout, and exits 0. Dudle blink
-animations render paused (eyes open) for a stable frame, and the app
-stays `.accessory` with no visible window. The PNG uses a fixed light
-scheme on an opaque white backdrop (the menu's material comes from its
-window, which does not exist offscreen). On any failure (unpaired,
-broker unreachable, unknown detail ID, unwritable path) the PNG still
-shows what the UI would show — e.g. the unpaired or unreachable header
-— the error goes to stderr, and the exit code is 1 (the JSON line is
-still printed so automation can locate the rendering).
-
-`--window` uses activation policy `.regular` and a titled `NSWindow`
-hosting the same `ContentView`; clicking a row opens the read-only
-detail sheet exactly as in the menu.
-
-`swift test` covers the flag parsing as a pure function
-(`parseLaunchOptions`) and renders a fixed fake forest + health through
-the same view to a PNG in a temp dir, asserting a nonzero file. The
-render test skips gracefully (and says so) when `ImageRenderer` cannot
-produce an image in the test environment.
-
-### Tauri app
-
-The Tauri app takes the same flags. Run the built binary directly so its
-stdout and exit code reach the caller:
+Run the built binary directly so its stdout and exit code reach the
+caller:
 
 ```sh
 APP=src-tauri/target/release/bundle/macos/GeniusBar.app/Contents/MacOS/geniusbar
@@ -240,12 +168,11 @@ the bridge answers. Once a census has settled it renders statically
 (Dudles paused, eyes open) and calls `snapshot_ready`. The shell then
 captures the web view with WebKit's `takeSnapshotWithConfiguration`,
 redraws it at scale 2 (768×1120 for the 384×560 popup), writes the PNG and
-prints `{"snapshot":"<path>","souls":N}`. Unlike R1, the PNG keeps the
-popup's own colour scheme. `--snapshot-detail` takes a bare agent ID or an
+prints `{"snapshot":"<path>","souls":N}`. The PNG keeps the popup's own
+colour scheme. `--snapshot-detail` takes a bare agent ID or an
 `account/agentId` key and opens that soul's detail beneath the list. A
 snapshot only reads: it polls no inbox, acks nothing, takes no Finder-opened
-package, and starts no service refresh or update check. Failures work as in
-R1: an unpaired or unreachable census, an unknown detail ID, or an
+package, and starts no service refresh or update check. On failure, an unpaired or unreachable census, an unknown detail ID, or an
 unwritable path still prints the JSON line, sends the error to stderr and
 exits 1, with the PNG showing what the popup shows wherever it can be
 written. If no census settles within 30 seconds, the shell captures
@@ -256,11 +183,11 @@ the readiness report (`useSnapshot`).
 
 ## Layout
 
-- `Sources/GeniusBarLib/` — protocol client, models, custody, principal
-  credential store, Dudle derivation, `AppState`, menu/detail/Dudle
-  views, launch-flag parsing, offscreen snapshot renderer.
-- `Sources/GeniusBar/` — SwiftUI `MenuBarExtra` app wiring (`--snapshot`
-  / `--window` modes).
-- `Tests/GeniusBarTests/` — Dudle derivation, soul nesting, wire framing,
-  client decoding, credential store, paths, launch options, snapshot
-  rendering suite.
+- `src-tauri/` — the Rust shell: tray, popup and window, the bridge and
+  service processes, the updater. It holds no agent logic.
+- `ui/` — the React web view (Vite, TypeScript), with its models and tests.
+- `bridge/` — Node scripts run in the bundled Node: the broker bridge,
+  first-run setup, login services, and command-line tools.
+- `scripts/` — component fetching, signing checks, and release helpers.
+- `souls/` — the bundled Starter soul.
+- `docs/decisions/` — ADRs.
