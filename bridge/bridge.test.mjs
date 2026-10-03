@@ -34,6 +34,15 @@ test('passes only known fields to the client', async () => {
   assert.deepEqual(Object.keys(seen).filter((k) => seen[k] !== undefined).sort(), ['body', 'key', 'to']);
 });
 
+test('launch forwards the agent comms choice and nothing else extra (#71)', async () => {
+  let seen;
+  const h = harness({ launch: async (args) => { seen = args; return { requestId: 'r', status: 'pending' }; } });
+  await h.handle(JSON.stringify({ id: 1, method: 'launch',
+    params: { account: 'me', package: '/p.soul', harness: 'claude', comms: false, op: 'admin' } }));
+  assert.deepEqual(Object.fromEntries(Object.entries(seen).filter(([, v]) => v !== undefined)),
+    { account: 'me', package: '/p.soul', harness: 'claude', comms: false });
+});
+
 test('rejects malformed and unknown requests without calling the client', async () => {
   const h = harness({ census: async () => assert.fail('called') });
   await h.handle('not json');

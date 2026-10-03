@@ -3,7 +3,7 @@
 // daemon exactly once; nothing here retries a launch.
 //
 // Contract, from agent-comms docs/principal-client.md (Request a daemon
-// launch): launch({ account, soul | package, harness, name? }) returns
+// launch): launch({ account, soul | package, harness, name?, comms? }) returns
 // { requestId, status: 'pending' }; launchStatus(requestId) returns the same
 // shape until status is 'launched' or 'failed'.
 
@@ -16,6 +16,11 @@ export interface LaunchRequest {
   harness: string;
   /** Optional display name; blank means none. */
   name: string;
+  /**
+   * Agent comms for the launched soul (#71); agent-bot writes it to the
+   * soul's soul.json before starting it. Omitted leaves the soul's setting.
+   */
+  comms?: boolean;
 }
 
 /**
@@ -63,11 +68,12 @@ export function launchProblem(request: LaunchRequest): string | null {
 }
 
 /** Bridge params for `launch`, with the name omitted when blank. */
-export function launchParams(request: LaunchRequest): Record<string, string> {
-  const params: Record<string, string> = { account: request.account, harness: request.harness.trim() };
+export function launchParams(request: LaunchRequest): Record<string, string | boolean> {
+  const params: Record<string, string | boolean> = { account: request.account, harness: request.harness.trim() };
   if ('package' in request.target) params.package = request.target.package;
   else params.soul = request.target.soul;
   if (request.name.trim() !== '') params.name = request.name.trim();
+  if (typeof request.comms === 'boolean') params.comms = request.comms;
   return params;
 }
 

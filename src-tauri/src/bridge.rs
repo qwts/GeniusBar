@@ -636,6 +636,30 @@ mod tests {
     }
 
     #[test]
+    fn parses_soul_comms_results_and_errors() {
+        let shown =
+            br#"{"agentId":"agent_1","name":"bill","managed":true,"comms":false,"running":false}"#;
+        assert_eq!(parse_soul_comms(shown, b"").unwrap()["comms"], json!(false));
+        assert_eq!(
+            parse_soul_comms(
+                b"",
+                b"agent-bot soul comms: agent_1 is running; stop it first\n"
+            ),
+            Err(BridgeError::new(
+                "soul-comms-failed",
+                "agent_1 is running; stop it first"
+            ))
+        );
+        assert_eq!(
+            parse_soul_comms(b"{\"agentId\":\"agent_1\"}\n", b""),
+            Err(BridgeError::new(
+                "soul-comms-failed",
+                "agent-bot gave no comms state"
+            ))
+        );
+    }
+
+    #[test]
     fn parses_cli_tools_results_with_their_own_fallback() {
         assert_eq!(
             parse_script_output(
@@ -695,6 +719,84 @@ pub async fn harness_auth<R: Runtime>(
         .await
         .map_err(|e| unavailable(e.to_string()))?;
     parse_harness_auth(&output.stdout)
+}
+
+/// A soul's managed and agent-comms state (#71), from agent-bot's
+/// `soul comms <soul> show|on|off --json`: `{agentId, name, managed, comms,
+/// running}`. agent-bot owns the rules: `on` and `off` ask the owner to
+/// approve and are refused while the soul runs. GeniusBar only relays.
+#[tauri::command]
+pub async fn soul_comms<R: Runtime>(
+    app: AppHandle<R>,
+    action: String,
+    soul: String,
+) -> Result<Value, BridgeError> {
+    let unavailable = |e: String| BridgeError::new("soul-comms-unavailable", &e);
+    if !matches!(action.as_str(), "show" | "on" | "off") {
+        return Err(BridgeError::new(
+            "soul-comms-invalid",
+            "action must be show, on or off",
+        ));
+    }
+    let resources = app
+        .path()
+        .resource_dir()
+        .map_err(|e| unavailable(e.to_string()))?;
+    let output = app
+        .shell()
+        .sidecar("node")
+        .map_err(|e| unavailable(e.to_string()))?
+        .envs(HOST_ENV.iter().copied())
+        .args([
+            resources
+                .join("components")
+                .join("agent-bot")
+                .join("agent-bot.mjs")
+                .into_os_string(),
+            "soul".into(),
+            "comms".into(),
+            soul.into(),
+            action.into(),
+            "--json".into(),
+        ])
+        .output()
+        .await
+        .map_err(|e| unavailable(e.to_string()))?;
+    parse_soul_comms(&output.stdout, &output.stderr)
+}
+
+/// agent-bot's `soul comms --json` line, or its `agent-bot soul comms: …` error.
+fn parse_soul_comms(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    let last = |bytes: &[u8]| -> String {
+        String::from_utf8_lossy(
+            bytes
+                .split(|b| *b == b'\n')
+                .rev()
+                .find(|line| !line.iter().all(u8::is_ascii_whitespace))
+                .unwrap_or_default(),
+        )
+        .trim()
+        .to_string()
+    };
+    if let Ok(value) = serde_json::from_str::<Value>(&last(stdout)) {
+        if value.get("agentId").and_then(Value::as_str).is_some()
+            && value.get("comms").and_then(Value::as_bool).is_some()
+        {
+            return Ok(value);
+        }
+    }
+    let message = last(stderr);
+    let message = message
+        .strip_prefix("agent-bot soul comms: ")
+        .unwrap_or(&message);
+    Err(BridgeError::new(
+        "soul-comms-failed",
+        if message.is_empty() {
+            "agent-bot gave no comms state"
+        } else {
+            message
+        },
+    ))
 }
 
 /// Metrics are optional: missing collectors or an older bundle never block messaging.

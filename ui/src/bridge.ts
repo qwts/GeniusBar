@@ -78,6 +78,47 @@ export async function runtimeMetrics(): Promise<RuntimeMetrics> {
   }
 }
 
+/**
+ * A soul's managed and agent-comms state (#71), as agent-bot reports it.
+ * `running` souls keep their setting until stopped; agent-bot enforces that.
+ */
+export interface SoulComms {
+  agentId: string;
+  managed: boolean;
+  comms: boolean;
+  running: boolean;
+}
+
+export function normalizeSoulComms(raw: unknown): SoulComms | null {
+  if (!isRecord(raw) || typeof raw.agentId !== 'string' || typeof raw.comms !== 'boolean') return null;
+  return { agentId: raw.agentId, managed: raw.managed === true, comms: raw.comms, running: raw.running === true };
+}
+
+/** The soul's state, or null when agent-bot cannot say (an older bundle, another host's soul). */
+export async function soulComms(agentId: string, invokeImpl: typeof invoke = invoke): Promise<SoulComms | null> {
+  if (!inApp() && invokeImpl === invoke) return null;
+  try {
+    return normalizeSoulComms(await invokeImpl<unknown>('soul_comms', { action: 'show', soul: agentId }));
+  } catch {
+    return null;
+  }
+}
+
+/** Turns agent comms on or off; agent-bot asks the owner and refuses while the soul runs. */
+export async function setSoulComms(agentId: string, comms: boolean, invokeImpl: typeof invoke = invoke): Promise<SoulComms> {
+  let raw: unknown;
+  try {
+    raw = await invokeImpl<unknown>('soul_comms', { action: comms ? 'on' : 'off', soul: agentId });
+  } catch (error) {
+    const e = error as { code?: unknown; message?: unknown };
+    throw new BridgeError(typeof e?.code === 'string' ? e.code : 'soul-comms-failed',
+      typeof e?.message === 'string' ? e.message : String(error));
+  }
+  const state = normalizeSoulComms(raw);
+  if (!state) throw new BridgeError('soul-comms-failed', 'agent-bot gave no comms state');
+  return state;
+}
+
 export async function call<T>(method: BridgeMethod, params: Record<string, unknown> = {},
   invokeImpl: typeof invoke = invoke): Promise<T> {
   try {

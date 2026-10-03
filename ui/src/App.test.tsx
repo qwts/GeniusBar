@@ -126,7 +126,7 @@ describe('App setup', () => {
     expect((screen.getByLabelText('Account') as HTMLInputElement).value).toBe('user');
     expect((screen.getByLabelText('Harness') as HTMLInputElement).value).toBe('codex');
     fireEvent.submit(form);
-    expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { soul: 'agent_p' }, harness: 'codex', name: '' });
+    expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { soul: 'agent_p' }, harness: 'codex', name: '', comms: true });
   });
 
   it('prefills the default harness, and still launches any harness typed in', () => {
@@ -143,7 +143,20 @@ describe('App setup', () => {
     fireEvent.change(screen.getByLabelText('Package'), { target: { value: '/souls/helper' } });
     fireEvent.change(harness, { target: { value: 'my-own-harness' } });
     fireEvent.submit(screen.getByRole('form', { name: 'Launch a companion package' }));
-    expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { package: '/souls/helper' }, harness: 'my-own-harness', name: '' });
+    expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { package: '/souls/helper' }, harness: 'my-own-harness', name: '', comms: true });
+  });
+
+  it('launches with agent comms on by default, or off when turned off first (#71)', () => {
+    const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'Launch package…' }));
+    const comms = screen.getByRole('switch', { name: 'Agent comms' }) as HTMLInputElement;
+    expect(comms.checked).toBe(true);
+    fireEvent.click(comms);
+    fireEvent.change(screen.getByLabelText('Package'), { target: { value: '/souls/helper' } });
+    fireEvent.change(screen.getByLabelText('Harness'), { target: { value: 'claude' } });
+    fireEvent.submit(screen.getByRole('form', { name: 'Launch a companion package' }));
+    expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { package: '/souls/helper' }, harness: 'claude', name: '', comms: false });
   });
 
   it('launches a package from the footer, and shows a refusal inline', () => {
@@ -153,7 +166,7 @@ describe('App setup', () => {
     fireEvent.change(screen.getByLabelText('Package'), { target: { value: '/souls/helper' } });
     fireEvent.change(screen.getByLabelText('Harness'), { target: { value: 'claude' } });
     fireEvent.submit(screen.getByRole('form', { name: 'Launch a companion package' }));
-    expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { package: '/souls/helper' }, harness: 'claude', name: '' });
+    expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { package: '/souls/helper' }, harness: 'claude', name: '', comms: true });
     const refused: LaunchApi = { ...launcher, state: { phase: 'error', requestId: null, text: 'GeniusBar can’t reach the agents on account user. Make sure setup has finished, then try again.' } };
     rerender(<App census={sampleCensus} connection={sampleConnection} launcher={refused} isStatic />);
     expect(screen.getByRole('alert').textContent).toMatch(/can’t reach the agents/i);

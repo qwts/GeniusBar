@@ -239,6 +239,7 @@ pub fn run() {
             starter::install_dev_tools,
             bridge::harness_auth,
             bridge::runtime_metrics,
+            bridge::soul_comms,
             updates::update_status,
             updates::update_action,
             snapshot::snapshot_options,

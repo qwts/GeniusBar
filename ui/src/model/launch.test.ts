@@ -22,6 +22,8 @@ describe('launch requests', () => {
   it('builds params with exactly one target and no blank name', () => {
     expect(launchParams(soul)).toEqual({ account: 'user', soul: 'agent_1', harness: 'codex' });
     expect(launchParams(pkg)).toEqual({ account: 'user', package: '/souls/p', harness: 'codex', name: 'Helper' });
+    expect(launchParams({ ...pkg, comms: false })).toMatchObject({ comms: false });
+    expect(launchParams({ ...soul, comms: true })).toMatchObject({ comms: true });
   });
 
   it('enforces the wire contract limits', () => {

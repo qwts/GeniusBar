@@ -1,15 +1,18 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { runtimeMetrics, type RuntimeMetrics } from '../bridge';
+import { BridgeError, runtimeMetrics, setSoulComms, soulComms, type RuntimeMetrics } from '../bridge';
 import { buildSoulForest } from '../model/census';
 import { emptyComposer } from '../model/chat';
 import { sampleCensus } from '../model/fixtures';
 import { CompanionDetails, CompanionSession } from './CompanionSession';
 
 afterEach(cleanup);
-vi.mock('../bridge', () => ({ runtimeMetrics: vi.fn() }));
+vi.mock('../bridge', async (original) => ({ BridgeError: (await original<typeof import('../bridge')>()).BridgeError,
+  runtimeMetrics: vi.fn(), soulComms: vi.fn(), setSoulComms: vi.fn() }));
 beforeEach(() => {
   vi.mocked(runtimeMetrics).mockReset().mockResolvedValue({ unavailable: true });
+  vi.mocked(soulComms).mockReset().mockResolvedValue(null);
+  vi.mocked(setSoulComms).mockReset();
 });
 
 const [luna, child] = sampleCensus;
@@ -36,6 +39,57 @@ function field(term: string): string | null {
 }
 
 describe('CompanionDetails', () => {
+  describe('managed and agent comms (#71)', () => {
+    const stopped = { agentId: child.agentId, managed: true, comms: true, running: false };
+
+    it('adds Managed and Agent comms rows, keeping every other row', async () => {
+      vi.mocked(soulComms).mockResolvedValue(stopped);
+      render(<CompanionDetails soul={child} />);
+      await screen.findByText('Managed', { selector: 'dt' });
+      expect(field('Managed')).toBe('Managed');
+      expect(field('Agent comms')).toBe('On');
+      for (const term of ['Account', 'Harness', 'Presence', 'Parent', 'Unacked', 'Last wake']) {
+        expect(screen.getByText(term, { selector: 'dt' })).toBeTruthy();
+      }
+      expect(soulComms).toHaveBeenCalledWith(child.agentId);
+    });
+
+    it('shows Unmanaged and Off', async () => {
+      vi.mocked(soulComms).mockResolvedValue({ ...stopped, managed: false, comms: false });
+      render(<CompanionDetails soul={child} />);
+      await screen.findByText('Unmanaged');
+      expect(field('Agent comms')).toBe('Off');
+    });
+
+    it('locks the toggle while the companion runs', async () => {
+      vi.mocked(soulComms).mockResolvedValue({ ...stopped, running: true });
+      render(<CompanionDetails soul={child} />);
+      const toggle = await screen.findByRole('switch', { name: /Agent comms for/ });
+      expect((toggle as HTMLInputElement).disabled).toBe(true);
+      expect(screen.getByText('Stop the companion to change')).toBeTruthy();
+    });
+
+    it('turns comms off through agent-bot when stopped, and shows a refusal', async () => {
+      vi.mocked(soulComms).mockResolvedValue(stopped);
+      vi.mocked(setSoulComms).mockResolvedValueOnce({ ...stopped, comms: false });
+      render(<CompanionDetails soul={child} />);
+      fireEvent.click(await screen.findByRole('switch', { name: /Agent comms for/ }));
+      expect(setSoulComms).toHaveBeenCalledWith(child.agentId, false);
+      await waitFor(() => expect(field('Agent comms')).toBe('Off'));
+      vi.mocked(setSoulComms).mockRejectedValueOnce(new BridgeError('soul-comms-failed', 'the owner did not approve'));
+      fireEvent.click(screen.getByRole('switch', { name: /Agent comms for/ }));
+      await screen.findByText('Agent comms unchanged: the owner did not approve');
+      expect(field('Agent comms')).toMatch(/^Off/);
+    });
+
+    it('adds no rows when agent-bot cannot say', async () => {
+      render(<CompanionDetails soul={child} />);
+      await waitFor(() => expect(soulComms).toHaveBeenCalledOnce());
+      expect(screen.queryByText('Managed', { selector: 'dt' })).toBeNull();
+      expect(screen.queryByRole('switch')).toBeNull();
+    });
+  });
+
   it('shows model and context with their observation ages, without changing presence', async () => {
     vi.mocked(runtimeMetrics).mockResolvedValue(metrics);
     render(<CompanionDetails soul={child} />);
