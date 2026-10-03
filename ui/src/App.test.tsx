@@ -248,6 +248,30 @@ describe('App setup', () => {
     expect(screen.queryByRole('button', { name: 'Check for Updates…' })).toBeNull();
   });
 
+  it('keeps the update line above an open companion session in the popup', () => {
+    const act = vi.fn();
+    const updates = { status: { state: 'available' as const, version: '0.1.1' }, act };
+    render(<App census={sampleCensus} connection={sampleConnection} updates={updates} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: /^agent_c,/ }));
+    expect(screen.getByRole('region', { name: 'agent_c, agent_c' })).toBeTruthy();
+    expect(screen.getByRole('status', { name: 'Update' }).textContent).toContain('GeniusBar 0.1.1 is available.');
+    fireEvent.click(screen.getByRole('button', { name: 'Install and restart' }));
+    expect(act).toHaveBeenCalledOnce();
+  });
+
+  it('shows an update or an error beside the closed window-mode menu, and opens it', () => {
+    const updates = { status: { state: 'available' as const, version: '0.1.1' }, act: () => {} };
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} updates={updates} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'GeniusBar 0.1.1 is available.' }));
+    expect(screen.getByRole('dialog', { name: 'GeniusBar menu' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'GeniusBar 0.1.1 is available.' })).toBeNull();
+    cleanup();
+    render(<App mode="window" census={sampleCensus} isStatic
+      connection={{ ...sampleConnection, lastError: 'Could not read the census.' }} />);
+    expect(screen.queryByRole('dialog', { name: 'GeniusBar menu' })).toBeNull();
+    expect(screen.getByRole('alert').textContent).toBe('Could not read the census.');
+  });
+
   it('removes services only after the owner confirms, and shows a failure inline', async () => {
     const onRemove = vi.fn<() => Promise<void>>(async () => { throw new Error('launchctl would not unload'); });
     render(<App connection={sampleConnection} onRemoveServices={onRemove} isStatic />);

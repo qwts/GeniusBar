@@ -93,8 +93,9 @@ export function Conversation({ name, entries, composer, onDraft, onSend, dudle, 
             type="submit"
             disabled={!ready}
             aria-label={composer.sending ? t('sending') : t('send')}
-            className="grid size-8 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40"
+            className={`flex h-8 shrink-0 items-center justify-center gap-1 rounded-md bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40 ${composer.sending ? 'px-2 text-xs' : 'w-8'}`}
           >
+            {composer.sending && <span>{t('sending')}</span>}
             <ArrowUp className="size-4" aria-hidden />
           </button>
         </div>

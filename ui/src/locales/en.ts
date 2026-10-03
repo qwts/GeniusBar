@@ -52,6 +52,8 @@ export const en = {
   send: 'Send',
   sending: 'Sending…',
   sendHint: '⌘↩ to send',
+  showDetails: 'Show details for {name}',
+  showsDetails: 'Shows details.',
   'tab.chat': 'Chat',
   'tab.tree': 'Delegation',
   'tab.details': 'Details',

@@ -228,17 +228,28 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   );
 
   if (mode === 'tray') {
-    return <main className="gb flex h-full flex-col bg-popover">{session || menu()}</main>;
+    // An open session keeps the update line above it, as the panel did before R6.
+    return (
+      <main className="gb flex h-full flex-col bg-popover">
+        {session ? <>{updates && <UpdateNotice status={updates.status} onAction={updates.act} />}{session}</> : menu()}
+      </main>
+    );
   }
 
   const header = healthHeader(connection);
+  // The menu is a popover, so its update line and an error footer also show
+  // beside the GeniusBar button while it is closed.
+  const update = updates ? updateNotice(updates.status) : null;
+  const attention = update ? { text: update.text, isError: update.isError }
+    : footer?.isError ? { text: footer.text, isError: true }
+    : null;
   const notice = showSetup ? t('setupHint')
     : forest.length === 0 ? (showStarter ? t('setupHint') : empty ?? header.title)
     : null;
   return (
     <div className="gb flex h-full flex-col">
       <Toolbar open={menuOpen} onOpenChange={setMenuOpen} tone={header.tone} title={header.title}
-        onReset={layoutActions.reset}>
+        attention={attention} onReset={layoutActions.reset}>
         {menu({ hidden: layout.hidden, onToggle: layoutActions.setHidden, onShowAll: layoutActions.showAll })}
       </Toolbar>
       <Desktop forest={forest} layout={layout} paused={paused} unreadOf={unread} selectedKey={openKey} onOpen={open}
@@ -256,8 +267,9 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
  * a popover, plus the desktop's own controls. Escape or a click outside
  * closes the menu.
  */
-function Toolbar({ open, onOpenChange, tone, title, onReset, children }: {
-  open: boolean; onOpenChange: (open: boolean) => void; tone: string; title: string; onReset: () => void; children: ReactNode;
+function Toolbar({ open, onOpenChange, tone, title, attention = null, onReset, children }: {
+  open: boolean; onOpenChange: (open: boolean) => void; tone: string; title: string;
+  attention?: { text: string; isError: boolean } | null; onReset: () => void; children: ReactNode;
 }) {
   const { t } = useI18n();
   const root = useRef<HTMLDivElement>(null);
@@ -290,6 +302,14 @@ function Toolbar({ open, onOpenChange, tone, title, onReset, children }: {
           </div>
         )}
       </div>
+      {attention && !open && (
+        <div role={attention.isError ? 'alert' : 'status'} className="min-w-0">
+          <button type="button" onClick={() => onOpenChange(true)} title={attention.text}
+            className={`max-w-[20rem] truncate rounded px-1.5 py-0.5 text-xs hover:bg-accent ${attention.isError ? 'text-destructive' : 'text-muted-foreground'}`}>
+            {attention.text}
+          </button>
+        </div>
+      )}
       <button type="button" onClick={onReset} title={t('menu.resetLayout')} aria-label={t('menu.resetLayout')}
         className="ml-auto rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground">
         <LayoutGrid className="size-4" aria-hidden />

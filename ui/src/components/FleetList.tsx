@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Eye, EyeOff, Search } from 'lucide-react';
-import { displayHarness, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
+import { availabilityNote, displayHarness, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
 import { deriveDudle } from '../model/dudle';
 import { companionLabel, searchTeams, teamsOf } from '../model/fleet';
 import { useI18n } from '../lib/i18n';
@@ -44,17 +44,23 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty }: F
     const unread = unreadOf?.(soul) ?? 0;
     const hidden = hiding?.hidden.includes(key) ?? false;
     const name = displayName(soul);
+    const note = availabilityNote(soul);
     return (
       <li key={key} className="group flex items-center gap-1 px-2">
         <button
           type="button"
           className={`companion-row flex min-w-0 flex-1 items-center gap-2 rounded-md py-1 pr-1 text-left text-sm hover:bg-accent ${hidden ? 'opacity-50' : ''}`}
           style={{ paddingLeft: 4 + depth * 14 }}
+          title={t('showDetails', { name })}
           aria-label={companionLabel(soul, t, unread)}
+          aria-description={t('showsDetails')}
           onClick={() => onOpen(soul)}
         >
           <SoulDudle soul={soul} size={20} paused={paused} />
-          <span className="truncate">{name}</span>
+          <span className="flex min-w-0 flex-col">
+            <span className="truncate">{name}</span>
+            {note && <span className="truncate text-[10px] text-muted-foreground">{note}</span>}
+          </span>
           <span className="truncate font-mono text-[10px] text-muted-foreground">{displayHarness(soul)}</span>
           <span className="ml-auto flex shrink-0 items-center gap-1.5">
             {unread > 0 && (
