@@ -90,8 +90,9 @@ export interface SoulComms {
 }
 
 export function normalizeSoulComms(raw: unknown): SoulComms | null {
-  if (!isRecord(raw) || typeof raw.agentId !== 'string' || typeof raw.comms !== 'boolean') return null;
-  return { agentId: raw.agentId, managed: raw.managed === true, comms: raw.comms, running: raw.running === true };
+  if (!isRecord(raw) || typeof raw.agentId !== 'string' || typeof raw.comms !== 'boolean'
+    || typeof raw.managed !== 'boolean' || typeof raw.running !== 'boolean') return null;
+  return { agentId: raw.agentId, managed: raw.managed, comms: raw.comms, running: raw.running };
 }
 
 /** The soul's state, or null when agent-bot cannot say (an older bundle, another host's soul). */

@@ -151,20 +151,38 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
   const [comms, setComms] = useState<SoulComms | null>(null);
   const [commsSaving, setCommsSaving] = useState(false);
   const [commsError, setCommsError] = useState<string | null>(null);
+  // Every read and change takes a ticket; only the latest one, for the soul
+  // still shown, may settle, so a consent dialog for one soul never
+  // overwrites another's state. A refresh skips its read while a change is
+  // in flight, so it never replaces that change's result with an older read.
+  const commsTicket = useRef(0);
+  const commsChanging = useRef(false);
   useEffect(() => {
-    let active = true;
+    commsTicket.current += 1;
+    commsChanging.current = false;
     setComms(null);
     setCommsError(null);
-    void soulComms(soul.agentId).then((result) => { if (active) setComms(result); });
-    return () => { active = false; };
+    setCommsSaving(false);
+  }, [soul.agentId]);
+  useEffect(() => {
+    if (commsChanging.current) return;
+    const ticket = ++commsTicket.current;
+    void soulComms(soul.agentId).then((result) => { if (commsTicket.current === ticket) setComms(result); });
   }, [soul.agentId, metricsRefresh]);
   const toggleComms = (on: boolean) => {
+    const ticket = ++commsTicket.current;
+    const latest = () => commsTicket.current === ticket;
+    commsChanging.current = true;
     setCommsSaving(true);
     setCommsError(null);
     setSoulComms(soul.agentId, on)
-      .then((result) => setComms(result))
-      .catch((error: unknown) => setCommsError(error instanceof Error ? error.message : String(error)))
-      .finally(() => setCommsSaving(false));
+      .then((result) => { if (latest()) setComms(result); })
+      .catch((error: unknown) => { if (latest()) setCommsError(error instanceof Error ? error.message : String(error)); })
+      .finally(() => {
+        if (!latest()) return;
+        commsChanging.current = false;
+        setCommsSaving(false);
+      });
   };
   const snapshot = 'unavailable' in metrics ? null : metrics;
   const observations = snapshot?.souls[soul.agentId]?.observations ?? [];

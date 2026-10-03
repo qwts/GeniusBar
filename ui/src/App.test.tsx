@@ -126,7 +126,9 @@ describe('App setup', () => {
     expect((screen.getByLabelText('Account') as HTMLInputElement).value).toBe('user');
     expect((screen.getByLabelText('Harness') as HTMLInputElement).value).toBe('codex');
     fireEvent.submit(form);
-    expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { soul: 'agent_p' }, harness: 'codex', name: '', comms: true });
+    expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { soul: 'agent_p' }, harness: 'codex', name: '' });
+    // agent-bot could not say what this soul's comms is, so the launch leaves it alone.
+    expect(screen.queryByRole('switch', { name: 'Agent comms' })).toBeNull();
   });
 
   it('prefills the default harness, and still launches any harness typed in', () => {
@@ -196,6 +198,17 @@ describe('App setup', () => {
     expect(launcher.launch).toHaveBeenCalledOnce();
   });
 
+  it('lets the first companion start with agent comms off (#71)', () => {
+    const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    const starter = { package: '/App/souls/starter.soul', account: 'friend', name: 'Starter', harnesses: ['claude'], devTools: true };
+    render(<App census={[]} connection={sampleConnection} launcher={launcher} starter={starter} isStatic />);
+    const comms = screen.getByRole('switch', { name: 'Agent comms' }) as HTMLInputElement;
+    expect(comms.checked).toBe(true);
+    fireEvent.click(comms);
+    fireEvent.submit(screen.getByRole('form', { name: 'Start with Starter' }));
+    expect(launcher.launch).toHaveBeenCalledWith({ account: 'friend', target: { package: '/App/souls/starter.soul' }, harness: 'claude', name: 'Starter', comms: false });
+  });
+
   it('opens an empty manual form after an opened package is closed', () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher}
@@ -212,7 +225,7 @@ describe('App setup', () => {
     const { rerender } = render(<App census={[]} connection={sampleConnection} launcher={launcher} starter={starter} isStatic />);
     expect((screen.getByLabelText('Harness') as HTMLInputElement).value).toBe('claude');
     fireEvent.click(screen.getByRole('button', { name: 'Start with Starter' }));
-    expect(launcher.launch).toHaveBeenCalledWith({ account: 'friend', target: { package: '/App/souls/starter.soul' }, harness: 'claude', name: 'Starter' });
+    expect(launcher.launch).toHaveBeenCalledWith({ account: 'friend', target: { package: '/App/souls/starter.soul' }, harness: 'claude', name: 'Starter', comms: true });
     const failed: LaunchApi = { ...launcher, state: { phase: 'failed', requestId: 'r1', agentId: null, detail: 'harness not installed' } };
     rerender(<App census={[]} connection={sampleConnection} launcher={failed} starter={starter} isStatic />);
     expect(screen.getByRole('alert').textContent).toMatch(/harness not installed/);

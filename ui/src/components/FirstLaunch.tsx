@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from 'react';
+import { useI18n } from '../lib/i18n';
 import { canLaunch } from '../model/launch';
 import type { LaunchApi } from '../useLaunch';
 import { LaunchStatus } from './LaunchForm';
@@ -83,7 +84,10 @@ function DevToolsNeeded({ devTools }: { devTools?: DevTools }) {
  */
 export function FirstLaunch({ starter, launcher, auth, devTools, onStart }:
   { starter: Starter; launcher: LaunchApi; auth?: HarnessAuth; devTools?: DevTools; onStart?: () => void }) {
+  const { t } = useI18n();
   const [harness, setHarness] = useState(starter.harnesses[0] ?? '');
+  // Agent comms is on by default and can be turned off only before start (#71).
+  const [comms, setComms] = useState(true);
   const [started, setStarted] = useState(false);
   const ids = useId();
   if (!starter.devTools && !started) return <DevToolsNeeded devTools={devTools} />;
@@ -97,7 +101,7 @@ export function FirstLaunch({ starter, launcher, auth, devTools, onStart }:
         if (!ready) return;
         setStarted(true);
         onStart?.();
-        void launcher.launch({ account: starter.account, target: { package: starter.package }, harness, name: starter.name });
+        void launcher.launch({ account: starter.account, target: { package: starter.package }, harness, name: starter.name, comms });
       }}
     >
       {!started && <p>No companions yet. Start with {starter.name}, a friendly first companion you can chat with.</p>}
@@ -106,6 +110,12 @@ export function FirstLaunch({ starter, launcher, auth, devTools, onStart }:
         <span>Harness</span>
         <input value={harness} readOnly={started} list={`${ids}-harnesses`} onChange={(e) => setHarness(e.target.value)} />
       </label>
+      <label>
+        <span>{t('launch.comms')}</span>
+        <input type="checkbox" role="switch" className="justify-self-start" checked={comms} disabled={started}
+          onChange={(e) => setComms(e.target.checked)} />
+      </label>
+      {!started && <p className="muted small">{t('launch.commsHint')}</p>}
       {started && <LaunchStatus state={launcher.state} />}
       {started && auth && launcher.state.phase === 'launched' && launcher.state.agentId && (
         <HarnessSignIn auth={auth} harness={harness} soul={launcher.state.agentId} />

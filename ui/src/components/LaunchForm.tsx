@@ -18,7 +18,11 @@ interface LaunchFormProps {
   soul?: CensusRow;
   /** The viewer's default harness, used when the soul has none. */
   defaultHarness?: string | null;
-  /** The soul's current agent comms setting, when known; new launches default to on (#71). */
+  /**
+   * The soul's current agent comms setting (#71). New packages default to on.
+   * For an existing soul, undefined means not known yet: the switch is hidden
+   * and the launch leaves the soul's own setting.
+   */
   initialComms?: boolean;
 }
 
@@ -58,14 +62,16 @@ export function LaunchStatus({ state }: { state: LaunchState }) {
  * One launch at a time; the result stays on screen and is never retried.
  */
 export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness = null, initialPackagePath = '',
-  checkingPackage = false, packageError: initialPackageError = null, initialComms = true }: LaunchFormProps) {
+  checkingPackage = false, packageError: initialPackageError = null, initialComms }: LaunchFormProps) {
   const { t } = useI18n();
   const [account, setAccount] = useState(soul?.account ?? (accounts.length === 1 ? accounts[0] : ''));
   const [packagePath, setPackagePath] = useState(initialPackagePath);
   const [packageError, setPackageError] = useState(initialPackageError);
   const [harness, setHarness] = useState(soul?.harness ?? defaultHarness ?? '');
   const [name, setName] = useState('');
-  const [comms, setComms] = useState(initialComms);
+  // Follows the soul's setting as it arrives, until the owner changes it here.
+  const [chosenComms, setComms] = useState<boolean | undefined>(undefined);
+  const comms = chosenComms ?? initialComms ?? (soul ? undefined : true);
   // The launcher is shared: show its result only in the form that started it.
   const [started, setStarted] = useState(false);
   const ids = useId();
@@ -88,7 +94,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
           target: soul ? { soul: soul.agentId } : { package: packagePath },
           harness,
           name,
-          comms,
+          ...(comms === undefined ? {} : { comms }),
         });
       }}
     >
@@ -112,11 +118,15 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
         <span>{t('launch.name')}</span>
         <input value={name} placeholder={t('launch.nameOptional')} onChange={(e) => setName(e.target.value)} />
       </label>
-      <label>
-        <span>{t('launch.comms')}</span>
-        <input type="checkbox" role="switch" className="justify-self-start" checked={comms} onChange={(e) => setComms(e.target.checked)} />
-      </label>
-      <p className="muted small">{t('launch.commsHint')}</p>
+      {comms !== undefined && (
+        <>
+          <label>
+            <span>{t('launch.comms')}</span>
+            <input type="checkbox" role="switch" className="justify-self-start" checked={comms} onChange={(e) => setComms(e.target.checked)} />
+          </label>
+          <p className="muted small">{t('launch.commsHint')}</p>
+        </>
+      )}
       <h3 className="launch-step">{t('launch.step.harness')}</h3>
       <label>
         <span>{t('field.harness')}</span>

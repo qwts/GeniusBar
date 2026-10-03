@@ -46,7 +46,9 @@ describe('soul comms (#71)', () => {
   it('drops malformed states', () => {
     expect(normalizeSoulComms({ agentId: 'a' })).toBeNull();
     expect(normalizeSoulComms(null)).toBeNull();
-    expect(normalizeSoulComms({ agentId: 'a', comms: true })).toEqual({ agentId: 'a', managed: false, comms: true, running: false });
+    expect(normalizeSoulComms({ agentId: 'a', comms: true })).toBeNull();
+    expect(normalizeSoulComms({ agentId: 'a', comms: true, managed: false })).toBeNull();
+    expect(normalizeSoulComms({ agentId: 'a', comms: true, managed: false, running: false })).toEqual({ agentId: 'a', managed: false, comms: true, running: false });
   });
 });
 
