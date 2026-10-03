@@ -30,7 +30,7 @@ export function launchProblem(request: LaunchRequest): string | null {
   if (request.account.trim() === '') return 'Choose an account.';
   if ('package' in request.target) {
     const path = request.target.package;
-    if (path.trim() === '') return 'Enter the soul package path.';
+    if (path.trim() === '') return 'Enter the companion package path.';
     if (path.length > MAX_PACKAGE) return `The package path is longer than ${MAX_PACKAGE} characters.`;
   }
   if (request.harness.trim() === '') return 'Enter a harness.';
@@ -107,6 +107,6 @@ export function launchErrorText(code: string, _message: string, account?: string
     case 'broker-timeout':
       return 'GeniusBar can’t reach its background service. Check the roster before trying again.';
     default:
-      return 'GeniusBar couldn’t start this soul. Try again, and ask for help if the problem continues.';
+      return 'GeniusBar couldn’t start this companion. Try again, and ask for help if the problem continues.';
   }
 }

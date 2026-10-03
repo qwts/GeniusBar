@@ -1,5 +1,6 @@
 // First-run setup state (#9): which steps are done, and whether the
 // connection calls for setup at all.
+import { translate, type Translate } from '../lib/i18n';
 import type { ConnectionSnapshot } from './status';
 
 export type SetupStep = 'broker' | 'account' | 'principal' | 'daemon';
@@ -32,14 +33,14 @@ export interface ExistingServices {
 }
 
 /** A short description of another install's services, or null when there are none. */
-export function describeExisting(existing: ExistingServices | null | undefined): string | null {
+export function describeExisting(existing: ExistingServices | null | undefined, t: Translate = (key, vars) => translate('en', key, vars)): string | null {
   if (!existing || (!existing.broker && !existing.daemon)) return null;
-  const from = existing.broker?.homebrew || existing.daemon?.homebrew ? ' from Homebrew' : '';
   const parts = [
-    existing.broker && `agent-comms${existing.broker.version ? ` ${existing.broker.version}` : ''} (${existing.broker.state})`,
-    existing.daemon && `agent-bot${existing.daemon.version ? ` ${existing.daemon.version}` : ''} (${existing.daemon.state})`,
+    existing.broker && `agent-comms${existing.broker.version ? ` ${existing.broker.version}` : ''} (${t(`setup.${existing.broker.state}`)})`,
+    existing.daemon && `agent-bot${existing.daemon.version ? ` ${existing.daemon.version}` : ''} (${t(`setup.${existing.daemon.state}`)})`,
   ].filter(Boolean);
-  return `${parts.join(' and ')}${from}`;
+  const services = parts.join(t('list.and'));
+  return existing.broker?.homebrew || existing.daemon?.homebrew ? t('setup.homebrew', { services }) : services;
 }
 
 export const idleSetup: SetupState = {

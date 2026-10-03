@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { Check, Circle, Download, Loader2, Terminal, TriangleAlert } from 'lucide-react';
+import { useI18n } from '../lib/i18n';
 
 export type ToolState = 'absent' | 'installed' | 'stale' | 'other';
 export interface ToolsStatus {
@@ -25,6 +27,7 @@ const errorText = (e: unknown, fallback: string) => {
  * replaced after the user says so; Uninstall puts it back.
  */
 export function CliTools({ api }: { api: CliToolsApi }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<ToolsStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -38,8 +41,8 @@ export function CliTools({ api }: { api: CliToolsApi }) {
 
   if (!open) {
     return (
-      <button type="button" className="link" onClick={() => { setOpen(true); void run(api.status, 'Could not check the command-line tools.'); }}>
-        Command-line tools…
+      <button type="button" className="link inline-flex items-center gap-1" onClick={() => { setOpen(true); void run(api.status, t('cli.checkFailed')); }}>
+        <Terminal className="size-3.5" aria-hidden />{t('cli.action')}
       </button>
     );
   }
@@ -47,47 +50,51 @@ export function CliTools({ api }: { api: CliToolsApi }) {
   const ours = status?.tools.some((tool) => tool.state === 'installed' || tool.state === 'stale') ?? false;
   const complete = status?.tools.every((tool) => tool.state === 'installed') ?? false;
   return (
-    <div className="confirm" role="group" aria-label="Command-line tools">
-      <p className="small">
-        Put <code>agent-bot</code> and <code>agent-comms</code> on your PATH so agents you start yourself can join.
-        {status && <> They go in <code>{status.dir}</code>.</>}
+    <div className="w-full min-w-0 space-y-2 rounded-md border border-border bg-muted/50 p-3 text-xs" role="group" aria-label={t('cli.label')}>
+      <p className="break-words text-xs leading-relaxed text-muted-foreground">
+        {t('cli.description')}
+        {status && <> {t('cli.directory', { dir: status.dir })}</>}
       </p>
       {status?.path?.profile && (
-        <p className="small">Added to your PATH in <code>{status.path.profile}</code>. Open a new terminal to use them.</p>
+        <p className="break-words text-xs leading-relaxed text-muted-foreground">{t('cli.profile', { profile: status.path.profile })}</p>
       )}
       {status?.path && !status.path.onPath && status.tools.some((tool) => tool.state === 'installed') && (
-        <p className="small">Add <code>{status.dir}</code> to your PATH so a terminal finds them.</p>
+        <p className="break-words text-xs leading-relaxed text-muted-foreground">{t('cli.addPath', { dir: status.dir })}</p>
       )}
       {status && (
-        <ul className="small">
+        <ul className="break-words text-xs leading-relaxed text-muted-foreground">
           {status.tools.map((tool) => (
-            <li key={tool.name}>
+            <li key={tool.name} className="flex flex-wrap items-center gap-1.5 py-1">
+              {tool.state === 'installed' ? <Check className="size-3.5" aria-hidden /> : tool.state === 'absent' ? <Circle className="size-3.5" aria-hidden /> : <TriangleAlert className="size-3.5" aria-hidden />}
               <code>{tool.name}</code>{' '}
-              {tool.state === 'installed' && 'installed from GeniusBar'}
-              {tool.state === 'stale' && 'installed from an older copy of GeniusBar'}
-              {tool.state === 'absent' && 'not installed'}
-              {tool.state === 'other' && <>already there: <code>{tool.target}</code></>}
+              {tool.state === 'installed' && t('cli.installed')}
+              {tool.state === 'stale' && t('cli.stale')}
+              {tool.state === 'absent' && t('cli.absent')}
+              {tool.state === 'other' && <>{t('cli.other')} <code className="break-all">{tool.target}</code></>}
             </li>
           ))}
         </ul>
       )}
       {others.length > 0 && (
-        <p className="small">
-          Installing replaces {others.map((tool) => tool.name).join(' and ')}. The current one is set aside, and Uninstall puts it back.
+        <p className="break-words text-xs leading-relaxed text-muted-foreground">
+          {t('cli.replace', { tools: others.map((tool) => tool.name).join(t('list.and')) })}
         </p>
       )}
-      {error && <p className="error small" role="alert">{error}</p>}
-      <div className="detail-actions">
-        <button type="button" disabled={busy} onClick={() => setOpen(false)}>Close</button>
+      {error && <p className="text-xs text-destructive" role="alert">{error}</p>}
+      <div className="flex flex-wrap justify-end gap-2">
+        <button type="button" className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-secondary px-2.5 py-1 text-xs text-secondary-foreground hover:bg-accent disabled:opacity-50" disabled={busy} onClick={() => setOpen(false)}>{t('close')}</button>
         {ours && (
-          <button type="button" disabled={busy} onClick={() => void run(api.uninstall, 'Could not uninstall the command-line tools.')}>
-            Uninstall
+          <button type="button" className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-secondary px-2.5 py-1 text-xs text-secondary-foreground hover:bg-accent disabled:opacity-50" disabled={busy} onClick={() => void run(api.uninstall, t('cli.uninstallFailed'))}>
+            {t('cli.uninstall')}
           </button>
         )}
         {status && !complete && (
-          <button type="button" disabled={busy}
-            onClick={() => void run(() => api.install(others.map((tool) => tool.name)), 'Could not install the command-line tools.')}>
-            {busy ? 'Installing…' : others.length ? 'Replace and install' : 'Install'}
+          <button type="button" className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-secondary px-2.5 py-1 text-xs text-secondary-foreground hover:bg-accent disabled:opacity-50" disabled={busy}
+            onClick={() => void run(() => api.install(others.map((tool) => tool.name)), t('cli.installFailed'))}>
+            <span className="inline-flex items-center gap-1.5">
+              {busy ? <Loader2 className="size-3.5 motion-safe:animate-spin" aria-hidden /> : <Download className="size-3.5" aria-hidden />}
+              {busy ? t('cli.installing') : others.length ? t('cli.replaceInstall') : t('cli.install')}
+            </span>
           </button>
         )}
       </div>

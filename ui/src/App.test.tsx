@@ -1,21 +1,39 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { emptyComposer, mergeIncoming, emptyChat } from './model/chat';
+import type { CensusRow } from './model/census';
 import { inboxMessage, sampleCensus, sampleConnection } from './model/fixtures';
 import { idleSetup } from './model/setup';
 import { disconnected } from './model/status';
+import { LAYOUT_KEY, layoutActions } from './state/layout';
 import type { ChatApi } from './useChat';
 import type { LaunchApi } from './useLaunch';
 
-afterEach(() => { cleanup(); globalThis.localStorage?.clear(); });
+afterEach(() => { cleanup(); globalThis.localStorage?.clear(); layoutActions.forget(); });
+
+// luna's team with a subagent of its own, so a hidden lead can leave
+// several descendants behind it.
+const nestedCensus: readonly CensusRow[] = [
+  ...sampleCensus.filter((soul) => soul.agentId !== 'agent_gone'),
+  {
+    account: 'user',
+    agentId: 'agent_k',
+    name: 'kiro',
+    harness: 'claude',
+    parent: 'agent_c',
+    presence: 'joined',
+    unacked: 0,
+    lastWake: null,
+  },
+];
 
 describe('App', () => {
   it('shows the header and an empty roster before the bridge connects', () => {
     render(<App />);
     expect(screen.getByRole('heading', { name: 'GeniusBar' })).toBeTruthy();
     expect(screen.getByRole('status').textContent).toMatch(/connecting/i);
-    expect(screen.getByRole('region', { name: 'Souls' }).childElementCount).toBe(0);
+    expect(screen.getByRole('region', { name: 'Fleet' }).childElementCount).toBe(0);
   });
 
   it('renders the fixed fake census and health, nested, with every soul', () => {
@@ -23,19 +41,25 @@ describe('App', () => {
     // rows that the same header with an empty roster does not.
     render(<App census={sampleCensus} connection={sampleConnection} isStatic />);
     expect(screen.getByRole('status', { name: 'Connected' }).textContent).toBe('Connected');
-    const roster = screen.getByRole('region', { name: 'Souls' });
-    expect(roster.querySelectorAll('button.soul-row')).toHaveLength(3);
+    const roster = screen.getByRole('region', { name: 'Fleet' });
+    expect(roster.querySelectorAll('button.companion-row')).toHaveLength(3);
     cleanup();
     render(<App connection={sampleConnection} isStatic />);
-    expect(screen.getByRole('region', { name: 'Souls' }).textContent).toBe('No souls yet. Your first soul will appear here.');
+    expect(screen.getByRole('region', { name: 'Fleet' }).textContent).toBe('No companions yet. Your first companion will appear here.');
   });
 
-  it('opens the detail for a selected row and closes it with Done', () => {
+  it('opens a companion as a session in the popup, and goes back to the fleet', () => {
     render(<App census={sampleCensus} connection={sampleConnection} isStatic />);
     fireEvent.click(screen.getByRole('button', { name: /^agent_c,/ }));
-    expect(screen.getByRole('dialog', { name: 'agent_c, agent_c' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
-    expect(screen.queryByRole('dialog')).toBeNull();
+    const session = screen.getByRole('region', { name: 'agent_c, agent_c' });
+    expect(screen.queryByRole('region', { name: 'Fleet' })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Back to fleet' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to fleet' }));
+    expect(screen.queryByRole('region', { name: 'agent_c, agent_c' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^agent_c,/ }));
+    fireEvent.keyDown(screen.getByRole('region', { name: 'agent_c, agent_c' }), { key: 'Escape' });
+    expect(screen.getByRole('region', { name: 'Fleet' })).toBeTruthy();
+    expect(session.isConnected).toBe(false);
   });
 
   it('keeps the last census on screen while the broker is unreachable', () => {
@@ -68,12 +92,12 @@ describe('App', () => {
     expect(chat.open).toHaveBeenLastCalledWith(null);
     fireEvent.click(row);
     expect(chat.open).toHaveBeenLastCalledWith('user/agent_c');
-    const dialog = screen.getByRole('dialog', { name: 'agent_c, agent_c' });
-    expect(dialog.textContent).toContain('hello');
+    const session = screen.getByRole('region', { name: 'agent_c, agent_c' });
+    expect(session.textContent).toContain('hello');
     fireEvent.change(screen.getByRole('textbox', { name: 'Message to agent_c' }), { target: { value: 'yo' } });
     expect(chat.setDraft).toHaveBeenCalledWith('user/agent_c', 'yo');
     expect(chat.composers['user/agent_c'] ?? emptyComposer).toEqual(emptyComposer);
-    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to fleet' }));
     expect(chat.open).toHaveBeenLastCalledWith(null);
   });
 });
@@ -83,7 +107,7 @@ describe('App setup', () => {
     const unpaired = { ...disconnected, bridgeConnected: true, unpaired: true };
     render(<App connection={unpaired} setup={idleSetup} onSetup={() => {}} />);
     expect(screen.getByRole('region', { name: 'Setup' })).toBeTruthy();
-    expect(screen.queryByRole('region', { name: 'Souls' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Fleet' })).toBeNull();
     expect(screen.queryByText('No souls on this machine.')).toBeNull();
   });
 
@@ -105,7 +129,7 @@ describe('App setup', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Launch package…' }));
     fireEvent.change(screen.getByLabelText('Package'), { target: { value: '/souls/helper' } });
     fireEvent.change(screen.getByLabelText('Harness'), { target: { value: 'claude' } });
-    fireEvent.submit(screen.getByRole('form', { name: 'Launch a soul package' }));
+    fireEvent.submit(screen.getByRole('form', { name: 'Launch a companion package' }));
     expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { package: '/souls/helper' }, harness: 'claude', name: '' });
     const refused: LaunchApi = { ...launcher, state: { phase: 'error', requestId: null, text: 'GeniusBar can’t reach the agents on account user. Make sure setup has finished, then try again.' } };
     rerender(<App census={sampleCensus} connection={sampleConnection} launcher={refused} isStatic />);
@@ -126,7 +150,7 @@ describe('App setup', () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher}
       openedPackage={{ id: 1, path: '/Downloads/broken.soul', checking: false, error: 'unreadable' }} isStatic />);
-    const form = screen.getByRole('form', { name: 'Launch a soul package' });
+    const form = screen.getByRole('form', { name: 'Launch a companion package' });
     expect((screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.submit(form);
     expect(launcher.launch).not.toHaveBeenCalled();
@@ -170,10 +194,10 @@ describe('App setup', () => {
     const signIn = await screen.findByRole('button', { name: 'Sign in to Claude' });
     expect(auth).toHaveBeenCalledWith('status', 'claude', 'agent_s');
     fireEvent.click(signIn);
-    await waitFor(() => expect(screen.getByText(/Ready\. Open the soul/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Ready\. Open the companion/)).toBeTruthy());
     expect(auth).toHaveBeenCalledWith('login', 'claude', 'agent_s');
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-    expect(screen.queryByRole('region', { name: 'Your first soul' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Your first companion' })).toBeNull();
   });
 
   it('asks for Apple developer tools before the starter can launch', async () => {
@@ -193,7 +217,7 @@ describe('App setup', () => {
   it('keeps the plain empty text when the starter soul is not offered', () => {
     render(<App census={[]} connection={sampleConnection} isStatic />);
     expect(screen.queryByRole('form', { name: 'Start with Starter' })).toBeNull();
-    expect(screen.getByText('No souls yet. Your first soul will appear here.')).toBeTruthy();
+    expect(screen.getByText('No companions yet. Your first companion will appear here.')).toBeTruthy();
   });
 
   it('offers no launch without a launcher', () => {
@@ -233,5 +257,146 @@ describe('App setup', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
     expect(await screen.findByText('Services removed.')).toBeTruthy();
     expect(onRemove).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('App window mode', () => {
+  const desktop = () => screen.getByRole('main', { name: 'Fleet' });
+
+  it('lays out one card per team and opens a companion in a window', () => {
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
+    expect(within(desktop()).getByRole('region', { name: 'luna' })).toBeTruthy();
+    expect(within(desktop()).getByRole('region', { name: 'old' })).toBeTruthy();
+    fireEvent.click(within(desktop()).getByRole('button', { name: /^agent_c,/ }));
+    const win = screen.getByRole('dialog', { name: 'agent_c' });
+    expect(within(win).getByRole('region', { name: 'agent_c, agent_c' })).toBeTruthy();
+    expect(within(win).queryByRole('button', { name: 'Back to fleet' })).toBeNull();
+    expect(document.activeElement).toBe(within(win).getByRole('button', { name: 'Close window' }));
+    fireEvent.click(within(win).getByRole('button', { name: 'Close window' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('opens the menu from the toolbar, and hides companions from the desktop', () => {
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
+    expect(screen.queryByRole('dialog', { name: 'GeniusBar menu' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'GeniusBar menu' }));
+    const menu = screen.getByRole('dialog', { name: 'GeniusBar menu' });
+    fireEvent.click(within(menu).getByRole('button', { name: 'Hide from desktop: agent_c' }));
+    expect(within(desktop()).queryByRole('button', { name: /^agent_c,/ })).toBeNull();
+    expect(JSON.parse(localStorage.getItem(LAYOUT_KEY)!).hidden).toEqual(['user/agent_c']);
+    // Still listed in the menu, and still opens from there.
+    expect(within(menu).getByRole('button', { name: /^agent_c,/ })).toBeTruthy();
+    fireEvent.click(within(menu).getByRole('button', { name: 'Show all hidden (1)' }));
+    expect(within(desktop()).getByRole('button', { name: /^agent_c,/ })).toBeTruthy();
+    fireEvent.keyDown(within(menu).getByRole('searchbox'), { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'GeniusBar menu' })).toBeNull();
+  });
+
+  it('collapses a team and remembers it', () => {
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
+    const collapse = within(desktop()).getByRole('button', { name: 'Collapse team' });
+    expect(collapse.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(collapse);
+    expect(within(desktop()).queryByRole('button', { name: /^agent_c,/ })).toBeNull();
+    expect(JSON.parse(localStorage.getItem(LAYOUT_KEY)!).collapsed).toEqual(['user/agent_p']);
+    fireEvent.click(within(desktop()).getByRole('button', { name: 'Expand team' }));
+    expect(within(desktop()).getByRole('button', { name: /^agent_c,/ })).toBeTruthy();
+  });
+
+  it('replaces a hidden team lead with a neutral placeholder, keeping its subagents reachable', () => {
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'GeniusBar menu' }));
+    const menu = screen.getByRole('dialog', { name: 'GeniusBar menu' });
+    fireEvent.click(within(menu).getByRole('button', { name: 'Hide from desktop: luna' }));
+    // The hidden lead leaves nothing behind: no avatar, no name, no harness,
+    // and no longer the card's accessible name either.
+    const card = within(desktop()).getByRole('region', { name: 'Team' });
+    expect(card.textContent).not.toMatch(/luna|codex/i);
+    expect(within(card).queryByRole('button', { name: /^luna,/ })).toBeNull();
+    expect(within(desktop()).queryByRole('region', { name: 'luna' })).toBeNull();
+    // Only what reaches the visible subagent is left, and it still opens.
+    expect(card.textContent).toContain('1 subagent');
+    fireEvent.click(within(card).getByRole('button', { name: /^agent_c,/ }));
+    expect(screen.getByRole('dialog', { name: 'agent_c' })).toBeTruthy();
+    // Collapsing the card still folds its subagent away.
+    fireEvent.click(within(card).getByRole('button', { name: 'Collapse team' }));
+    expect(within(card).queryByRole('button', { name: /^agent_c,/ })).toBeNull();
+  });
+
+  it('counts the subagents hidden under a hidden lead, and drops the card once all are hidden', () => {
+    render(<App mode="window" census={nestedCensus} connection={sampleConnection} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'GeniusBar menu' }));
+    const menu = screen.getByRole('dialog', { name: 'GeniusBar menu' });
+    fireEvent.click(within(menu).getByRole('button', { name: 'Hide from desktop: luna' }));
+    fireEvent.click(within(menu).getByRole('button', { name: 'Hide from desktop: agent_c' }));
+    const card = within(desktop()).getByRole('region', { name: 'Team' });
+    expect(card.textContent).toContain('2 subagents · 1 hidden');
+    expect(within(card).queryByRole('button', { name: /^agent_c,/ })).toBeNull();
+    expect(within(card).getByRole('button', { name: /^kiro,/ })).toBeTruthy();
+    fireEvent.click(within(menu).getByRole('button', { name: 'Hide from desktop: kiro' }));
+    expect(within(desktop()).queryByRole('region', { name: 'Team' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'luna' })).toBeNull();
+    fireEvent.click(within(menu).getByRole('button', { name: 'Show all hidden (3)' }));
+    expect(within(desktop()).getByRole('region', { name: 'luna' })).toBeTruthy();
+  });
+
+  it('opens the menu on its own while setup is needed', () => {
+    const unpaired = { ...disconnected, bridgeConnected: true, unpaired: true };
+    render(<App mode="window" connection={unpaired} setup={idleSetup} onSetup={() => {}} />);
+    expect(desktop().textContent).toContain('Open the GeniusBar menu above to set up.');
+    const menu = screen.getByRole('dialog', { name: 'GeniusBar menu' });
+    expect(within(menu).getByRole('region', { name: 'Setup' })).toBeTruthy();
+  });
+});
+
+describe('App language', () => {
+  it('switches to Spanish and remembers the choice', () => {
+    render(<App census={sampleCensus} connection={sampleConnection} isStatic />);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Language' }), { target: { value: 'es' } });
+    expect(screen.getByRole('region', { name: 'Flota' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^luna, codex, Listo$/ })).toBeTruthy();
+    expect(localStorage.getItem('gb.lang')).toBe('es');
+    cleanup();
+    render(<App census={sampleCensus} connection={sampleConnection} isStatic />);
+    expect(screen.getByRole('combobox', { name: 'Idioma' })).toHaveProperty('value', 'es');
+  });
+
+  it('localizes the placeholder a hidden team lead leaves behind', () => {
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'GeniusBar menu' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Language' }), { target: { value: 'es' } });
+    const menu = screen.getByRole('dialog', { name: 'Menú de GeniusBar' });
+    fireEvent.click(within(menu).getByRole('button', { name: 'Ocultar del escritorio: luna' }));
+    const card = within(screen.getByRole('main', { name: 'Flota' })).getByRole('region', { name: 'Equipo' });
+    expect(card.textContent).toContain('1 subagente');
+    expect(card.textContent).not.toMatch(/luna|codex/i);
+  });
+});
+
+
+describe('CLI tools and migration in the rebuilt shell', () => {
+  it.each(['tray', 'window'] as const)('keeps both actions and translates them in %s mode', async (mode) => {
+    const onSetup = vi.fn();
+    const cliTools = {
+      status: vi.fn(async () => ({ dir: '/Users/me/.local/bin', tools: [{ name: 'agent-bot', state: 'absent' as const }] })),
+      install: vi.fn(), uninstall: vi.fn(),
+    };
+    render(<App mode={mode} connection={{ ...disconnected, bridgeConnected: true, unpaired: true }}
+      setup={idleSetup} onSetup={onSetup} cliTools={cliTools} existingServices={{
+        broker: { label: 'broker', program: [], version: '0.3.1', homebrew: true, state: 'stopped' },
+        daemon: { label: 'daemon', program: [], version: null, homebrew: true, state: 'running' },
+      }} />);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Language' }), { target: { value: 'es' } });
+    expect(screen.getByRole('region', { name: 'Configuración' })).toBeTruthy();
+    expect(screen.getByRole('note').textContent).toContain('agent-comms 0.3.1 (detenido) y agent-bot (en ejecución) de Homebrew');
+    expect(screen.getByRole('note').textContent).toContain('se reinician los servicios que estaban en ejecución');
+    expect(screen.getByText('Iniciar tus agentes')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Trasladar a GeniusBar' }));
+    expect(onSetup).toHaveBeenLastCalledWith(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Conservarlos' }));
+    expect(onSetup).toHaveBeenLastCalledWith(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Herramientas de línea de comandos…' }));
+    await screen.findByRole('button', { name: 'Instalar' });
+    expect(cliTools.status).toHaveBeenCalledOnce();
   });
 });

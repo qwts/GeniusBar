@@ -44,12 +44,12 @@ describe('Conversation', () => {
       <Conversation
         name="luna"
         entries={[]}
-        composer={{ ...emptyComposer, draft: 'kept', error: 'This soul’s mailbox is full.' }}
+        composer={{ ...emptyComposer, draft: 'kept', error: 'This companion’s mailbox is full.' }}
         onDraft={() => {}}
         onSend={() => {}}
       />,
     );
-    expect(screen.getByRole('alert').textContent).toBe('This soul’s mailbox is full.');
+    expect(screen.getByRole('alert').textContent).toBe('This companion’s mailbox is full.');
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('kept');
   });
 });

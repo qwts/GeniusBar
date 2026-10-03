@@ -184,11 +184,11 @@ export function sendFailed(composer: Composer, code: string, message: string): C
 export function sendErrorText(code: string, _message: string): string {
   switch (code) {
     case 'unknown-recipient':
-      return 'This soul cannot receive your messages: it may have left, or it does not accept messages from you.';
+      return 'This companion cannot receive your messages: it may have left, or it does not accept messages from you.';
     case 'rate-limited':
       return 'Too many messages in the last minute. Wait a moment, then send again.';
     case 'mailbox-full':
-      return 'This soul’s mailbox is full. Send again once it has read some messages.';
+      return 'This companion’s mailbox is full. Send again once it has read some messages.';
     case 'message-too-large':
       return 'This message is too large to send. Shorten it and try again.';
     case 'broker-unreachable':

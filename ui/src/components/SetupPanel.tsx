@@ -1,46 +1,49 @@
+import { ArrowRightLeft, Check, Circle, Loader2 } from 'lucide-react';
+import { useI18n } from '../lib/i18n';
 import { describeExisting, SETUP_STEPS, type ExistingServices, type SetupState } from '../model/setup';
 
-const MARK = { pending: '○', running: '…', done: '✓' } as const;
+const MARK = { pending: Circle, running: Loader2, done: Check } as const;
 
-/**
- * First-run setup, shown in place of the roster until GeniusBar is paired.
- * When another install's broker or daemon has a plist (Homebrew's), setup
- * says so and offers to move them over, or to keep them as they are (#41).
- */
+/** Setup can keep another install's services or move them to GeniusBar. */
 export function SetupPanel({ setup, onSetup, existing }: {
   setup: SetupState;
   onSetup: (migrate?: boolean) => void;
   existing?: ExistingServices | null;
 }) {
-  const found = describeExisting(existing);
+  const { t } = useI18n();
+  const found = describeExisting(existing, t);
   return (
-    <section className="setup" aria-label="Setup">
-      <p>Let’s connect GeniusBar to your account.</p>
-      <ol>
-        {SETUP_STEPS.map(({ step, label }) => (
-          <li key={step} className={setup.steps[step]}>
-            <span aria-hidden="true">{MARK[setup.steps[step]]}</span> {label}
-          </li>
-        ))}
+    <section className="space-y-3 border-b border-border px-3.5 py-4 text-sm" aria-label={t('setup.label')}>
+      <p className="font-medium">{t('setup.intro')}</p>
+      <ol className="space-y-2 text-xs" aria-live="polite">
+        {SETUP_STEPS.map(({ step }) => {
+          const state = setup.steps[step];
+          const Mark = MARK[state];
+          return (
+            <li key={step} className={`flex items-center gap-2 ${state === 'pending' ? 'text-muted-foreground' : 'text-foreground'}`}>
+              <Mark className={`size-4 shrink-0 ${state === 'done' ? 'text-success' : state === 'running' ? 'text-primary' : ''} ${state === 'running' ? 'motion-safe:animate-spin' : ''}`} aria-hidden />
+              {t(`setup.${step}`)}
+            </li>
+          );
+        })}
       </ol>
       {found && !setup.running && (
-        <p className="small" role="note">
-          {found} is already installed. GeniusBar can take over its services, keeping your agents, messages and
-          pairings. Stopped services are moved without trying to stop them again. If that fails, previously
-          running services are started again. Or keep the existing services and continue setup.
+        <p className="rounded-md border border-border bg-muted p-3 text-xs leading-relaxed text-muted-foreground" role="note">
+          {t('setup.migration', { services: found })}
         </p>
       )}
-      {setup.error && <p className="error small" role="alert">{setup.error}</p>}
+      {setup.error && <p className="text-xs text-destructive" role="alert">{setup.error}</p>}
       {found ? (
-        <div className="detail-actions">
-          <button type="button" onClick={() => onSetup(false)} disabled={setup.running}>Keep them</button>
-          <button type="button" onClick={() => onSetup(true)} disabled={setup.running}>
-            {setup.running ? 'Setting up…' : 'Move to GeniusBar'}
+        <div className="flex flex-wrap justify-end gap-2">
+          <button type="button" className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-secondary px-2.5 py-1 text-xs text-secondary-foreground hover:bg-accent disabled:opacity-50" onClick={() => onSetup(false)} disabled={setup.running}>{t('setup.keep')}</button>
+          <button type="button" className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-secondary px-2.5 py-1 text-xs text-secondary-foreground hover:bg-accent disabled:opacity-50" onClick={() => onSetup(true)} disabled={setup.running}>
+            <ArrowRightLeft className="size-3.5" aria-hidden />
+            {setup.running ? t('setup.settingUp') : t('setup.move')}
           </button>
         </div>
       ) : (
-        <button type="button" onClick={() => onSetup()} disabled={setup.running}>
-          {setup.running ? 'Setting up…' : setup.error ? 'Try again' : 'Set up'}
+        <button type="button" className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-secondary px-2.5 py-1 text-xs text-secondary-foreground hover:bg-accent disabled:opacity-50" onClick={() => onSetup()} disabled={setup.running}>
+          {setup.running ? t('setup.settingUp') : setup.error ? t('setup.retry') : t('setup.go')}
         </button>
       )}
     </section>

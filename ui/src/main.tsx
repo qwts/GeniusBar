@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { StrictMode, useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { App } from './App';
+import { App, type AppMode } from './App';
 import type { CliToolsApi } from './components/CliTools';
 import type { DevTools, HarnessAuth, Starter } from './components/FirstLaunch';
 import { useCensus } from './useCensus';
@@ -10,6 +10,10 @@ import { useChat } from './useChat';
 import { useLaunch } from './useLaunch';
 import { useSetup } from './useSetup';
 import { useUpdates } from './useUpdates';
+import '@fontsource/ibm-plex-sans/latin-400.css';
+import '@fontsource/ibm-plex-sans/latin-500.css';
+import '@fontsource/ibm-plex-sans/latin-600.css';
+import '@fontsource/jetbrains-mono/latin-400.css';
 import './styles.css';
 
 // The live app: census and connection come from the bridge.
@@ -33,7 +37,7 @@ function Live() {
         setOpenedPackage((current) => current?.id === id ? {
           ...current,
           checking: false,
-          error: 'GeniusBar couldn’t read this soul package. Check that it’s accessible and contains a soul.json file, then try again.',
+          error: 'GeniusBar couldn’t read this companion package. Check that it’s accessible and contains a soul.json file, then try again.',
         } : current);
       }
     }
@@ -61,8 +65,11 @@ function Live() {
     install: (replace) => invoke('cli_tools', { action: 'install', replace }),
     uninstall: () => invoke('cli_tools', { action: 'uninstall' }),
   };
+  // The shell's --window flag picks the desktop; the popup is the default.
+  const [mode, setMode] = useState<AppMode>('tray');
+  useEffect(() => { invoke<AppMode>('app_mode').then(setMode, () => {}); }, []);
   return (
-    <App census={census} connection={connection} onRefresh={refresh} setup={setup}
+    <App mode={mode} census={census} connection={connection} onRefresh={refresh} setup={setup}
       onSetup={(migrate) => { void runSetup(migrate); }} existingServices={existing} cliTools={cliTools} chat={chat} launcher={launcher} starter={starter} harnessAuth={harnessAuth}
       devTools={devTools} openedPackage={openedPackage} updates={updates}
       onRemoveServices={async () => { await invoke('remove_services'); void refresh?.(); }} />
