@@ -520,6 +520,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn runtime_metrics_reads_snapshot_or_returns_unavailable() {
+        let snapshot = json!({
+            "collectedAt": "2026-10-03T12:00:00Z",
+            "souls": { "agent_p": { "lastCallAt": null, "observations": [] } },
+            "errors": [{ "agentId": "agent_p", "source": "claude", "code": "read-failed", "message": "failed" }],
+            "missing": []
+        });
+        assert_eq!(
+            parse_runtime_metrics(snapshot.to_string().as_bytes()),
+            snapshot
+        );
+        for output in [
+            b"".as_slice(),
+            b"unknown command metrics",
+            b"{}",
+            b"{\"error\":{\"message\":\"failed\"}}",
+        ] {
+            assert_eq!(
+                parse_runtime_metrics(output),
+                json!({ "unavailable": true })
+            );
+        }
+    }
+
+    #[test]
     fn harness_auth_reads_sign_in_state_or_error() {
         let ok = parse_harness_auth(b"{\"harness\":\"claude\",\"loggedIn\":false}\n").unwrap();
         assert_eq!(ok["loggedIn"], false);
@@ -670,6 +695,58 @@ pub async fn harness_auth<R: Runtime>(
         .await
         .map_err(|e| unavailable(e.to_string()))?;
     parse_harness_auth(&output.stdout)
+}
+
+/// Metrics are optional: missing collectors or an older bundle never block messaging.
+#[tauri::command]
+pub async fn runtime_metrics<R: Runtime>(app: AppHandle<R>) -> Result<Value, BridgeError> {
+    let unavailable = json!({ "unavailable": true });
+    let Ok(resources) = app.path().resource_dir() else {
+        return Ok(unavailable);
+    };
+    let script = resources
+        .join("components")
+        .join("agent-bot")
+        .join("agent-bot.mjs");
+    for action in ["collect", "show"] {
+        let Ok(command) = app.shell().sidecar("node") else {
+            return Ok(unavailable);
+        };
+        let Ok(output) = command
+            .envs(HOST_ENV.iter().copied())
+            .args([
+                script.clone().into_os_string(),
+                "metrics".into(),
+                action.into(),
+                "--json".into(),
+            ])
+            .output()
+            .await
+        else {
+            return Ok(unavailable);
+        };
+        if !output.status.success() {
+            return Ok(unavailable);
+        }
+        if action == "show" {
+            return Ok(parse_runtime_metrics(&output.stdout));
+        }
+    }
+    Ok(unavailable)
+}
+
+fn parse_runtime_metrics(stdout: &[u8]) -> Value {
+    let Ok(value) = serde_json::from_slice::<Value>(stdout) else {
+        return json!({ "unavailable": true });
+    };
+    if value.get("collectedAt").is_none()
+        || !value.get("souls").is_some_and(Value::is_object)
+        || !value.get("errors").is_some_and(Value::is_array)
+        || !value.get("missing").is_some_and(Value::is_array)
+    {
+        return json!({ "unavailable": true });
+    }
+    value
 }
 
 /// agent-bot's `harness auth` line: `{harness, loggedIn}` or `{error}`.

@@ -238,6 +238,7 @@ pub fn run() {
             soul_package::validate_soul_package,
             starter::install_dev_tools,
             bridge::harness_auth,
+            bridge::runtime_metrics,
             updates::update_status,
             updates::update_action,
             snapshot::snapshot_options,
