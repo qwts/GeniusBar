@@ -43,7 +43,11 @@ function failed(result, fallback) {
   return new SetupError(error?.code ?? fallback, error?.message ?? `${fallback}`);
 }
 
-export async function runSetup({ cli, bot, report, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now }) {
+// `principal` asks the broker as GeniusBar's own principal, the credential the
+// bridge will load (#56). The CLI's census is not that question: it answers
+// as whichever principal the CLI's credential file holds, which on a Mac moved
+// over from Homebrew is the owner's, not GeniusBar's.
+export async function runSetup({ cli, bot, report, principal = () => cli(['census']), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now }) {
   // 1. A broker. Use whichever one already answers on the shared socket;
   // install ours only when none does, so two brokers never compete. A
   // socket file proves nothing (a crashed broker leaves one), so ask the
@@ -86,7 +90,7 @@ export async function runSetup({ cli, bot, report, sleep = (ms) => new Promise((
 
   // 3. GeniusBar as a principal, paired and approved.
   report({ step: 'principal', state: 'running' });
-  const census = await cli(['census']);
+  const census = await principal();
   if (!census?.ok) {
     const paired = await cli(['principal', 'pair', '--name', PRINCIPAL_NAME]);
     if (!paired?.ok || !paired.code) throw failed(paired, 'principal-pair-failed');
@@ -134,9 +138,20 @@ async function main() {
   });
   const cli = runner(path.join(commsDir, 'bin', 'agent-comms.mjs'));
   const bot = runner(path.join(botDir, 'agent-bot.mjs'));
+  // The same load the bridge does: GeniusBar's credential name (from its
+  // environment), the keychain on macOS. Any failure means not set up yet.
+  const principal = async () => {
+    try {
+      const { createPrincipalClient } = await import(pathToFileURL(path.join(commsDir, 'lib', 'principal-client.mjs')).href);
+      const census = await createPrincipalClient().census();
+      return census?.ok === false ? census : { ok: true };
+    } catch (error) {
+      return { ok: false, error: { code: error?.code ?? 'principal-unavailable', message: String(error?.message ?? error) } };
+    }
+  };
   const write = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
   try {
-    await runSetup({ cli, bot, report: write });
+    await runSetup({ cli, bot, principal, report: write });
     write({ done: true });
   } catch (error) {
     write({ done: false, code: error.code ?? 'setup-failed', message: String(error.message ?? error) });
