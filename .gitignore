@@ -5,3 +5,4 @@ src-tauri/gen/
 .cache/
 src-tauri/binaries/
 src-tauri/resources/components/
+keyd/target/

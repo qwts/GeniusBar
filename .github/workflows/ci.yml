@@ -42,13 +42,21 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
-          workspaces: src-tauri
+          workspaces: |
+            src-tauri
+            keyd
       - name: Install
         run: npm ci && npm --prefix ui ci
       # Pinned Node (checksum-verified) and components; the shell's build
       # needs the sidecar binary to exist.
       - name: Fetch bundled components
         run: node scripts/fetch-components.mjs
+      # agent-bot-keyd (agent-bot-identity #397) is the second sidecar.
+      - name: agent-bot-keyd format, lint, tests
+        working-directory: keyd
+        run: cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked
+      - name: Build agent-bot-keyd sidecar
+        run: node scripts/build-keyd.mjs
       - name: Bridge tests
         run: node --test 'bridge/*.test.mjs' 'scripts/*.test.mjs'
       - name: UI typecheck and tests

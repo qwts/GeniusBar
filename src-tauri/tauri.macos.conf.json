@@ -1,9 +1,17 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeDevCommand": "node scripts/fetch-components.mjs && node scripts/build-keyd.mjs && npm --prefix ui run dev",
+    "beforeBuildCommand": "node scripts/fetch-components.mjs && node scripts/build-keyd.mjs && npm --prefix ui run build"
+  },
   "bundle": {
     "targets": [
       "app",
       "dmg"
+    ],
+    "externalBin": [
+      "binaries/node",
+      "binaries/agent-bot-keyd"
     ],
     "macOS": {
       "hardenedRuntime": true,

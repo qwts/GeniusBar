@@ -138,6 +138,45 @@ test('remove unloads and deletes both GeniusBar units, skipping absent ones', as
   await assert.rejects(removeServices({ units, read: () => 'x', cli: none.run, bot: stuck.run }), { code: 'launchctl-failed' });
 });
 
+const keyd = '/Applications/Genius Bar.app/Contents/MacOS/agent-bot-keyd';
+const keydInstall = `keyd install --bin ${keyd} --json`;
+
+test('refresh keeps agent-bot-keyd running beside the daemon (agent-bot-identity #397)', async () => {
+  const current = { B: plist(node, entry), D: '<plist/>' };
+  const daemon = { 'daemon install --json': { label: 'app.geniusbar.agent-bot', changed: false, loaded: true } };
+  const fresh = fake({ ...daemon, [keydInstall]: { label: 'app.geniusbar.keyd', changed: true, loaded: true } });
+  assert.deepEqual(await refreshServices({ units, read: (f) => current[f], node, commsEntry: entry, cli: fake({}).run, bot: fresh.run, keyd }),
+    { broker: 'current', daemon: 'current', keyd: 'reinstalled' });
+  assert.deepEqual(fresh.calls, ['daemon install --json', keydInstall]);
+
+  const kicks = [];
+  const stamp = { read: async () => '0.1.0', write: async () => {} };
+  const same = fake({ ...daemon, [keydInstall]: { label: 'app.geniusbar.keyd', changed: false, loaded: true } });
+  assert.deepEqual(await refreshServices({ units, read: (f) => current[f], node, commsEntry: entry, cli: fake({}).run, bot: same.run,
+    keyd, version: '0.1.1', stamp, kickstart: async (which) => { kicks.push(which); return true; } }),
+    { broker: 'restarted', daemon: 'restarted', keyd: 'restarted' });
+  assert.deepEqual(kicks, ['broker', 'daemon', 'keyd']);
+
+  // An agent-bot that predates `keyd install` never fails the refresh.
+  const old = fake({ ...daemon, [keydInstall]: null });
+  assert.deepEqual(await refreshServices({ units, read: (f) => current[f], node, commsEntry: entry, cli: fake({}).run, bot: old.run, keyd }),
+    { broker: 'current', daemon: 'current', keyd: 'unavailable' });
+
+  // No daemon unit: setup has not run, so keyd is not installed either.
+  const none = fake({});
+  assert.deepEqual(await refreshServices({ units, read: () => null, node, commsEntry: entry, cli: none.run, bot: none.run, keyd }),
+    { broker: 'absent', daemon: 'absent', keyd: 'absent' });
+  assert.deepEqual(none.calls, []);
+});
+
+test('remove unloads agent-bot-keyd first and keeps its keys', async () => {
+  const bot = fake({ 'keyd uninstall --json': { unloaded: true }, 'daemon disable --json': { unloaded: true } });
+  const cli = fake({ 'broker uninstall': { ok: true, installed: false, unloaded: true } });
+  assert.deepEqual(await removeServices({ units, read: () => 'x', cli: cli.run, bot: bot.run, keyd }),
+    { keyd: 'removed', daemon: 'removed', broker: 'removed' });
+  assert.deepEqual(bot.calls, ['keyd uninstall --json', 'daemon disable --json']);
+});
+
 // Homebrew's units, as the host has them (#41).
 const brewBroker = `<plist><dict><key>Label</key><string>dev.qwts.agent-comms.broker</string>
 <key>ProgramArguments</key><array>

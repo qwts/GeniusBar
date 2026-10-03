@@ -33,6 +33,8 @@ pub const HOST_ENV: &[(&str, &str)] = &[
     ("AGENT_COMMS_SERVICE_LABEL", "app.geniusbar.broker"),
     ("AGENT_COMMS_CREDENTIAL_NAME", "app.geniusbar.principal"),
     ("AGENT_BOT_SERVICE_LABEL", "app.geniusbar.agent-bot"),
+    // agent-bot-keyd, GeniusBar's key custodian (agent-bot-identity #397).
+    ("AGENT_BOT_KEYD_SERVICE_LABEL", "app.geniusbar.keyd"),
     // GeniusBar's daemon runs the souls it launches (ADR-0276).
     ("AGENT_BOT_EXECUTOR", "1"),
 ];
