@@ -18,6 +18,26 @@ export interface LaunchRequest {
   name: string;
 }
 
+/**
+ * Harnesses agent-bot's daemon can drive today (its ACP registry's enabled
+ * rows). GeniusBar never runs a model itself; the harness does.
+ */
+export const KNOWN_HARNESSES: readonly { id: string; label: string }[] = [
+  { id: 'claude', label: 'Claude Code' },
+  { id: 'opencode', label: 'opencode' },
+  { id: 'muse', label: 'Muse' },
+];
+
+/** The known harnesses, then any others seen in the census or chosen, each once. */
+export function harnessOptions(seen: readonly string[], ...extra: (string | null | undefined)[]): { id: string; label: string }[] {
+  const out = [...KNOWN_HARNESSES];
+  for (const id of [...seen, ...extra]) {
+    const harness = id?.trim();
+    if (harness && !out.some((h) => h.id === harness)) out.push({ id: harness, label: harness });
+  }
+  return out;
+}
+
 // Limits from the wire contract; the broker enforces them too.
 export const MAX_PACKAGE = 4096;
 export const MAX_HARNESS = 64;

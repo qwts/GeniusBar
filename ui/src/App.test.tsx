@@ -310,9 +310,9 @@ describe('App window mode', () => {
 
   it('replaces a hidden team lead with a neutral placeholder, keeping its subagents reachable', () => {
     render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
-    fireEvent.click(screen.getByRole('button', { name: 'GeniusBar menu' }));
-    const menu = screen.getByRole('dialog', { name: 'GeniusBar menu' });
-    fireEvent.click(within(menu).getByRole('button', { name: 'Hide from desktop: luna' }));
+    // The menu's eye on a lead hides the whole team; the card's own menu hides just the lead.
+    fireEvent.contextMenu(within(desktop()).getByRole('button', { name: /^luna,/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Hide from desktop' }));
     // The hidden lead leaves nothing behind: no avatar, no name, no harness,
     // and no longer the card's accessible name either.
     const card = within(desktop()).getByRole('region', { name: 'Team' });
@@ -332,7 +332,9 @@ describe('App window mode', () => {
     render(<App mode="window" census={nestedCensus} connection={sampleConnection} isStatic />);
     fireEvent.click(screen.getByRole('button', { name: 'GeniusBar menu' }));
     const menu = screen.getByRole('dialog', { name: 'GeniusBar menu' });
-    fireEvent.click(within(menu).getByRole('button', { name: 'Hide from desktop: luna' }));
+    // The menu's eye on a lead hides the whole team; the card's own menu hides just the lead.
+    fireEvent.contextMenu(within(desktop()).getByRole('button', { name: /^luna,/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Hide from desktop' }));
     fireEvent.click(within(menu).getByRole('button', { name: 'Hide from desktop: agent_c' }));
     const card = within(desktop()).getByRole('region', { name: 'Team' });
     expect(card.textContent).toContain('2 subagents · 1 hidden');
@@ -342,6 +344,18 @@ describe('App window mode', () => {
     expect(within(desktop()).queryByRole('region', { name: 'Team' })).toBeNull();
     expect(screen.queryByRole('region', { name: 'luna' })).toBeNull();
     fireEvent.click(within(menu).getByRole('button', { name: 'Show all hidden (3)' }));
+    expect(within(desktop()).getByRole('region', { name: 'luna' })).toBeTruthy();
+  });
+
+  it('hides and shows a whole team from the menu', () => {
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'GeniusBar menu' }));
+    const menu = screen.getByRole('dialog', { name: 'GeniusBar menu' });
+    fireEvent.click(within(menu).getByRole('button', { name: 'Hide team from desktop: luna' }));
+    expect(within(desktop()).queryByRole('region', { name: 'Team' })).toBeNull();
+    expect(within(desktop()).queryByRole('region', { name: 'luna' })).toBeNull();
+    expect(JSON.parse(localStorage.getItem(LAYOUT_KEY)!).hidden).toEqual(['user/agent_p', 'user/agent_c']);
+    fireEvent.click(within(menu).getByRole('button', { name: 'Show team on desktop: luna' }));
     expect(within(desktop()).getByRole('region', { name: 'luna' })).toBeTruthy();
   });
 
@@ -370,8 +384,9 @@ describe('App language', () => {
     render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
     fireEvent.click(screen.getByRole('button', { name: 'GeniusBar menu' }));
     fireEvent.change(screen.getByRole('combobox', { name: 'Language' }), { target: { value: 'es' } });
-    const menu = screen.getByRole('dialog', { name: 'Menú de GeniusBar' });
-    fireEvent.click(within(menu).getByRole('button', { name: 'Ocultar del escritorio: luna' }));
+    expect(screen.getByRole('dialog', { name: 'Menú de GeniusBar' })).toBeTruthy();
+    fireEvent.contextMenu(within(screen.getByRole('main', { name: 'Flota' })).getByRole('button', { name: /^luna,/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Ocultar del escritorio' }));
     const card = within(screen.getByRole('main', { name: 'Flota' })).getByRole('region', { name: 'Equipo' });
     expect(card.textContent).toContain('1 subagente');
     expect(card.textContent).not.toMatch(/luna|codex/i);

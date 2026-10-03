@@ -59,6 +59,11 @@ const toggle = (list: string[], key: string, on: boolean) =>
 
 export const layoutActions = {
   setHidden: (key: string, hidden: boolean) => { load(); set({ ...state, hidden: toggle(state.hidden, key, hidden) }); },
+  /** Hide or show a whole team at once: its lead and every subagent. */
+  setTeamHidden: (keys: readonly string[], hidden: boolean) => {
+    load();
+    set({ ...state, hidden: keys.reduce((list, key) => toggle(list, key, hidden), state.hidden) });
+  },
   showAll: () => { load(); set({ ...state, hidden: [] }); },
   setCollapsed: (key: string, collapsed: boolean) => { load(); set({ ...state, collapsed: toggle(state.collapsed, key, collapsed) }); },
   move: (key: string, x: number, y: number) => { load(); set({ ...state, pos: { ...state.pos, [key]: { x, y } } }); },

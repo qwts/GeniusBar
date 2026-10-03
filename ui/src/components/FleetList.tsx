@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { Eye, EyeOff, Search } from 'lucide-react';
 import { displayHarness, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
 import { deriveDudle } from '../model/dudle';
-import { companionLabel, searchTeams, teamsOf } from '../model/fleet';
+import { companionLabel, searchTeams, teamKeys, teamsOf } from '../model/fleet';
 import { useI18n } from '../lib/i18n';
 import { Dudle } from './Dudle';
 
@@ -15,6 +15,8 @@ export function SoulDudle({ soul, size, paused, label }: { soul: CensusRow; size
 export interface Hiding {
   hidden: readonly string[];
   onToggle: (key: string, hidden: boolean) => void;
+  /** Hide or show a team's lead together with all its subagents. */
+  onToggleTeam: (keys: readonly string[], hidden: boolean) => void;
   onShowAll: () => void;
 }
 
@@ -38,8 +40,12 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty }: F
   const [query, setQuery] = useState('');
   const teams = useMemo(() => teamsOf(forest), [forest]);
   const shown = useMemo(() => searchTeams(teams, query), [teams, query]);
+  // Whole teams by lead, unaffected by the search, for hiding a team at once.
+  const teamOf = useMemo(() => new Map(teams.filter((team) => team.members.length > 0)
+    .map((team) => [soulKey(team.lead), teamKeys(team)])), [teams]);
 
-  const row = (soul: CensusRow, depth: number) => {
+  // A lead with subagents hides and shows its whole team; anyone else, just themselves.
+  const row = (soul: CensusRow, depth: number, team: readonly string[] | null = null) => {
     const key = soulKey(soul);
     const unread = unreadOf?.(soul) ?? 0;
     const hidden = hiding?.hidden.includes(key) ?? false;
@@ -71,9 +77,9 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty }: F
           <button
             type="button"
             className="rounded p-1 text-muted-foreground hover:text-foreground"
-            aria-label={`${hidden ? t('bar.show') : t('bar.hide')}: ${name}`}
+            aria-label={`${team ? (hidden ? t('bar.showTeam') : t('bar.hideTeam')) : (hidden ? t('bar.show') : t('bar.hide'))}: ${name}`}
             aria-pressed={!hidden}
-            onClick={() => hiding.onToggle(key, !hidden)}
+            onClick={() => (team ? hiding.onToggleTeam(team, !hidden) : hiding.onToggle(key, !hidden))}
           >
             {hidden ? <EyeOff className="size-3.5" aria-hidden /> : <Eye className="size-3.5 opacity-40 group-hover:opacity-100" aria-hidden />}
           </button>
@@ -102,7 +108,7 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty }: F
             {shown.map((team) => (
               <li key={soulKey(team.lead)}>
                 <ul className="m-0 list-none p-0" aria-label={displayName(team.lead)}>
-                  {team.leadMatches && row(team.lead, 0)}
+                  {team.leadMatches && row(team.lead, 0, teamOf.get(soulKey(team.lead)) ?? null)}
                   {team.members.map((m) => row(m.soul, m.depth))}
                 </ul>
               </li>

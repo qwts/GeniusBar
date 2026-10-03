@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  harnessOptions,
   applyStatus,
   applyStatusError,
   canLaunch,
@@ -33,6 +34,15 @@ describe('launch requests', () => {
     expect(launchProblem({ ...soul, name: 'n'.repeat(MAX_NAME) })).toBeNull();
     expect(launchProblem({ ...soul, name: 'n'.repeat(MAX_NAME + 1) })).toMatch(/longer/);
     expect(launchProblem({ ...soul, name: 'a\nb' })).toMatch(/control/);
+  });
+});
+
+describe('harness options', () => {
+  it('lists the known harnesses first, then census and chosen ones once each', () => {
+    expect(harnessOptions([], null).map((h) => h.id)).toEqual(['claude', 'opencode', 'muse']);
+    expect(harnessOptions(['grokbot', 'claude', ' '], 'codex', 'grokbot').map((h) => h.id))
+      .toEqual(['claude', 'opencode', 'muse', 'grokbot', 'codex']);
+    expect(harnessOptions([])[0]).toEqual({ id: 'claude', label: 'Claude Code' });
   });
 });
 
