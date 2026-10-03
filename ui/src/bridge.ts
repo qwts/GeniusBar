@@ -20,7 +20,7 @@ export const inApp = (): boolean => typeof window !== 'undefined' && '__TAURI_IN
 export interface RuntimeObservation {
   metric: string;
   value: string | number;
-  unit: string;
+  unit: string | null;
   scope: string;
   source: string;
   kind: 'reported' | 'configured';
@@ -35,10 +35,44 @@ export type RuntimeMetrics = { unavailable: true } | {
   missing: { agentId: string; source: string }[];
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isObservation = (value: unknown): value is RuntimeObservation => isRecord(value)
+  && typeof value.metric === 'string' && (typeof value.value === 'string' || typeof value.value === 'number')
+  && typeof value.source === 'string' && typeof value.observedAt === 'string';
+
+/** Keeps only well-formed entries, so a malformed collector line can't break the view. */
+export function normalizeRuntimeMetrics(raw: unknown): RuntimeMetrics {
+  if (!isRecord(raw) || !isRecord(raw.souls) || !Array.isArray(raw.errors) || !Array.isArray(raw.missing)) {
+    return { unavailable: true };
+  }
+  const souls: Record<string, { lastCallAt: string | null; observations: RuntimeObservation[] }> = {};
+  for (const [agentId, soul] of Object.entries(raw.souls)) {
+    if (!isRecord(soul) || !Array.isArray(soul.observations)) continue;
+    souls[agentId] = {
+      lastCallAt: typeof soul.lastCallAt === 'string' ? soul.lastCallAt : null,
+      observations: soul.observations.filter(isObservation),
+    };
+  }
+  const named = (value: unknown): value is Record<string, unknown> & { agentId: string; source: string } =>
+    isRecord(value) && typeof value.agentId === 'string' && typeof value.source === 'string';
+  return {
+    collectedAt: typeof raw.collectedAt === 'string' ? raw.collectedAt : null,
+    souls,
+    errors: raw.errors.filter(named).map((error) => ({
+      agentId: error.agentId, source: error.source,
+      code: typeof error.code === 'string' ? error.code : 'unknown',
+      message: typeof error.message === 'string' ? error.message : '',
+    })),
+    missing: raw.missing.filter(named).map(({ agentId, source }) => ({ agentId, source })),
+  };
+}
+
 export async function runtimeMetrics(): Promise<RuntimeMetrics> {
   if (!inApp()) return { unavailable: true };
   try {
-    return await invoke<RuntimeMetrics>('runtime_metrics');
+    return normalizeRuntimeMetrics(await invoke<unknown>('runtime_metrics'));
   } catch {
     return { unavailable: true };
   }
