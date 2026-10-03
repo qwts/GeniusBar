@@ -11,8 +11,8 @@
   "components": {
     "agent-comms": {
       "repo": "qwts/agent-comms",
-      "tag": "v0.3.3",
-      "ref": "3948c9a8e548e5104cb1eb8d75e5f446fd3f4537"
+      "tag": "v0.3.4",
+      "ref": "cc41482f666abeb1ac1e93c2b1329ad54bac9d41"
     },
     "agent-bot": {
       "repo": "qwts/agent-bot-identity",
