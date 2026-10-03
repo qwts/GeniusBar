@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -59,6 +59,32 @@ test('an existing broker is reused, never replaced', async () => {
   assert.deepEqual(calls, ['broker pairings', 'account status', 'census']);
 });
 
+// #56: on a Mac moved over from Homebrew, the CLI's census answers as the
+// owner's principal while GeniusBar has none of its own; setup must pair it.
+test('pairs GeniusBar when the CLI answers as another principal but GeniusBar has none', async () => {
+  const { cli, calls } = fakeCli({
+    'broker pairings': [live],
+    'account status': [{ ok: true, account: 'me', state: 'approved' }],
+    census: [{ ok: true, souls: [] }],
+    'principal pair --name GeniusBar': [{ ok: true, code: 'PC2', state: 'pending' }],
+    'admin principal-approve PC2': [{ ok: true, state: 'approved' }],
+  });
+  const reports = [];
+  await runSetup({ cli, bot: readyBot(), report: (r) => reports.push(r),
+    principal: async () => ({ ok: false, error: { code: 'keychain-read-failed' } }) });
+  assert.deepEqual(calls, ['broker pairings', 'account status', 'principal pair --name GeniusBar', 'admin principal-approve PC2']);
+  assert.deepEqual(reports.filter((r) => r.state === 'done').map((r) => r.step), ['broker', 'account', 'principal', 'daemon']);
+});
+
+test('a GeniusBar principal that already answers is not paired again', async () => {
+  const { cli, calls } = fakeCli({
+    'broker pairings': [live],
+    'account status': [{ ok: true, account: 'me', state: 'approved' }],
+  });
+  await runSetup({ cli, bot: readyBot(), report: () => {}, principal: async () => ({ ok: true }) });
+  assert.deepEqual(calls, ['broker pairings', 'account status']);
+});
+
 test('a pending account is approved with its listed code', async () => {
   const { cli, calls } = fakeCli({
     'account status': [{ ok: true, account: 'me', state: 'pending' }],
@@ -113,6 +139,9 @@ test('sets up against a real broker', { skip: !existsSync(comms) && 'components 
   const calls = path.join(root, 'comms-calls.log');
   const guard = path.join(root, 'agent-comms');
   mkdirSync(path.join(guard, 'bin'), { recursive: true });
+  // setup loads the principal client from the agent-comms it was given (#56).
+  symlinkSync(path.join(comms, 'lib'), path.join(guard, 'lib'));
+  writeFileSync(path.join(guard, 'package.json'), readFileSync(path.join(comms, 'package.json')));
   writeFileSync(path.join(guard, 'bin', 'agent-comms.mjs'), [
     "import { appendFileSync } from 'node:fs';",
     `appendFileSync(${JSON.stringify(calls)}, process.argv.slice(2).join(' ') + '\\n');`,
