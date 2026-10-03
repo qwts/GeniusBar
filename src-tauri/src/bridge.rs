@@ -660,6 +660,42 @@ mod tests {
     }
 
     #[test]
+    fn parses_soul_locate_results_and_errors() {
+        let installed = br#"{"path":"/s/A.soul","status":"installed","agentId":"agent_1","soulDir":"/s/A.soul","copies":[]}"#;
+        assert_eq!(
+            parse_soul_locate(installed, b"").unwrap()["agentId"],
+            json!("agent_1")
+        );
+        assert_eq!(
+            parse_soul_locate(b"{\"path\":\"/p.soul\",\"status\":\"package\"}\n", b"").unwrap()
+                ["status"],
+            json!("package")
+        );
+        assert_eq!(
+            parse_soul_locate(b"{\"path\":\"/p.soul\",\"status\":\"installed\"}", b""),
+            Err(BridgeError::new(
+                "soul-locate-failed",
+                "agent-bot gave no location"
+            ))
+        );
+        assert_eq!(
+            parse_soul_locate(b"{\"status\":\"elsewhere\",\"agentId\":\"agent_1\"}", b""),
+            Err(BridgeError::new(
+                "soul-locate-failed",
+                "agent-bot gave no location"
+            ))
+        );
+        // An older bundle has no `soul locate`: its usage error comes back.
+        assert_eq!(
+            parse_soul_locate(b"", b"agent-bot: usage: agent-bot soul cold-wake\n"),
+            Err(BridgeError::new(
+                "soul-locate-failed",
+                "agent-bot: usage: agent-bot soul cold-wake"
+            ))
+        );
+    }
+
+    #[test]
     fn parses_cli_tools_results_with_their_own_fallback() {
         assert_eq!(
             parse_script_output(
@@ -795,6 +831,80 @@ fn parse_soul_comms(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> 
         "soul-comms-failed",
         if message.is_empty() {
             "agent-bot gave no comms state"
+        } else {
+            message
+        },
+    ))
+}
+
+/// What a `.soul` opened from Finder is (#80), from agent-bot's
+/// `soul locate PATH`: `{path, status, agentId?, soulDir?, copies?, message?}`
+/// where status is package, installed, copy, duplicate or unregistered.
+/// agent-bot owns the rules; an installed soul's own folder is that soul,
+/// never a new launch. An older bundle without the command is an error the
+/// UI ignores, keeping the package flow (the daemon applies the same rule).
+#[tauri::command]
+pub async fn locate_soul_package<R: Runtime>(
+    app: AppHandle<R>,
+    package: String,
+) -> Result<Value, BridgeError> {
+    let unavailable = |e: String| BridgeError::new("soul-locate-unavailable", &e);
+    let resources = app
+        .path()
+        .resource_dir()
+        .map_err(|e| unavailable(e.to_string()))?;
+    let output = app
+        .shell()
+        .sidecar("node")
+        .map_err(|e| unavailable(e.to_string()))?
+        .envs(HOST_ENV.iter().copied())
+        .args([
+            resources
+                .join("components")
+                .join("agent-bot")
+                .join("agent-bot.mjs")
+                .into_os_string(),
+            "soul".into(),
+            "locate".into(),
+            package.into(),
+        ])
+        .output()
+        .await
+        .map_err(|e| unavailable(e.to_string()))?;
+    parse_soul_locate(&output.stdout, &output.stderr)
+}
+
+fn last_line(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(
+        bytes
+            .split(|b| *b == b'\n')
+            .rev()
+            .find(|line| !line.iter().all(u8::is_ascii_whitespace))
+            .unwrap_or_default(),
+    )
+    .trim()
+    .to_string()
+}
+
+const LOCATE_STATUSES: [&str; 5] = ["package", "installed", "copy", "duplicate", "unregistered"];
+
+/// agent-bot's `soul locate` line, or its `soul locate: …` error.
+fn parse_soul_locate(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    if let Ok(value) = serde_json::from_str::<Value>(&last_line(stdout)) {
+        let status = value.get("status").and_then(Value::as_str);
+        let has_soul = value.get("agentId").and_then(Value::as_str).is_some();
+        if status.is_some_and(|s| LOCATE_STATUSES.contains(&s))
+            && (status == Some("package") || has_soul)
+        {
+            return Ok(value);
+        }
+    }
+    let message = last_line(stderr);
+    let message = message.strip_prefix("soul locate: ").unwrap_or(&message);
+    Err(BridgeError::new(
+        "soul-locate-failed",
+        if message.is_empty() {
+            "agent-bot gave no location"
         } else {
             message
         },

@@ -45,8 +45,12 @@ interface AppProps {
   chat?: ChatApi;
   /** Launching souls and packages (#18); without it there is no Launch. */
   launcher?: LaunchApi;
-  /** A `.soul` opened in Finder, validated by the Rust shell. */
-  openedPackage?: { id: number; path: string; checking: boolean; error: string | null };
+  /**
+   * A `.soul` opened in Finder, validated by the Rust shell. `agentId` names
+   * the installed soul it is (agent-bot `soul locate`, #80): that companion
+   * opens instead of a new launch.
+   */
+  openedPackage?: { id: number; path: string; checking: boolean; error: string | null; agentId?: string };
   /** Removes GeniusBar's login services (#9); without it there is no action. */
   onRemoveServices?: () => Promise<void>;
   /** The bundled starter soul (R4), offered while the roster is empty. */
@@ -124,13 +128,23 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const activePackage = openedPackage && openedPackage.id !== dismissedPackage ? openedPackage : undefined;
   // Window mode's menu is a popover; it opens itself when it has news.
   const [menuOpen, setMenuOpen] = useState(false);
+  // An installed soul opened from Finder is that companion, never a new
+  // launch (#80); one not in the roster yet keeps the form, and the daemon
+  // relaunches it rather than spawning another.
+  const openedSoul = openedPackage?.agentId ? findSoul(forest, openedPackage.agentId) : null;
   useEffect(() => {
-    if (openedPackage) {
-      setSelectedKey(null);
-      setLaunchingPackage(true);
-      setMenuOpen(true);
+    if (!openedPackage) return;
+    if (openedSoul) {
+      setLaunchingPackage(false);
+      setDismissedPackage(openedPackage.id);
+      setSelectedKey(soulKey(openedSoul));
+      setMenuOpen(false);
+      return;
     }
-  }, [openedPackage?.id]);
+    setSelectedKey(null);
+    setLaunchingPackage(true);
+    setMenuOpen(true);
+  }, [openedPackage?.id, openedSoul && soulKey(openedSoul)]);
   // The first launch stays open from the click until closed, so its result
   // and sign-in remain after the new soul fills the roster.
   const [starterOpen, setStarterOpen] = useState(false);

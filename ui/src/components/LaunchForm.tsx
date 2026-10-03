@@ -116,7 +116,8 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
       )}
       <label>
         <span>{t('launch.name')}</span>
-        <input value={name} placeholder={t('launch.nameOptional')} onChange={(e) => setName(e.target.value)} />
+        {/* Not a person's name: keep the web view from offering contact AutoFill (#80). */}
+        <input value={name} placeholder={t('launch.nameOptional')} autoComplete="off" onChange={(e) => setName(e.target.value)} />
       </label>
       {comms !== undefined && (
         <>
