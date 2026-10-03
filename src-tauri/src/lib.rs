@@ -189,6 +189,7 @@ fn start_snapshot(app: &mut App, window: &WebviewWindow) {
 pub fn run() {
     let mode = parse_mode(std::env::args().skip(1));
     let tray_mode = mode == Mode::Tray;
+    let snapshot_mode = matches!(mode, Mode::Snapshot(_));
     let snapshot = match &mode {
         Mode::Snapshot(request) => Some(request.clone()),
         _ => None,
@@ -234,8 +235,10 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("GeniusBar failed to start")
         .run(move |app, event| {
+            // A snapshot stays hidden and read-only: a package opened from
+            // Finder meanwhile is left for the next normal launch.
             #[cfg(target_os = "macos")]
-            if let RunEvent::Opened { urls } = &event {
+            if let (false, RunEvent::Opened { urls }) = (snapshot_mode, &event) {
                 let opened = app
                     .state::<soul_package::PendingSoulPackages>()
                     .enqueue_urls(urls);
