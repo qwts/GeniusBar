@@ -155,6 +155,18 @@
   .gb code { font-family: var(--font-mono); font-size: 11px; }
 }
 
+/* Dudle animations, from the Lovable design. Paused Dudles stand still. */
+@keyframes dudle-breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.04, 0.97); } }
+@keyframes dudle-bounce { 0%,100% { transform: translateY(0); } 40% { transform: translateY(-14%); } }
+@keyframes dudle-blink { 0%,92%,100% { transform: scaleY(1); } 95% { transform: scaleY(0.1); } }
+@keyframes dudle-focus { 0%,100% { transform: translateX(-6%); } 50% { transform: translateX(6%); } }
+.dudle-body { transform-origin: 50% 60%; animation: dudle-breathe 4s ease-in-out infinite; }
+.dudle[data-state="awaiting"] .dudle-body { animation: dudle-bounce 1s ease-in-out infinite; }
+.dudle[data-state="offline"] .dudle-body { animation: none; }
+.dudle-eyes { transform-box: fill-box; transform-origin: center; animation: dudle-blink 5s infinite; }
+.dudle[data-state="working"] .dudle-pupils { transform-box: fill-box; animation: dudle-focus 1.2s ease-in-out infinite; }
+.dudle[data-paused="true"] .dudle-body, .dudle[data-paused="true"] .dudle-eyes, .dudle[data-paused="true"] .dudle-pupils { animation: none; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.001ms !important;
