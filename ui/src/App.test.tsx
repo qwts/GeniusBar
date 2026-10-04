@@ -421,6 +421,36 @@ describe('App window mode', () => {
     expect(screen.queryByRole('dialog', { name: 'Jump to companion' })).toBeNull();
   });
 
+  it('closes open menus under ⌘K, keeps Tab in the palette, and restores focus', () => {
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
+    const item = screen.getByRole('button', { name: 'GeniusBar menu' });
+    fireEvent.click(item);
+    expect(screen.getByRole('dialog', { name: 'GeniusBar menu' })).toBeTruthy();
+    item.focus();
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    expect(screen.queryByRole('dialog', { name: 'GeniusBar menu' })).toBeNull();
+    const palette = screen.getByRole('dialog', { name: 'Jump to companion' });
+    const stops = [within(palette).getByRole('textbox'), ...within(palette).getAllByRole('button')];
+    stops[stops.length - 1].focus();
+    fireEvent.keyDown(stops[stops.length - 1], { key: 'Tab' });
+    expect(document.activeElement).toBe(stops[0]);
+    fireEvent.keyDown(stops[0], { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(stops[stops.length - 1]);
+    fireEvent.keyDown(stops[0], { key: 'Escape' });
+    expect(document.activeElement).toBe(item);
+  });
+
+  it('describes the unread count on the GeniusBar item', () => {
+    const { state } = mergeIncoming(emptyChat, [
+      inboxMessage('msg_1', 1, 'hello', { account: 'user', agentId: 'agent_c' }),
+      inboxMessage('msg_2', 2, 'again', { account: 'user', agentId: 'agent_c' }),
+    ]);
+    const chat: ChatApi = { chat: state, composers: {}, open: vi.fn(), setDraft: vi.fn(), send: vi.fn() };
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic chat={chat} />);
+    const item = screen.getByRole('button', { name: 'GeniusBar menu' });
+    expect(document.getElementById(item.getAttribute('aria-describedby')!)?.textContent).toBe('2 new');
+  });
+
   it('resets the desktop layout from the View menu', () => {
     render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
     fireEvent.click(within(desktop()).getByRole('button', { name: 'Collapse team' }));

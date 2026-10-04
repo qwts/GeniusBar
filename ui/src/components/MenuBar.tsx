@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { LayoutGrid, Search } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { allSouls, displayHarness, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
@@ -36,13 +36,20 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
   const closeView = () => setViewOpen(false);
   useClickAway(item, open, closeMenu);
   useClickAway(view, viewOpen, closeView);
+  const badge = useId();
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((v) => !v); }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        // As the search button does: no menu stays open under the palette.
+        setViewOpen(false);
+        onOpenChange(false);
+        setPalette((v) => !v);
+      }
     };
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
-  }, []);
+  }, [onOpenChange]);
   const now = useClock(paused);
   const clock = new Intl.DateTimeFormat(lang, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(now);
   const openPalette = () => { setViewOpen(false); onOpenChange(false); setPalette(true); };
@@ -92,6 +99,7 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
             aria-expanded={open}
             aria-haspopup="dialog"
             aria-label={t('bar.menu')}
+            aria-describedby={unread > 0 ? badge : undefined}
             title={title}
             onClick={() => onOpenChange(!open)}
             className={`flex h-6 items-center gap-1 rounded px-1 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${open ? 'bg-accent' : ''}`}
@@ -99,11 +107,12 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
             <span className="grid size-4 place-items-center rounded-[4px] bg-foreground text-[10px] font-bold text-background" aria-hidden>G</span>
             <span className={`dot dot-${tone}`} aria-hidden />
             {unread > 0 && (
-              <span title={t('newCount', { count: unread })} className="grid min-w-4 place-items-center rounded-full bg-warning px-1 font-mono text-[10px] font-bold leading-4 text-warning-foreground">
+              <span title={t('newCount', { count: unread })} aria-hidden className="grid min-w-4 place-items-center rounded-full bg-warning px-1 font-mono text-[10px] font-bold leading-4 text-warning-foreground">
                 {unread}
               </span>
             )}
           </button>
+          {unread > 0 && <span id={badge} hidden>{t('newCount', { count: unread })}</span>}
           {open && (
             <div role="dialog" aria-label={t('bar.menu')}
               className="absolute top-full right-0 mt-1.5 flex max-h-[calc(100vh-3rem)] w-[22rem] flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-2xl">
@@ -128,6 +137,8 @@ function useClock(paused: boolean): Date {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     if (paused) return;
+    // Back from hidden: show the time now, not when it was hidden.
+    setNow(new Date());
     const i = setInterval(() => setNow(new Date()), 15_000);
     return () => clearInterval(i);
   }, [paused]);
@@ -142,6 +153,10 @@ function Palette({ forest, paused, onClose, onJump }: {
   const [q, setQ] = useState('');
   const box = useRef<HTMLDivElement>(null);
   useClickAway(box, true, onClose);
+  // A modal: focus returns where it was when the palette closes.
+  // Read while rendering, before the search box takes focus.
+  const [before] = useState(() => document.activeElement as HTMLElement | null);
+  useEffect(() => () => before?.focus(), [before]);
   const query = q.trim().toLowerCase();
   const match = (s: CensusRow) => !query || `${displayName(s)} ${displayHarness(s)} ${s.agentId}`.toLowerCase().includes(query);
   const teams = forest
@@ -150,7 +165,10 @@ function Palette({ forest, paused, onClose, onJump }: {
   return (
     <div className="fixed inset-0 z-50 grid place-items-start justify-center bg-black/50 pt-[15vh]">
       <div ref={box} role="dialog" aria-modal="true" aria-label={t('bar.palette')}
-        onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') onClose();
+          if (e.key === 'Tab') trapTab(e, box.current);
+        }}
         className="w-[30rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border bg-popover shadow-2xl">
         <div className="flex items-center gap-2 border-b border-border px-3">
           <Search className="size-4 text-muted-foreground" aria-hidden />
@@ -177,4 +195,14 @@ function Palette({ forest, paused, onClose, onJump }: {
       </div>
     </div>
   );
+}
+
+/** Keeps Tab and Shift+Tab inside `root`, wrapping at either end. */
+function trapTab(e: ReactKeyboardEvent, root: HTMLElement | null) {
+  const stops = root ? [...root.querySelectorAll<HTMLElement>('input, button, [tabindex]:not([tabindex="-1"])')] : [];
+  if (stops.length === 0) return;
+  const first = stops[0];
+  const last = stops[stops.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 }
