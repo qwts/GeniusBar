@@ -33,6 +33,7 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-menubar: var(--menubar);
   --color-sidebar: var(--sidebar);
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
@@ -64,6 +65,7 @@
   --border: oklch(0.32 0.01 70);
   --input: oklch(0.34 0.01 70);
   --ring: oklch(0.8 0.15 72);
+  --menubar: oklch(0.13 0.004 60 / 0.92);
   --sidebar: oklch(0.155 0.007 70);
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;

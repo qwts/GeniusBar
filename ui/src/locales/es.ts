@@ -68,6 +68,8 @@ export const es: Catalog = {
   'bar.noResults': 'No se encontraron compañeros',
   'bar.open': 'Abrir',
   'bar.menu': 'Menú de GeniusBar',
+  'menu.view': 'Ver',
+  'bar.palette': 'Ir a un compañero',
   'team.collapse': 'Contraer equipo',
   'team.expand': 'Expandir equipo',
   'team.countOne': '1 subagente',

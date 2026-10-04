@@ -1,0 +1,180 @@
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { LayoutGrid, Search } from 'lucide-react';
+import { useI18n } from '../lib/i18n';
+import { allSouls, displayHarness, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
+import { SoulDudle } from './FleetList';
+
+/** Closes on a pointer down outside `ref` while `open`. */
+function useClickAway(ref: RefObject<HTMLElement | null>, open: boolean, close: () => void) {
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: PointerEvent) => { if (!ref.current?.contains(e.target as Node)) close(); };
+    document.addEventListener('pointerdown', away);
+    return () => document.removeEventListener('pointerdown', away);
+  }, [ref, open, close]);
+}
+
+/**
+ * Window mode's menu bar, drawn as Lovable's: the app name and a View menu
+ * on the left; the GeniusBar item (whose menu drops down as a popover),
+ * the jump palette and the clock on the right. Escape or a click outside
+ * closes a menu. ⌘K opens the palette.
+ */
+export function MenuBar({ open, onOpenChange, tone, title, attention = null, onReset, unread, forest, paused, onJump, children }: {
+  open: boolean; onOpenChange: (open: boolean) => void; tone: string; title: string;
+  attention?: { text: string; isError: boolean } | null; onReset: () => void;
+  /** Unread messages across the fleet, badged on the GeniusBar item. */
+  unread: number;
+  forest: readonly SoulNode[]; paused: boolean; onJump: (soul: CensusRow) => void; children: ReactNode;
+}) {
+  const { t, lang } = useI18n();
+  const item = useRef<HTMLDivElement>(null);
+  const view = useRef<HTMLDivElement>(null);
+  const [viewOpen, setViewOpen] = useState(false);
+  const [palette, setPalette] = useState(false);
+  const closeMenu = () => onOpenChange(false);
+  const closeView = () => setViewOpen(false);
+  useClickAway(item, open, closeMenu);
+  useClickAway(view, viewOpen, closeView);
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((v) => !v); }
+    };
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  }, []);
+  const now = useClock(paused);
+  const clock = new Intl.DateTimeFormat(lang, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(now);
+  const openPalette = () => { setViewOpen(false); onOpenChange(false); setPalette(true); };
+  const viewItem = 'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent focus-visible:bg-accent focus-visible:outline-none';
+
+  return (
+    <header className="relative z-40 flex h-8 shrink-0 items-center gap-1 bg-menubar px-2 text-[13px] text-foreground">
+      <span className="flex items-center gap-1.5 px-1.5 py-0.5 font-semibold tracking-tight">
+        <span className="grid size-5 place-items-center rounded bg-primary text-[11px] text-primary-foreground" aria-hidden>G</span>
+        <span>GeniusBar</span>
+      </span>
+      <div ref={view} className="relative" onKeyDown={(e) => { if (e.key === 'Escape') setViewOpen(false); }}>
+        <button type="button" aria-haspopup="menu" aria-expanded={viewOpen} onClick={() => setViewOpen(!viewOpen)}
+          className={`h-7 rounded px-2 text-xs hover:bg-accent ${viewOpen ? 'bg-accent' : ''}`}>
+          {t('menu.view')}
+        </button>
+        {viewOpen && (
+          <div role="menu" aria-label={t('menu.view')}
+            className="absolute top-full left-0 mt-1 min-w-[14rem] rounded-md border border-border bg-popover p-1 shadow-2xl">
+            <button type="button" role="menuitem" className={viewItem} onClick={openPalette}>
+              <Search className="size-3.5" aria-hidden /> {t('bar.palette')}
+              <span className="ml-auto pl-4 text-muted-foreground">⌘K</span>
+            </button>
+            <div role="separator" className="-mx-1 my-1 h-px bg-border" />
+            <button type="button" role="menuitem" className={viewItem} onClick={() => { setViewOpen(false); onReset(); }}>
+              <LayoutGrid className="size-3.5" aria-hidden /> {t('menu.resetLayout')}
+            </button>
+          </div>
+        )}
+      </div>
+      {attention && !open && (
+        <div role={attention.isError ? 'alert' : 'status'} className="min-w-0">
+          <button type="button" onClick={() => onOpenChange(true)} title={attention.text}
+            className={`max-w-[20rem] truncate rounded px-1.5 py-0.5 text-xs hover:bg-accent ${attention.isError ? 'text-destructive' : 'text-muted-foreground'}`}>
+            {attention.text}
+          </button>
+        </div>
+      )}
+      <div className="ml-auto flex items-center gap-3 pr-1">
+        <button type="button" onClick={onReset} title={t('menu.resetLayout')} aria-label={t('menu.resetLayout')}
+          className="rounded p-0.5 text-foreground/90 hover:bg-accent">
+          <LayoutGrid className="size-4" aria-hidden />
+        </button>
+        <div ref={item} className="relative" onKeyDown={(e) => { if (e.key === 'Escape') onOpenChange(false); }}>
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-haspopup="dialog"
+            aria-label={t('bar.menu')}
+            title={title}
+            onClick={() => onOpenChange(!open)}
+            className={`flex h-6 items-center gap-1 rounded px-1 hover:bg-accent ${open ? 'bg-accent' : ''}`}
+          >
+            <span className="grid size-4 place-items-center rounded-[4px] bg-foreground text-[10px] font-bold text-background" aria-hidden>G</span>
+            <span className={`dot dot-${tone}`} aria-hidden />
+            {unread > 0 && (
+              <span title={t('newCount', { count: unread })} className="rounded-full bg-primary px-1 font-mono text-[10px] font-bold leading-4 text-primary-foreground">
+                {unread}
+              </span>
+            )}
+          </button>
+          {open && (
+            <div role="dialog" aria-label={t('bar.menu')}
+              className="absolute top-full right-0 mt-1.5 flex max-h-[calc(100vh-3rem)] w-[22rem] flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-2xl">
+              {children}
+            </div>
+          )}
+        </div>
+        <button type="button" aria-label={t('bar.palette')} onClick={openPalette}
+          className="rounded p-0.5 text-foreground/90 hover:bg-accent">
+          <Search className="size-4" aria-hidden />
+        </button>
+        <time className="pl-1 text-foreground/90" dateTime={now.toISOString()}>{clock}</time>
+      </div>
+      {palette && <Palette forest={forest} paused={paused} onClose={() => setPalette(false)}
+        onJump={(soul) => { setPalette(false); onJump(soul); }} />}
+    </header>
+  );
+}
+
+/** The current minute; static renders keep the first. */
+function useClock(paused: boolean): Date {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    if (paused) return;
+    const i = setInterval(() => setNow(new Date()), 15_000);
+    return () => clearInterval(i);
+  }, [paused]);
+  return now;
+}
+
+/** ⌘K jump-to-companion palette, grouped by team. */
+function Palette({ forest, paused, onClose, onJump }: {
+  forest: readonly SoulNode[]; paused: boolean; onClose: () => void; onJump: (soul: CensusRow) => void;
+}) {
+  const { t } = useI18n();
+  const [q, setQ] = useState('');
+  const box = useRef<HTMLDivElement>(null);
+  useClickAway(box, true, onClose);
+  const query = q.trim().toLowerCase();
+  const match = (s: CensusRow) => !query || `${displayName(s)} ${displayHarness(s)} ${s.agentId}`.toLowerCase().includes(query);
+  const teams = forest
+    .map((node) => ({ key: soulKey(node.soul), heading: displayName(node.soul), souls: allSouls([node]).filter(match) }))
+    .filter((team) => team.souls.length > 0);
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-start justify-center bg-black/50 pt-[15vh]">
+      <div ref={box} role="dialog" aria-modal="true" aria-label={t('bar.palette')}
+        onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
+        className="w-[30rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border bg-popover shadow-2xl">
+        <div className="flex items-center gap-2 border-b border-border px-3">
+          <Search className="size-4 text-muted-foreground" aria-hidden />
+          <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('bar.search')} aria-label={t('bar.search')}
+            className="h-11 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground" />
+        </div>
+        <div className="max-h-80 overflow-y-auto p-1">
+          {teams.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">{t('bar.noResults')}</p>}
+          {teams.map((team) => (
+            <div key={team.key} role="group" aria-label={team.heading}>
+              <p className="px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">{team.heading}</p>
+              {team.souls.map((soul) => (
+                <button key={soulKey(soul)} type="button" onClick={() => onJump(soul)}
+                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none">
+                  <SoulDudle soul={soul} size={18} paused={paused} />
+                  <span>{displayName(soul)}</span>
+                  <span className="font-mono text-xs text-muted-foreground">{displayHarness(soul)}</span>
+                  <span className="ml-auto text-xs text-muted-foreground">{t(`presence.${soul.presence}`)}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}

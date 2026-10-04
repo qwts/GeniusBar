@@ -67,6 +67,8 @@ export const en = {
   'bar.noResults': 'No companions found',
   'bar.open': 'Open',
   'bar.menu': 'GeniusBar menu',
+  'menu.view': 'View',
+  'bar.palette': 'Jump to companion',
   'team.collapse': 'Collapse team',
   'team.expand': 'Expand team',
   'team.countOne': '1 subagent',

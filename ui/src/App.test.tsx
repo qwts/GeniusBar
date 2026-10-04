@@ -404,6 +404,32 @@ describe('App window mode', () => {
     expect(screen.queryByRole('dialog', { name: 'GeniusBar menu' })).toBeNull();
   });
 
+  it('jumps to a companion from the View menu or ⌘K palette', () => {
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'View' }));
+    fireEvent.click(within(screen.getByRole('menu', { name: 'View' })).getByRole('menuitem', { name: /Jump to companion/ }));
+    const palette = screen.getByRole('dialog', { name: 'Jump to companion' });
+    fireEvent.change(within(palette).getByRole('textbox', { name: 'Search companions…' }), { target: { value: 'agent_c' } });
+    fireEvent.click(within(palette).getByRole('button', { name: /agent_c/ }));
+    expect(screen.queryByRole('dialog', { name: 'Jump to companion' })).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'agent_c' })).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    const again = screen.getByRole('dialog', { name: 'Jump to companion' });
+    fireEvent.change(within(again).getByRole('textbox'), { target: { value: 'nobody' } });
+    expect(within(again).getByText('No companions found')).toBeTruthy();
+    fireEvent.keyDown(within(again).getByRole('textbox'), { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Jump to companion' })).toBeNull();
+  });
+
+  it('resets the desktop layout from the View menu', () => {
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
+    fireEvent.click(within(desktop()).getByRole('button', { name: 'Collapse team' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Reset desktop layout' }));
+    expect(screen.queryByRole('menu', { name: 'View' })).toBeNull();
+    expect(within(desktop()).getAllByRole('button', { name: 'Collapse team' }).length).toBeGreaterThan(0);
+  });
+
   it('collapses a team and remembers it', () => {
     render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
     const collapse = within(desktop()).getByRole('button', { name: 'Collapse team' });
