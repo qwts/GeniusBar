@@ -56,7 +56,7 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
       </span>
       <div ref={view} className="relative" onKeyDown={(e) => { if (e.key === 'Escape') setViewOpen(false); }}>
         <button type="button" aria-haspopup="menu" aria-expanded={viewOpen} onClick={() => setViewOpen(!viewOpen)}
-          className={`h-7 rounded px-2 text-xs hover:bg-accent ${viewOpen ? 'bg-accent' : ''}`}>
+          className={`h-7 rounded px-2 text-xs hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${viewOpen ? 'bg-accent' : ''}`}>
           {t('menu.view')}
         </button>
         {viewOpen && (
@@ -83,7 +83,7 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
       )}
       <div className="ml-auto flex items-center gap-3 pr-1">
         <button type="button" onClick={onReset} title={t('menu.resetLayout')} aria-label={t('menu.resetLayout')}
-          className="rounded p-0.5 text-foreground/90 hover:bg-accent">
+          className="rounded p-0.5 text-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
           <LayoutGrid className="size-4" aria-hidden />
         </button>
         <div ref={item} className="relative" onKeyDown={(e) => { if (e.key === 'Escape') onOpenChange(false); }}>
@@ -94,12 +94,12 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
             aria-label={t('bar.menu')}
             title={title}
             onClick={() => onOpenChange(!open)}
-            className={`flex h-6 items-center gap-1 rounded px-1 hover:bg-accent ${open ? 'bg-accent' : ''}`}
+            className={`flex h-6 items-center gap-1 rounded px-1 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${open ? 'bg-accent' : ''}`}
           >
             <span className="grid size-4 place-items-center rounded-[4px] bg-foreground text-[10px] font-bold text-background" aria-hidden>G</span>
             <span className={`dot dot-${tone}`} aria-hidden />
             {unread > 0 && (
-              <span title={t('newCount', { count: unread })} className="rounded-full bg-primary px-1 font-mono text-[10px] font-bold leading-4 text-primary-foreground">
+              <span title={t('newCount', { count: unread })} className="grid min-w-4 place-items-center rounded-full bg-warning px-1 font-mono text-[10px] font-bold leading-4 text-warning-foreground">
                 {unread}
               </span>
             )}
@@ -112,10 +112,10 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
           )}
         </div>
         <button type="button" aria-label={t('bar.palette')} onClick={openPalette}
-          className="rounded p-0.5 text-foreground/90 hover:bg-accent">
+          className="rounded p-0.5 text-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
           <Search className="size-4" aria-hidden />
         </button>
-        <time className="pl-1 text-foreground/90" dateTime={now.toISOString()}>{clock}</time>
+        <time className="pl-1 text-foreground" dateTime={now.toISOString()}>{clock}</time>
       </div>
       {palette && <Palette forest={forest} paused={paused} onClose={() => setPalette(false)}
         onJump={(soul) => { setPalette(false); onJump(soul); }} />}
