@@ -70,7 +70,7 @@ export function Desktop({ forest, layout, paused, unreadOf, selectedKey, onOpen,
           <TeamCluster key={id} {...p} paused={paused} unreadOf={unreadOf} selectedKey={selectedKey} onOpen={onOpen} />
         ))
       )}
-      {!notice && onLaunch && (
+      {onLaunch && (
         <button type="button" onClick={onLaunch}
           className="fixed bottom-4 left-4 z-10 flex items-center gap-2 rounded-full border border-dashed border-muted-foreground/50 bg-background/70 px-3 py-1.5 text-xs text-foreground backdrop-blur hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
           <Plus className="size-3.5" aria-hidden /> {t('launchCompanion')}

@@ -475,6 +475,29 @@ describe('App window mode', () => {
     expect(within(desktop()).queryByRole('button', { name: 'Launch companion' })).toBeNull();
   });
 
+  it('keeps the Launch button on an empty desktop', () => {
+    const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    render(<App mode="window" census={[]} connection={sampleConnection} launcher={launcher} isStatic />);
+    expect(within(desktop()).queryByRole('region')).toBeNull();
+    expect(within(desktop()).getByRole('button', { name: 'Launch companion' })).toBeTruthy();
+  });
+
+  it('shows the unread count on a card, capped at 9+', () => {
+    const messages = (n: number) => Array.from({ length: n }, (_, i) =>
+      inboxMessage(`msg_${i + 1}`, i + 1, 'hello', { account: 'user', agentId: 'agent_c' }));
+    const chatWith = (n: number): ChatApi => ({
+      chat: mergeIncoming(emptyChat, messages(n)).state, composers: {}, open: vi.fn(), setDraft: vi.fn(), send: vi.fn(),
+    });
+    const { unmount } = render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic chat={chatWith(2)} />);
+    const card = () => within(desktop()).getByRole('button', { name: /^agent_c,/ });
+    expect(card().getAttribute('aria-label')).toContain('2 unread messages');
+    expect(within(card()).getByText('2')).toBeTruthy();
+    unmount();
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic chat={chatWith(12)} />);
+    expect(card().getAttribute('aria-label')).toContain('12 unread messages');
+    expect(within(card()).getByText('9+')).toBeTruthy();
+  });
+
   it('collapses a team and remembers it', () => {
     render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
     const collapse = within(desktop()).getByRole('button', { name: 'Collapse team' });
