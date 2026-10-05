@@ -72,11 +72,11 @@ export function Desktop({ forest, layout, paused, unreadOf, selectedKey, onOpen,
       )}
       {!notice && onLaunch && (
         <button type="button" onClick={onLaunch}
-          className="fixed bottom-4 left-4 z-10 flex items-center gap-2 rounded-full border border-dashed border-muted-foreground/50 bg-background/70 px-3 py-1.5 text-xs text-foreground backdrop-blur hover:bg-accent">
+          className="fixed bottom-4 left-4 z-10 flex items-center gap-2 rounded-full border border-dashed border-muted-foreground/50 bg-background/70 px-3 py-1.5 text-xs text-foreground backdrop-blur hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
           <Plus className="size-3.5" aria-hidden /> {t('launchCompanion')}
         </button>
       )}
-      {!notice && <p className="pointer-events-none fixed inset-x-0 bottom-3 m-0 text-center text-xs text-muted-foreground/70">{t('desktopHint')}</p>}
+      {!notice && <p className="pointer-events-none fixed inset-x-0 bottom-3 m-0 text-center text-xs text-muted-foreground">{t('desktopHint')}</p>}
       {children}
     </main>
   );
@@ -213,7 +213,7 @@ function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = 
         <span className="relative">
           <SoulDudle soul={soul} size={size} paused={paused} />
           {unread > 0 && (
-            <span className="absolute -top-1 -right-1.5 min-w-[14px] rounded-full bg-primary px-0.5 text-center font-mono text-[9px] font-bold leading-[14px] text-primary-foreground ring-2 ring-card" aria-hidden>
+            <span className="absolute -top-1 -right-1.5 min-w-[14px] rounded-full bg-primary px-0.5 text-center font-mono text-[10px] font-bold leading-[14px] text-primary-foreground ring-2 ring-card" aria-hidden>
               {unread > 9 ? '9+' : unread}
             </span>
           )}
