@@ -378,7 +378,8 @@ describe('App setup', () => {
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'launchctl would not unload');
     onRemove.mockResolvedValueOnce(undefined);
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
-    expect(await screen.findByText('Services removed.')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole('group', { name: 'Remove services' })).toBeNull());
+    expect(screen.queryByText('Services removed.')).toBeNull();
     expect(onRemove).toHaveBeenCalledTimes(2);
   });
 });
@@ -394,6 +395,11 @@ describe('App window mode', () => {
     const win = screen.getByRole('dialog', { name: 'agent_c' });
     expect(within(win).getByRole('region', { name: 'agent_c, agent_c' })).toBeTruthy();
     expect(within(win).queryByRole('button', { name: 'Back to fleet' })).toBeNull();
+    // No hardened flag in the census, so no pill; luna's shows.
+    expect(within(win).queryByText('Hardened', { selector: 'span.rounded-full' })).toBeNull();
+    fireEvent.click(within(desktop()).getByRole('button', { name: /^luna,/ }));
+    expect(within(screen.getByRole('dialog', { name: 'luna' })).getByText('Hardened', { selector: 'span.rounded-full' })).toBeTruthy();
+    fireEvent.click(within(desktop()).getByRole('button', { name: /^agent_c,/ }));
     expect(document.activeElement).toBe(within(win).getByRole('button', { name: 'Close window' }));
     fireEvent.click(within(win).getByRole('button', { name: 'Close window' }));
     expect(screen.queryByRole('dialog')).toBeNull();
