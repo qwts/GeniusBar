@@ -273,7 +273,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
         {menu({ hidden: layout.hidden, onToggle: layoutActions.setHidden, onToggleTeam: layoutActions.setTeamHidden, onShowAll: layoutActions.showAll })}
       </MenuBar>
       <Desktop forest={forest} layout={layout} paused={paused} unreadOf={unread} selectedKey={openKey} onOpen={open}
-        notice={notice}>
+        notice={notice} onLaunch={launch && !showSetup ? () => { setSelectedKey(null); setLaunchingPackage(true); setMenuOpen(true); } : undefined}>
         {selected && session && (
           <CompanionWindow title={displayName(selected)} onClose={() => setSelectedKey(null)}>{session}</CompanionWindow>
         )}

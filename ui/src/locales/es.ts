@@ -45,6 +45,7 @@ export const es: Catalog = {
   unreadOne: '1 mensaje sin leer',
   unreadMany: '{count} mensajes sin leer',
   newCount: '{count} nuevos',
+  launchCompanion: 'Lanzar compañero',
   avatarFor: 'Avatar de {name}',
   emptyChat: 'Saluda a {name} para empezar a conversar.',
   conversationWith: 'Conversación con {name}',

@@ -44,6 +44,7 @@ export const en = {
   unreadOne: '1 unread message',
   unreadMany: '{count} unread messages',
   newCount: '{count} new',
+  launchCompanion: 'Launch companion',
   avatarFor: 'Avatar for {name}',
   emptyChat: 'Say hello to {name} to start chatting.',
   conversationWith: 'Conversation with {name}',

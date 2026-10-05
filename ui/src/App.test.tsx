@@ -460,6 +460,21 @@ describe('App window mode', () => {
     expect(within(desktop()).getAllByRole('button', { name: 'Collapse team' }).length).toBeGreaterThan(0);
   });
 
+  it('opens the launch form from the desktop, and slims a solo card', () => {
+    const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} launcher={launcher} isStatic />);
+    expect(within(desktop()).getByRole('region', { name: 'old' }).style.width).toBe('200px');
+    expect(within(desktop()).getByRole('region', { name: 'luna' }).style.width).toBe('300px');
+    fireEvent.click(within(desktop()).getByRole('button', { name: 'Launch companion' }));
+    const menu = screen.getByRole('dialog', { name: 'GeniusBar menu' });
+    expect(within(menu).getByRole('region', { name: 'Launch a companion package' })).toBeTruthy();
+  });
+
+  it('has no Launch button without a launcher', () => {
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
+    expect(within(desktop()).queryByRole('button', { name: 'Launch companion' })).toBeNull();
+  });
+
   it('collapses a team and remembers it', () => {
     render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
     const collapse = within(desktop()).getByRole('button', { name: 'Collapse team' });

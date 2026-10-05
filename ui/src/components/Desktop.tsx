@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react';
-import { ChevronDown, EyeOff, Users, X } from 'lucide-react';
+import { ChevronDown, EyeOff, MessageCircle, Plus, Users, X } from 'lucide-react';
 import { displayHarness, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
 import { companionLabel, teamKeys, teamsOf, type Team } from '../model/fleet';
 import { useI18n } from '../lib/i18n';
@@ -7,6 +7,8 @@ import { layoutActions, type DesktopLayout } from '../state/layout';
 import { SoulDudle } from './FleetList';
 
 const CARD_W = 300;
+/** A lead with no subagents is a slim card, as the design's solo cards. */
+const SOLO_W = 200;
 const GAP = 16;
 
 interface DesktopProps {
@@ -18,6 +20,8 @@ interface DesktopProps {
   onOpen: (soul: CensusRow) => void;
   /** Shown in place of the teams: setup hints and the empty fleet. */
   notice?: ReactNode;
+  /** Opens the launch form; without it there is no Launch button. */
+  onLaunch?: () => void;
   /** The open companion's window. */
   children?: ReactNode;
 }
@@ -26,7 +30,7 @@ interface DesktopProps {
  * Window mode's desktop (R6): every team as a card the user can drag,
  * collapse, and hide companions from. Teams nobody moved fill columns.
  */
-export function Desktop({ forest, layout, paused, unreadOf, selectedKey, onOpen, notice, children }: DesktopProps) {
+export function Desktop({ forest, layout, paused, unreadOf, selectedKey, onOpen, notice, onLaunch, children }: DesktopProps) {
   const { t } = useI18n();
   const ref = useRef<HTMLElement>(null);
   const [width, setWidth] = useState(1100);
@@ -66,7 +70,13 @@ export function Desktop({ forest, layout, paused, unreadOf, selectedKey, onOpen,
           <TeamCluster key={id} {...p} paused={paused} unreadOf={unreadOf} selectedKey={selectedKey} onOpen={onOpen} />
         ))
       )}
-      {!notice && <p className="pointer-events-none fixed inset-x-0 bottom-2 m-0 text-center text-xs text-muted-foreground/70">{t('desktopHint')}</p>}
+      {!notice && onLaunch && (
+        <button type="button" onClick={onLaunch}
+          className="fixed bottom-4 left-4 z-10 flex items-center gap-2 rounded-full border border-dashed border-muted-foreground/50 bg-background/70 px-3 py-1.5 text-xs text-foreground backdrop-blur hover:bg-accent">
+          <Plus className="size-3.5" aria-hidden /> {t('launchCompanion')}
+        </button>
+      )}
+      {!notice && <p className="pointer-events-none fixed inset-x-0 bottom-3 m-0 text-center text-xs text-muted-foreground/70">{t('desktopHint')}</p>}
       {children}
     </main>
   );
@@ -121,8 +131,8 @@ function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unread
   return (
     <section
       aria-label={leadHidden ? t('team.placeholder') : displayName(team.lead)}
-      style={{ left: at.x, top: at.y, width: CARD_W }}
-      className={`absolute rounded-xl border border-border bg-card/80 shadow-lg backdrop-blur-md ${live ? 'z-20' : ''}`}
+      style={{ left: at.x, top: at.y, width: count > 0 ? CARD_W : SOLO_W }}
+      className={`absolute rounded-xl border border-border bg-card/75 shadow-lg backdrop-blur-md ${live ? 'z-20' : ''}`}
     >
       <div onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
         className={`flex touch-none items-center gap-2 p-2 ${live ? 'cursor-grabbing' : 'cursor-grab'}`}>
@@ -186,6 +196,7 @@ function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = 
   const [menu, setMenu] = useState(false);
   const first = useRef<HTMLButtonElement>(null);
   const label = companionLabel(soul, t, unread);
+  const menuItem = 'flex items-center gap-2 rounded-sm px-2 py-1.5 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-none';
   useEffect(() => { if (menu) first.current?.focus(); }, [menu]);
   return (
     <div className="relative">
@@ -201,29 +212,33 @@ function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = 
       >
         <span className="relative">
           <SoulDudle soul={soul} size={size} paused={paused} />
-          {unread > 0 && <span className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-primary ring-2 ring-card" aria-hidden />}
+          {unread > 0 && (
+            <span className="absolute -top-1 -right-1.5 min-w-[14px] rounded-full bg-primary px-0.5 text-center font-mono text-[9px] font-bold leading-[14px] text-primary-foreground ring-2 ring-card" aria-hidden>
+              {unread > 9 ? '9+' : unread}
+            </span>
+          )}
         </span>
         {!bare && (
-          <span className={`max-w-full truncate text-[10px] ${soul.presence === 'left' ? 'text-muted-foreground' : ''}`}>
+          <span className={`max-w-full truncate text-[10px] ${soul.presence === 'left' ? 'text-muted-foreground' : 'text-foreground'}`}>
             {displayName(soul)}
           </span>
         )}
       </button>
       {menu && (
         <div role="menu" aria-label={displayName(soul)}
-          className="absolute top-full left-1/2 z-30 mt-1 grid min-w-40 -translate-x-1/2 rounded-md border border-border bg-popover p-1 text-sm shadow-xl"
+          className="absolute top-full left-1/2 z-30 mt-1 grid min-w-44 -translate-x-1/2 rounded-md border border-border bg-popover p-1 text-sm shadow-xl"
           onKeyDown={(e) => { if (e.key === 'Escape') setMenu(false); }}
           onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setMenu(false); }}>
-          <button ref={first} type="button" role="menuitem" className="rounded px-2 py-1 text-left hover:bg-accent"
+          <button ref={first} type="button" role="menuitem" className={menuItem}
             onClick={() => { setMenu(false); onOpen(soul); }}>
-            {t('bar.open')}
+            <MessageCircle className="size-3.5" aria-hidden /> {t('bar.open')}
           </button>
-          <button type="button" role="menuitem" className="flex items-center gap-2 rounded px-2 py-1 text-left hover:bg-accent"
+          <button type="button" role="menuitem" className={menuItem}
             onClick={() => { setMenu(false); layoutActions.setHidden(soulKey(soul), true); }}>
             <EyeOff className="size-3.5" aria-hidden /> {t('bar.hide')}
           </button>
           {team && (
-            <button type="button" role="menuitem" className="flex items-center gap-2 rounded px-2 py-1 text-left hover:bg-accent"
+            <button type="button" role="menuitem" className={menuItem}
               onClick={() => { setMenu(false); layoutActions.setTeamHidden(team, true); }}>
               <EyeOff className="size-3.5" aria-hidden /> {t('bar.hideTeam')}
             </button>
