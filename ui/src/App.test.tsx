@@ -378,7 +378,8 @@ describe('App setup', () => {
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'launchctl would not unload');
     onRemove.mockResolvedValueOnce(undefined);
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
-    expect(await screen.findByText('Services removed.')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole('group', { name: 'Remove services' })).toBeNull());
+    expect(screen.queryByText('Services removed.')).toBeNull();
     expect(onRemove).toHaveBeenCalledTimes(2);
   });
 });

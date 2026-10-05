@@ -10,7 +10,7 @@ type Phase = 'idle' | 'confirming' | 'removing' | 'removed';
  */
 export function RemoveServices({ onRemove, startConfirming = false, onClose }: {
   onRemove: () => Promise<void>;
-  /** Opened from a menu: starts at the question, and reports Cancel. */
+  /** Opened from a menu: starts at the question, and reports Cancel and success. */
   startConfirming?: boolean;
   onClose?: () => void;
 }) {
@@ -41,6 +41,7 @@ export function RemoveServices({ onRemove, startConfirming = false, onClose }: {
             setPhase('removing');
             try {
               await onRemove();
+              if (onClose) { onClose(); return; }
               setPhase('removed');
             } catch (e) {
               const message = (e as { message?: unknown })?.message;
