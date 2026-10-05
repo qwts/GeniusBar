@@ -73,7 +73,7 @@ jobs:
     name: CI
     if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     needs: [tauri]
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
     steps:
       - name: All jobs passed
         run: test "${{ needs.tauri.result }}" = success
