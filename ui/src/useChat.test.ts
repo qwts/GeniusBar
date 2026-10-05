@@ -1,9 +1,9 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BridgeError } from './bridge';
-import { conversationOf, unreadOf } from './model/chat';
+import { conversationOf, MAX_AGGREGATE_ENTRIES, MAX_CONVERSATIONS, unreadOf } from './model/chat';
 import { inboxMessage } from './model/fixtures';
-import { CHAT_STORAGE_KEY, pollInbox, sendMessage, useChat } from './useChat';
+import { CHAT_STORAGE_KEY, INBOX_PAGE, pollInbox, sendMessage, useChat } from './useChat';
 
 afterEach(() => { cleanup(); globalThis.localStorage?.clear(); });
 
@@ -185,5 +185,51 @@ describe('useChat persistence', () => {
     const second = renderHook(() => useChat({ enabled: false, callImpl, storage }));
     const key = Object.keys(second.result.current.chat.conversations)[0];
     expect(second.result.current.chat.conversations[key].entries.map((e) => e.body)).toEqual(['kept']);
+  });
+});
+
+describe('useChat aggregate bounds (#93)', () => {
+  it('enforces bounds under sustained ingress from many senders via polling', async () => {
+    // Simulate a flood: each poll page returns messages from different senders.
+    let seq = 0;
+    let pageNum = 0;
+    const totalPages = 300; // 300 pages × 100 messages = 30,000 messages from 300 senders
+    const callImpl: Call = async (method) => {
+      if (method === 'inbox') {
+        if (pageNum >= totalPages) {
+          return { ok: true, messages: [], cursor: 0, remaining: 0 };
+        }
+        const batch = pageNum;
+        pageNum++;
+        const messages = Array.from({ length: INBOX_PAGE }, (_, i) => {
+          seq++;
+          return inboxMessage(
+            `flood_${batch}_${i}`, seq, `flood body ${batch}-${i}`,
+            { account: 'attacker', agentId: `agent_${batch}` },
+          );
+        });
+        return { ok: true, messages, cursor: seq, remaining: totalPages - pageNum > 0 ? 1 : 0 };
+      }
+      if (method === 'ack') return { ok: true };
+      return {};
+    };
+    const storage = memoryStorage();
+    const { result } = renderHook(() => useChat({
+      enabled: true, callImpl: callImpl as never, intervalMs: 10, storage,
+    }));
+    // Wait for several polls to process.
+    await waitFor(() => {
+      const convCount = Object.keys(result.current.chat.conversations).length;
+      return expect(convCount).toBeGreaterThan(0);
+    });
+    // Let polls run for a while to accumulate many messages.
+    await new Promise((r) => setTimeout(r, 500));
+    // Verify aggregate bounds are held.
+    const chat = result.current.chat;
+    const convCount = Object.keys(chat.conversations).length;
+    expect(convCount).toBeLessThanOrEqual(MAX_CONVERSATIONS);
+    let totalEntries = 0;
+    for (const c of Object.values(chat.conversations)) totalEntries += c.entries.length;
+    expect(totalEntries).toBeLessThanOrEqual(MAX_AGGREGATE_ENTRIES);
   });
 });
