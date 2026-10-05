@@ -115,16 +115,16 @@ export function mergeIncoming(state: ChatState, messages: readonly unknown[], op
     }
     if (!stored.includes(m.id)) stored.push(m.id);
   }
-  return { state: next, stored };
+  return { state: enforceAggregateBounds(next), stored };
 }
 
 /** Record a message this principal sent once `send` succeeded. */
 export function addSent(state: ChatState, key: string,
   sent: { messageId: string; body: string; at: number; seq?: number | null }): ChatState {
   if (state.ids.has(sent.messageId)) return state;
-  return addEntry(state, key, {
+  return enforceAggregateBounds(addEntry(state, key, {
     id: sent.messageId, direction: 'out', body: sent.body, at: sent.at, seq: sent.seq ?? null,
-  }, 0);
+  }, 0));
 }
 
 export function markRead(state: ChatState, key: string): ChatState {
@@ -201,6 +201,91 @@ export function sendErrorText(code: string, _message: string): string {
   }
 }
 
+// ---- Aggregate bounds (#93) -----------------------------------------------
+
+/** Hard cap on the number of conversations retained in memory. */
+export const MAX_CONVERSATIONS = 200;
+
+/** Hard cap on the total number of entries across all conversations. */
+export const MAX_AGGREGATE_ENTRIES = 10_000;
+
+/**
+ * Enforces aggregate memory bounds on the chat state:
+ * 1. Evicts oldest conversations when count exceeds MAX_CONVERSATIONS.
+ * 2. Evicts oldest entries across all conversations when total exceeds
+ *    MAX_AGGREGATE_ENTRIES, dropping conversations that become empty.
+ */
+export function enforceAggregateBounds(state: ChatState): ChatState {
+  let convs = state.conversations;
+  let ids = state.ids;
+
+  // 1. Bound conversation count: evict oldest conversations first.
+  const keys = Object.keys(convs);
+  if (keys.length > MAX_CONVERSATIONS) {
+    // Sort conversations by latest entry time ascending (oldest last-activity first).
+    const sorted = keys
+      .map((k) => {
+        const entries = convs[k].entries;
+        const latest = entries.length > 0 ? entries[entries.length - 1].at : 0;
+        return { key: k, latest };
+      })
+      .sort((a, b) => a.latest - b.latest);
+    const evictCount = keys.length - MAX_CONVERSATIONS;
+    const evictKeys = new Set(sorted.slice(0, evictCount).map((s) => s.key));
+    const nextConvs: Record<string, Conversation> = {};
+    const nextIds = new Set<string>();
+    for (const [k, c] of Object.entries(convs)) {
+      if (evictKeys.has(k)) continue;
+      nextConvs[k] = c;
+      for (const e of c.entries) nextIds.add(e.id);
+    }
+    convs = nextConvs;
+    ids = nextIds;
+  }
+
+  // 2. Bound aggregate entry count: evict the globally oldest entries. Each
+  // conversation's entries are already in time order, so the oldest entry
+  // overall is always one of the heads: pick the oldest head `excess` times
+  // instead of sorting every entry on each call.
+  let total = 0;
+  for (const c of Object.values(convs)) total += c.entries.length;
+  if (total > MAX_AGGREGATE_ENTRIES) {
+    const convKeys = Object.keys(convs);
+    const lists = convKeys.map((k) => convs[k].entries);
+    const dropped = new Array<number>(convKeys.length).fill(0);  // evicted from the front, per conversation
+    for (let excess = total - MAX_AGGREGATE_ENTRIES; excess > 0; excess--) {
+      let oldestAt = -1;
+      let oldest: ChatEntry | null = null;
+      for (let i = 0; i < lists.length; i++) {
+        const head = lists[i][dropped[i]];
+        if (head === undefined) continue;
+        if (oldest === null || byTime(head, oldest) < 0) { oldest = head; oldestAt = i; }
+      }
+      if (oldestAt < 0) break;
+      dropped[oldestAt]++;
+    }
+    // Rebuild conversations without the evicted entries; empty ones go.
+    const nextConvs: Record<string, Conversation> = {};
+    const nextIds = new Set<string>();
+    convKeys.forEach((k, i) => {
+      const c = convs[k];
+      if (dropped[i] === 0) {
+        nextConvs[k] = c;
+      } else {
+        const entries = c.entries.slice(dropped[i]);
+        if (entries.length === 0) return;
+        nextConvs[k] = { entries, unread: Math.min(c.unread, entries.length) };
+      }
+      for (const e of nextConvs[k].entries) nextIds.add(e.id);
+    });
+    convs = nextConvs;
+    ids = nextIds;
+  }
+
+  if (convs === state.conversations) return state;
+  return { conversations: convs, ids };
+}
+
 // Persistence. Acknowledged messages leave the broker mailbox, so the app's
 // copy is the only one: it is saved before each ack and reloaded at start.
 
@@ -243,5 +328,5 @@ export function fromStored(text: string | null): ChatState {
     const unread = Number.isInteger(c.unread) && (c.unread as number) >= 0 ? (c.unread as number) : 0;
     conversations[key] = { entries, unread: Math.min(unread, entries.length) };
   }
-  return { conversations, ids };
+  return enforceAggregateBounds({ conversations, ids });
 }

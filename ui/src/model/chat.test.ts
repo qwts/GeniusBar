@@ -6,7 +6,10 @@ import {
   conversationOf,
   emptyChat,
   emptyComposer,
+  enforceAggregateBounds,
   markRead,
+  MAX_AGGREGATE_ENTRIES,
+  MAX_CONVERSATIONS,
   mergeIncoming,
   sendErrorText,
   sendFailed,
@@ -17,6 +20,9 @@ import {
   fromStored,
   STORED_ENTRIES,
   toStored,
+  type ChatEntry,
+  type ChatState,
+  type Conversation,
 } from './chat';
 import { inboxMessage } from './fixtures';
 
@@ -177,5 +183,173 @@ describe('chat persistence', () => {
     expect(fromStored('{"v":2,"conversations":{}}')).toBe(emptyChat);
     const back = fromStored(JSON.stringify({ v: 1, conversations: { k: { entries: [entry('ok', 1), { id: 3 }], unread: 9 } } }));
     expect(back.conversations.k).toEqual({ entries: [entry('ok', 1)], unread: 1 });
+  });
+});
+
+describe('aggregate memory bounds (#93)', () => {
+  const entry = (id: string, at: number): ChatEntry =>
+    ({ id, direction: 'in', body: `b${id}`, at, seq: at });
+
+  function buildState(convCount: number, entriesPerConv: number): ChatState {
+    const conversations: Record<string, Conversation> = {};
+    const ids = new Set<string>();
+    for (let c = 0; c < convCount; c++) {
+      const entries: ChatEntry[] = [];
+      for (let e = 0; e < entriesPerConv; e++) {
+        const id = `m_${c}_${e}`;
+        entries.push(entry(id, c * 1_000_000 + e));
+        ids.add(id);
+      }
+      conversations[`account/agent_${c}`] = { entries, unread: 0 };
+    }
+    return { conversations, ids };
+  }
+
+  it('evicts oldest conversations when count exceeds MAX_CONVERSATIONS', () => {
+    const count = MAX_CONVERSATIONS + 50;
+    const state = buildState(count, 2);
+    const bounded = enforceAggregateBounds(state);
+    const keys = Object.keys(bounded.conversations);
+    expect(keys).toHaveLength(MAX_CONVERSATIONS);
+    // The 50 oldest conversations (lowest latest-entry time) should be gone.
+    for (let c = 0; c < 50; c++) {
+      expect(bounded.conversations[`account/agent_${c}`]).toBeUndefined();
+    }
+    // The newest should survive.
+    for (let c = count - 1; c >= 50; c--) {
+      expect(bounded.conversations[`account/agent_${c}`]).toBeDefined();
+    }
+    // Ids set is consistent.
+    let idCount = 0;
+    for (const c of Object.values(bounded.conversations)) idCount += c.entries.length;
+    expect(bounded.ids.size).toBe(idCount);
+  });
+
+  it('evicts oldest entries globally when total exceeds MAX_AGGREGATE_ENTRIES', () => {
+    // 20 conversations with 600 entries each = 12,000 entries > 10,000 cap.
+    const state = buildState(20, 600);
+    const bounded = enforceAggregateBounds(state);
+    let total = 0;
+    for (const c of Object.values(bounded.conversations)) total += c.entries.length;
+    expect(total).toBeLessThanOrEqual(MAX_AGGREGATE_ENTRIES);
+    expect(total).toBe(MAX_AGGREGATE_ENTRIES);
+    // The 2,000 oldest entries are evicted. Conversation 0 had the oldest
+    // entries (times 0..599), so it may have lost all entries and been removed.
+    // The newest conversations should retain all their entries.
+    const c19 = bounded.conversations['account/agent_19'];
+    expect(c19).toBeDefined();
+    expect(c19.entries.length).toBe(600);
+    // At least some early conversations should have lost entries or been dropped.
+    const c0 = bounded.conversations['account/agent_0'];
+    const c1 = bounded.conversations['account/agent_1'];
+    const earlyEntries = (c0?.entries.length ?? 0) + (c1?.entries.length ?? 0);
+    expect(earlyEntries).toBeLessThan(1200);
+  });
+
+  it('drops conversations that become empty after entry eviction', () => {
+    // 1 conversation with MAX_AGGREGATE_ENTRIES entries (at times 1_000_000+),
+    // plus 5 tiny conversations with 1 entry each at time 0..4 (oldest).
+    const conversations: Record<string, Conversation> = {};
+    const ids = new Set<string>();
+    for (let i = 0; i < 5; i++) {
+      const id = `old_${i}`;
+      conversations[`account/old_${i}`] = { entries: [entry(id, i)], unread: 1 };
+      ids.add(id);
+    }
+    const bigEntries: ChatEntry[] = [];
+    for (let i = 0; i < MAX_AGGREGATE_ENTRIES; i++) {
+      const id = `big_${i}`;
+      bigEntries.push(entry(id, 1_000_000 + i));
+      ids.add(id);
+    }
+    conversations['account/big'] = { entries: bigEntries, unread: 0 };
+    const state: ChatState = { conversations, ids };
+    const bounded = enforceAggregateBounds(state);
+    // The 5 old single-entry conversations should be gone.
+    for (let i = 0; i < 5; i++) {
+      expect(bounded.conversations[`account/old_${i}`]).toBeUndefined();
+    }
+    expect(bounded.conversations['account/big'].entries).toHaveLength(MAX_AGGREGATE_ENTRIES);
+  });
+
+  it('keeps unread intact when only older, already-read entries are evicted', () => {
+    // unread describes the newest entries, so evicting the oldest ones from a
+    // conversation must not lower it.
+    const conversations: Record<string, Conversation> = {};
+    const ids = new Set<string>();
+    const smallEntries: ChatEntry[] = [];
+    for (let i = 0; i < 5; i++) {
+      const id = `small_${i}`;
+      smallEntries.push(entry(id, i));
+      ids.add(id);
+    }
+    conversations['account/small'] = { entries: smallEntries, unread: 2 };
+    const bigEntries: ChatEntry[] = [];
+    for (let i = 0; i < MAX_AGGREGATE_ENTRIES - 2; i++) {
+      const id = `big_${i}`;
+      bigEntries.push(entry(id, 1_000_000 + i));
+      ids.add(id);
+    }
+    conversations['account/big'] = { entries: bigEntries, unread: 0 };
+    const bounded = enforceAggregateBounds({ conversations, ids });
+    // Total was MAX + 3, so the three oldest (small_0..2) are evicted.
+    const small = bounded.conversations['account/small'];
+    expect(small.entries.map((e) => e.id)).toEqual(['small_3', 'small_4']);
+    expect(small.unread).toBe(2);
+    expect(bounded.ids.has('small_0')).toBe(false);
+  });
+
+  it('is a no-op when within bounds', () => {
+    const state = buildState(5, 10);
+    expect(enforceAggregateBounds(state)).toBe(state);
+  });
+
+  it('is enforced by mergeIncoming on sustained ingress across many conversations', () => {
+    let state: ChatState = emptyChat;
+    // Simulate sustained ingress: 300 conversations × 50 messages each = 15,000 messages.
+    for (let c = 0; c < 300; c++) {
+      const messages = Array.from({ length: 50 }, (_, i) =>
+        inboxMessage(`m_${c}_${i}`, c * 100 + i, `body ${c}-${i}`, { account: 'user', agentId: `agent_${c}` }),
+      );
+      const result = mergeIncoming(state, messages);
+      state = result.state;
+    }
+    const convKeys = Object.keys(state.conversations);
+    expect(convKeys.length).toBeLessThanOrEqual(MAX_CONVERSATIONS);
+    let total = 0;
+    for (const c of Object.values(state.conversations)) total += c.entries.length;
+    expect(total).toBeLessThanOrEqual(MAX_AGGREGATE_ENTRIES);
+  }, 30_000);  // 15,000 messages through mergeIncoming: slow on a loaded CI runner
+
+  it('is enforced by addSent', () => {
+    // Fill to the max, then add one more via addSent.
+    const state = buildState(1, MAX_AGGREGATE_ENTRIES);
+    const after = addSent(state, 'account/agent_0', {
+      messageId: 'sent_new', body: 'hello', at: 999_999_999, seq: 1,
+    });
+    let total = 0;
+    for (const c of Object.values(after.conversations)) total += c.entries.length;
+    expect(total).toBeLessThanOrEqual(MAX_AGGREGATE_ENTRIES);
+    // The new sent message should be retained (it's the newest).
+    expect(after.ids.has('sent_new')).toBe(true);
+  });
+
+  it('preserves the existing 500-entry per-conversation serialization rule', () => {
+    // Ensure the per-conv STORED_ENTRIES rule still works independently.
+    const entries = Array.from({ length: STORED_ENTRIES + 5 }, (_, i) => entry(`m${i}`, i));
+    const back = fromStored(toStored({ conversations: { k: { entries, unread: 0 } }, ids: new Set() }));
+    expect(back.conversations.k.entries).toHaveLength(STORED_ENTRIES);
+    expect(back.conversations.k.entries[0].id).toBe('m5');
+  });
+
+  it('enforces bounds when loading from stored data', () => {
+    // Simulate stored data with more than MAX_CONVERSATIONS.
+    const conversations: Record<string, { entries: ChatEntry[]; unread: number }> = {};
+    for (let c = 0; c < MAX_CONVERSATIONS + 10; c++) {
+      conversations[`account/agent_${c}`] = { entries: [entry(`m_${c}`, c)], unread: 0 };
+    }
+    const stored = JSON.stringify({ v: 1, conversations });
+    const loaded = fromStored(stored);
+    expect(Object.keys(loaded.conversations).length).toBeLessThanOrEqual(MAX_CONVERSATIONS);
   });
 });
