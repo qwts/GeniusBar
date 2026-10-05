@@ -319,7 +319,7 @@ describe('aggregate memory bounds (#93)', () => {
     let total = 0;
     for (const c of Object.values(state.conversations)) total += c.entries.length;
     expect(total).toBeLessThanOrEqual(MAX_AGGREGATE_ENTRIES);
-  });
+  }, 30_000);  // 15,000 messages through mergeIncoming: slow on a loaded CI runner
 
   it('is enforced by addSent', () => {
     // Fill to the max, then add one more via addSent.

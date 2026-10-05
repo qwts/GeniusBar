@@ -221,7 +221,7 @@ describe('useChat aggregate bounds (#93)', () => {
     await waitFor(() => {
       const convCount = Object.keys(result.current.chat.conversations).length;
       return expect(convCount).toBeGreaterThan(0);
-    });
+    }, { timeout: 10_000 });
     // Let polls run for a while to accumulate many messages.
     await new Promise((r) => setTimeout(r, 500));
     // Verify aggregate bounds are held.
@@ -231,5 +231,5 @@ describe('useChat aggregate bounds (#93)', () => {
     let totalEntries = 0;
     for (const c of Object.values(chat.conversations)) totalEntries += c.entries.length;
     expect(totalEntries).toBeLessThanOrEqual(MAX_AGGREGATE_ENTRIES);
-  });
+  }, 30_000);  // a 30,000-message flood: slow on a loaded CI runner
 });

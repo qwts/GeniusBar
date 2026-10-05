@@ -243,28 +243,39 @@ export function enforceAggregateBounds(state: ChatState): ChatState {
     ids = nextIds;
   }
 
-  // 2. Bound aggregate entry count: evict oldest entries globally.
+  // 2. Bound aggregate entry count: evict the globally oldest entries. Each
+  // conversation's entries are already in time order, so the oldest entry
+  // overall is always one of the heads: pick the oldest head `excess` times
+  // instead of sorting every entry on each call.
   let total = 0;
   for (const c of Object.values(convs)) total += c.entries.length;
   if (total > MAX_AGGREGATE_ENTRIES) {
-    // Collect all entries with their conversation key, sort oldest first.
-    const all: { key: string; entry: ChatEntry }[] = [];
-    for (const [k, c] of Object.entries(convs)) {
-      for (const e of c.entries) all.push({ key: k, entry: e });
+    const convKeys = Object.keys(convs);
+    const dropped = new Map<string, number>();  // entries evicted from the front, per conversation
+    for (let excess = total - MAX_AGGREGATE_ENTRIES; excess > 0; excess--) {
+      let oldestKey: string | null = null;
+      let oldest: ChatEntry | null = null;
+      for (const k of convKeys) {
+        const head = convs[k].entries[dropped.get(k) ?? 0];
+        if (head === undefined) continue;
+        if (oldest === null || byTime(head, oldest) < 0) { oldest = head; oldestKey = k; }
+      }
+      if (oldestKey === null) break;
+      dropped.set(oldestKey, (dropped.get(oldestKey) ?? 0) + 1);
     }
-    all.sort((a, b) => byTime(a.entry, b.entry));
-    // Mark the oldest entries for eviction.
-    const evictIds = new Set<string>();
-    const excess = total - MAX_AGGREGATE_ENTRIES;
-    for (let i = 0; i < excess; i++) evictIds.add(all[i].entry.id);
-    // Rebuild conversations without evicted entries.
+    // Rebuild conversations without the evicted entries; empty ones go.
     const nextConvs: Record<string, Conversation> = {};
     const nextIds = new Set<string>();
     for (const [k, c] of Object.entries(convs)) {
-      const entries = c.entries.filter((e) => !evictIds.has(e.id));
-      if (entries.length === 0) continue;
-      nextConvs[k] = { entries, unread: Math.min(c.unread, entries.length) };
-      for (const e of entries) nextIds.add(e.id);
+      const n = dropped.get(k) ?? 0;
+      if (n === 0) {
+        nextConvs[k] = c;
+      } else {
+        const entries = c.entries.slice(n);
+        if (entries.length === 0) continue;
+        nextConvs[k] = { entries, unread: Math.min(c.unread, entries.length) };
+      }
+      for (const e of nextConvs[k].entries) nextIds.add(e.id);
     }
     convs = nextConvs;
     ids = nextIds;
