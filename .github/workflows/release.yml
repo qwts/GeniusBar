@@ -33,7 +33,7 @@ permissions:
 jobs:
   validate:
     name: Validate release tag
-    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       tag: ${{ steps.release.outputs.tag }}
@@ -93,7 +93,7 @@ jobs:
   publish:
     name: Publish GitHub release
     needs: [validate, build]
-    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     # The only job that writes: it creates the release and uploads assets.
     permissions:
