@@ -251,32 +251,33 @@ export function enforceAggregateBounds(state: ChatState): ChatState {
   for (const c of Object.values(convs)) total += c.entries.length;
   if (total > MAX_AGGREGATE_ENTRIES) {
     const convKeys = Object.keys(convs);
-    const dropped = new Map<string, number>();  // entries evicted from the front, per conversation
+    const lists = convKeys.map((k) => convs[k].entries);
+    const dropped = new Array<number>(convKeys.length).fill(0);  // evicted from the front, per conversation
     for (let excess = total - MAX_AGGREGATE_ENTRIES; excess > 0; excess--) {
-      let oldestKey: string | null = null;
+      let oldestAt = -1;
       let oldest: ChatEntry | null = null;
-      for (const k of convKeys) {
-        const head = convs[k].entries[dropped.get(k) ?? 0];
+      for (let i = 0; i < lists.length; i++) {
+        const head = lists[i][dropped[i]];
         if (head === undefined) continue;
-        if (oldest === null || byTime(head, oldest) < 0) { oldest = head; oldestKey = k; }
+        if (oldest === null || byTime(head, oldest) < 0) { oldest = head; oldestAt = i; }
       }
-      if (oldestKey === null) break;
-      dropped.set(oldestKey, (dropped.get(oldestKey) ?? 0) + 1);
+      if (oldestAt < 0) break;
+      dropped[oldestAt]++;
     }
     // Rebuild conversations without the evicted entries; empty ones go.
     const nextConvs: Record<string, Conversation> = {};
     const nextIds = new Set<string>();
-    for (const [k, c] of Object.entries(convs)) {
-      const n = dropped.get(k) ?? 0;
-      if (n === 0) {
+    convKeys.forEach((k, i) => {
+      const c = convs[k];
+      if (dropped[i] === 0) {
         nextConvs[k] = c;
       } else {
-        const entries = c.entries.slice(n);
-        if (entries.length === 0) continue;
+        const entries = c.entries.slice(dropped[i]);
+        if (entries.length === 0) return;
         nextConvs[k] = { entries, unread: Math.min(c.unread, entries.length) };
       }
       for (const e of nextConvs[k].entries) nextIds.add(e.id);
-    }
+    });
     convs = nextConvs;
     ids = nextIds;
   }
