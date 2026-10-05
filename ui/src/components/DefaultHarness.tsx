@@ -7,7 +7,8 @@ import { useI18n } from '../lib/i18n';
  * The menu's default harness: new launches start with it unless the
  * companion already has one. Kept per viewer; none asks every time.
  * "Other…" takes any harness command, as the design's select does; it
- * becomes the default on blur or Enter, so a half-typed command never does.
+ * becomes the default on blur or Enter, so a half-typed command never does,
+ * and an empty one leaves the current default alone.
  */
 export function DefaultHarness({ harnesses }: { harnesses: readonly string[] }) {
   const { t } = useI18n();
@@ -15,7 +16,9 @@ export function DefaultHarness({ harnesses }: { harnesses: readonly string[] }) 
   const [other, setOther] = useState(false);
   const [text, setText] = useState('');
   const options = harnessOptions(harnesses, defaultHarness);
-  const commit = () => preferenceActions.setDefaultHarness(text.trim() || null);
+  // Only a typed command becomes the default: leaving Other… empty keeps
+  // whatever was set, and None is how a default is cleared.
+  const commit = () => { const harness = text.trim(); if (harness) preferenceActions.setDefaultHarness(harness); };
   return (
     <section className="grid gap-1.5 border-t border-border p-3 text-xs" aria-label={t('harness.defaultTitle')}>
       <label className="grid gap-1.5">

@@ -20,7 +20,20 @@ describe('DefaultHarness', () => {
     expect((select as HTMLSelectElement).value).toBe('my-harness --flag');
   });
 
-  it('commits Other… on Enter, and clears the default when emptied', () => {
+  it('leaves the default alone when Other… is left empty', () => {
+    preferenceActions.setDefaultHarness('claude');
+    render(<DefaultHarness harnesses={['claude']} />);
+    const select = screen.getByRole('combobox', { name: 'Default harness' });
+    fireEvent.change(select, { target: { value: '__other' } });
+    const input = screen.getByRole('textbox', { name: 'Harness command' });
+    fireEvent.blur(input);
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(JSON.parse(localStorage.getItem(PREFERENCES_KEY)!)).toEqual({ defaultHarness: 'claude' });
+    fireEvent.change(select, { target: { value: '' } });
+    expect(JSON.parse(localStorage.getItem(PREFERENCES_KEY)!)).toEqual({ defaultHarness: null });
+  });
+
+  it('commits Other… on Enter, and keeps the default when emptied', () => {
     render(<DefaultHarness harnesses={[]} />);
     fireEvent.change(screen.getByRole('combobox', { name: 'Default harness' }), { target: { value: '__other' } });
     const input = screen.getByRole('textbox', { name: 'Harness command' });
@@ -30,6 +43,6 @@ describe('DefaultHarness', () => {
     expect(JSON.parse(localStorage.getItem(PREFERENCES_KEY)!)).toEqual({ defaultHarness: 'my-h' });
     fireEvent.change(input, { target: { value: '  ' } });
     fireEvent.blur(input);
-    expect(JSON.parse(localStorage.getItem(PREFERENCES_KEY)!)).toEqual({ defaultHarness: null });
+    expect(JSON.parse(localStorage.getItem(PREFERENCES_KEY)!)).toEqual({ defaultHarness: 'my-h' });
   });
 });

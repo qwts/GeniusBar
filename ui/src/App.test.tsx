@@ -492,6 +492,30 @@ describe('App window mode', () => {
     expect(within(desktop()).queryByRole('button', { name: 'Launch companion' })).toBeNull();
   });
 
+  it('opens the ⓘ sheet outside the window, so pressing on it does not drag the window', () => {
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
+    fireEvent.click(within(desktop()).getByRole('button', { name: /^agent_c,/ }));
+    const win = screen.getByRole('dialog', { name: 'agent_c' });
+    const before = win.style.transform;
+    fireEvent.click(within(win).getByRole('button', { name: 'Details' }));
+    const sheet = screen.getByRole('dialog', { name: 'Details · agent_c' });
+    expect(win.contains(sheet)).toBe(false);
+    expect(sheet.parentElement?.parentElement).toBe(document.body);
+    const backdrop = sheet.parentElement!;
+    // jsdom has no pointer capture; the drag handler calls it before it moves anything.
+    const capture = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'setPointerCapture', { value: capture, configurable: true });
+    fireEvent.pointerDown(backdrop, { pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(backdrop, { pointerId: 1, clientX: 90, clientY: 60 });
+    fireEvent.pointerDown(sheet, { pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(sheet, { pointerId: 1, clientX: 90, clientY: 60 });
+    expect(capture).not.toHaveBeenCalled();
+    expect(win.style.transform).toBe(before);
+    fireEvent.keyDown(sheet, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Details · agent_c' })).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'agent_c' })).toBeTruthy();
+  });
+
   it('keeps the Launch button on an empty desktop', () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     render(<App mode="window" census={[]} connection={sampleConnection} launcher={launcher} isStatic />);

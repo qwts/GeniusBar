@@ -48,6 +48,7 @@ describe('CompanionDetails', () => {
       await screen.findByText('Managed', { selector: 'dt' });
       expect(field('Managed')).toBe('Managed');
       expect(field('Agent comms')).toBe('On');
+      expect(field('Agent id')).toBe(child.agentId);
       for (const term of ['Account', 'Harness', 'Presence', 'Parent', 'Unacked', 'Last wake']) {
         expect(screen.getByText(term, { selector: 'dt' })).toBeTruthy();
       }
@@ -117,6 +118,21 @@ describe('CompanionDetails', () => {
       expect((screen.getByRole('switch', { name: 'Agent comms' }) as HTMLInputElement).checked).toBe(false);
       fireEvent.submit(screen.getByRole('form'));
       expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ comms: false }));
+    });
+
+    it('puts the comms row in the ⓘ Details sheet, with the same toggle', async () => {
+      const { InfoButton } = await import('./CompanionSession');
+      vi.mocked(soulComms).mockResolvedValue(stopped);
+      vi.mocked(setSoulComms).mockResolvedValueOnce({ ...stopped, comms: false });
+      render(<InfoButton soul={child} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+      const sheet = screen.getByRole('dialog', { name: 'Details · agent_c' });
+      expect(await within(sheet).findByText('Lets this soul message and be messaged by other souls.')).toBeTruthy();
+      expect(within(sheet).getByText('Managed')).toBeTruthy();
+      fireEvent.click(within(sheet).getByRole('switch', { name: /Agent comms for/ }));
+      expect(setSoulComms).toHaveBeenCalledWith(child.agentId, false);
+      fireEvent.keyDown(sheet, { key: 'Escape' });
+      expect(screen.queryByRole('dialog')).toBeNull();
     });
 
     it('adds no rows when agent-bot cannot say', async () => {

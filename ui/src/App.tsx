@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { FooterMenu } from './components/FooterMenu';
-import { CompanionSession } from './components/CompanionSession';
+import { CompanionSession, InfoButton } from './components/CompanionSession';
 import { CompanionWindow, Desktop } from './components/Desktop';
 import { FirstLaunch, type DevTools, type HarnessAuth, type Starter } from './components/FirstLaunch';
 import { FleetList, type Hiding } from './components/FleetList';
@@ -296,7 +296,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
       <Desktop forest={forest} layout={layout} paused={paused} unreadOf={unread} selectedKey={openKey} onOpen={open}
         notice={notice} onLaunch={launch && !showSetup ? () => { setSelectedKey(null); setLaunchingPackage(true); setMenuOpen(true); } : undefined}>
         {selected && session && (
-          <CompanionWindow soul={selected} paused={paused} onClose={() => setSelectedKey(null)}>{session}</CompanionWindow>
+          <CompanionWindow soul={selected} paused={paused} onClose={() => setSelectedKey(null)} actions={<InfoButton soul={selected} />}>{session}</CompanionWindow>
         )}
       </Desktop>
     </div>

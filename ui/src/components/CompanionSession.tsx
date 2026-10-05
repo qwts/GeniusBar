@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { ArrowLeft } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { ArrowLeft, Info, Radio, X } from 'lucide-react';
 import { runtimeMetrics, setSoulComms, soulComms, type RuntimeMetrics, type RuntimeObservation, type SoulComms } from '../bridge';
 import {
   availabilityNote,
@@ -93,6 +94,7 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
           </p>
         </div>
       {/* The design's segmented tabs, at the header's right. */}
+      {showBack && <InfoButton soul={soul} />}
       <div role="tablist" aria-label={name} className="ml-auto flex gap-0.5 rounded-lg bg-muted p-1"
         onKeyDown={(e) => {
           const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
@@ -136,19 +138,12 @@ function yesNo(value: boolean | null | undefined, t: Translate): string {
   return value === true ? t('yes') : value === false ? t('no') : t('unknown');
 }
 
-/** The read-only fields, with Launch… when launching is available. */
-export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0 }: { soul: CensusRow; roster?: readonly CensusRow[]; launch?: LaunchProps; metricsRefresh?: number }) {
-  const { t, lang } = useI18n();
-  const [launching, setLaunching] = useState(false);
-  const [metrics, setMetrics] = useState<RuntimeMetrics>({ unavailable: true });
-  useEffect(() => {
-    let active = true;
-    setMetrics({ unavailable: true });
-    void runtimeMetrics().then((result) => { if (active) setMetrics(result); });
-    return () => { active = false; };
-  }, [soul.agentId, metricsRefresh]);
-  // Managed and agent-comms state (#71) comes from agent-bot, which also
-  // decides whether it may change; this only shows it and relays the toggle.
+/**
+ * Managed and agent-comms state (#71) for one soul. It comes from
+ * agent-bot, which also decides whether it may change; this only shows it
+ * and relays the toggle.
+ */
+export function useSoulComms(agentId: string, refresh = 0) {
   const [comms, setComms] = useState<SoulComms | null>(null);
   const [commsSaving, setCommsSaving] = useState(false);
   const [commsError, setCommsError] = useState<string | null>(null);
@@ -164,19 +159,19 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
     setComms(null);
     setCommsError(null);
     setCommsSaving(false);
-  }, [soul.agentId]);
+  }, [agentId]);
   useEffect(() => {
     if (commsChanging.current) return;
     const ticket = ++commsTicket.current;
-    void soulComms(soul.agentId).then((result) => { if (commsTicket.current === ticket) setComms(result); });
-  }, [soul.agentId, metricsRefresh]);
+    void soulComms(agentId).then((result) => { if (commsTicket.current === ticket) setComms(result); });
+  }, [agentId, refresh]);
   const toggleComms = (on: boolean) => {
     const ticket = ++commsTicket.current;
     const latest = () => commsTicket.current === ticket;
     commsChanging.current = true;
     setCommsSaving(true);
     setCommsError(null);
-    setSoulComms(soul.agentId, on)
+    setSoulComms(agentId, on)
       .then((result) => { if (latest()) setComms(result); })
       .catch((error: unknown) => { if (latest()) setCommsError(error instanceof Error ? error.message : String(error)); })
       .finally(() => {
@@ -185,6 +180,21 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
         setCommsSaving(false);
       });
   };
+  return { comms, saving: commsSaving, error: commsError, toggle: toggleComms };
+}
+
+/** The read-only fields, with Launch… when launching is available. */
+export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0 }: { soul: CensusRow; roster?: readonly CensusRow[]; launch?: LaunchProps; metricsRefresh?: number }) {
+  const { t, lang } = useI18n();
+  const [launching, setLaunching] = useState(false);
+  const [metrics, setMetrics] = useState<RuntimeMetrics>({ unavailable: true });
+  useEffect(() => {
+    let active = true;
+    setMetrics({ unavailable: true });
+    void runtimeMetrics().then((result) => { if (active) setMetrics(result); });
+    return () => { active = false; };
+  }, [soul.agentId, metricsRefresh]);
+  const { comms, saving: commsSaving, error: commsError, toggle: toggleComms } = useSoulComms(soul.agentId, metricsRefresh);
   const snapshot = 'unavailable' in metrics ? null : metrics;
   const observations = snapshot?.souls[soul.agentId]?.observations ?? [];
   const errors = snapshot?.errors.filter((error) => error.agentId === soul.agentId) ?? [];
@@ -215,6 +225,7 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
   }
 
   const rows: [string, ReactNode][] = [
+    [t('field.agentId'), <span className="selectable">{soul.agentId}</span>],
     [t('field.account'), soul.account],
     [t('field.harness'), displayHarness(soul)],
     [t('field.presence'), soul.presence],
@@ -248,15 +259,15 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
     )]);
   }
 
+  // As the design's Details tab: a bordered list, sans labels and mono values.
   return (
-    <div className="grid gap-3 p-3">
-      <p className="selectable m-0 font-mono text-[11px] text-muted-foreground">{soul.agentId}</p>
+    <div className="grid gap-3 p-4">
       {note && <p className="muted m-0">{note}</p>}
-      <dl className="m-0 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1">
+      <dl className="m-0 divide-y divide-border rounded-md border border-border text-sm">
         {rows.map(([term, value]) => (
-          <div key={term} className="contents">
-            <dt className="text-muted-foreground">{term}</dt>
-            <dd className="m-0">{value}</dd>
+          <div key={term} className="flex gap-3 px-3 py-2">
+            <dt className="w-40 shrink-0 text-muted-foreground">{term}</dt>
+            <dd className="m-0 min-w-0 flex-1 font-mono text-xs leading-5 [overflow-wrap:anywhere]">{value}</dd>
           </div>
         ))}
       </dl>
@@ -265,11 +276,85 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
       ))}
       {launch && launching && <LaunchForm {...launch} soul={soul} initialComms={comms?.comms} />}
       {launch && !launching && (
-        <div className="detail-actions">
-          <button type="button" onClick={() => setLaunching(true)}>{t('launch')}</button>
+        <div className="flex justify-end">
+          <button type="button" onClick={() => setLaunching(true)}
+            className="min-h-8 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+            {t('launch')}
+          </button>
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The design's Agent comms row (Lovable `CommsRow`): title, hint (or why
+ * it is locked), Managed / Unmanaged in mono, and the switch. Absent while
+ * agent-bot cannot say.
+ */
+export function CommsRow({ soul, refresh = 0 }: { soul: CensusRow; refresh?: number }) {
+  const { t } = useI18n();
+  const { comms, saving, error, toggle } = useSoulComms(soul.agentId, refresh);
+  if (!comms) return null;
+  return (
+    <label className="flex items-start gap-3 p-3">
+      <Radio className="mt-0.5 size-4 text-muted-foreground" aria-hidden />
+      <span className="flex-1">
+        <span className="block text-sm font-medium">{t('field.comms')}</span>
+        <span className="block text-xs text-muted-foreground">{comms.running ? t('comms.stopFirst') : t('comms.hint')}</span>
+        <span className="block font-mono text-[11px] text-muted-foreground">{comms.managed ? t('comms.managed') : t('comms.unmanaged')}</span>
+        {saving && <span className="block text-[11px] text-muted-foreground" role="status">{t('comms.saving')}</span>}
+        {error && <span className="error block text-[11px]" role="alert">{t('comms.failed', { message: error })}</span>}
+      </span>
+      <input type="checkbox" role="switch" checked={comms.comms} disabled={comms.running || saving}
+        aria-label={t('comms.toggle', { name: displayName(soul) })} onChange={(e) => toggle(e.target.checked)} />
+    </label>
+  );
+}
+
+/**
+ * ⓘ and the Details sheet (Lovable 19.29.22): the soul's actionable rows.
+ * Only Agent comms is backed today; Wake (#90), harness sign-in and the
+ * GitHub App via keyd join when agent-bot reports them.
+ */
+export function InfoButton({ soul }: { soul: CensusRow }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const close = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (open) close.current?.focus(); }, [open]);
+  const name = displayName(soul);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} aria-label={t('details.title')} title={t('details.title')} aria-haspopup="dialog"
+        className="rounded p-1 text-muted-foreground hover:text-foreground">
+        <Info className="size-3.5" aria-hidden />
+      </button>
+      {/* Portalled to the body: the companion window's transform would otherwise
+          contain the fixed overlay, and a React pointerdown bubbling from the
+          sheet would start a drag in the title bar that holds this button. */}
+      {open && createPortal(
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
+          onPointerDown={(e) => e.stopPropagation()}>
+          <section role="dialog" aria-modal="true" aria-label={`${t('details.title')} · ${name}`}
+            onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } }}
+            className="relative grid w-full max-w-md gap-3 rounded-lg border border-border bg-popover p-5 shadow-2xl">
+            <button ref={close} type="button" onClick={() => setOpen(false)} aria-label={t('close')}
+              className="absolute top-3 right-3 rounded p-1 text-muted-foreground hover:text-foreground">
+              <X className="size-4" aria-hidden />
+            </button>
+            <div>
+              <h2 className="m-0 text-base font-semibold">{t('details.title')} · {name}</h2>
+              <p className="m-0 text-sm text-muted-foreground">{displayHarness(soul)}</p>
+            </div>
+            <div className="divide-y divide-border rounded-md border border-border empty:hidden">
+              <CommsRow soul={soul} />
+            </div>
+          </section>
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }
 
@@ -287,18 +372,18 @@ export function DelegationTree({ forest, focus, paused, onOpen }:
           type="button"
           aria-current={key === focus ? 'true' : undefined}
           onClick={() => onOpen(n.soul)}
-          className={`inline-flex items-center gap-2 rounded-md border px-2 py-1 text-sm ${key === focus
+          className={`inline-flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm ${key === focus
             ? 'border-primary bg-primary/10' : 'border-border bg-card hover:bg-accent'}`}
         >
-          <SoulDudle soul={n.soul} size={20} paused={paused} />
-          <span className="font-medium">{displayName(n.soul)}</span>
+          <SoulDudle soul={n.soul} size={22} paused={paused} />
+          <span className="font-medium text-foreground">{displayName(n.soul)}</span>
           <span className="text-xs text-muted-foreground">{t(`presence.${n.soul.presence}`)}</span>
         </button>
         {n.children.length > 0 && (
-          <ul className="mt-2 ml-4 grid list-none gap-2 border-l border-border pl-4">{n.children.map(node)}</ul>
+          <ul className="mt-2 ml-5 grid list-none gap-2 border-l border-border pl-5">{n.children.map(node)}</ul>
         )}
       </li>
     );
   };
-  return <ul className="m-0 grid list-none gap-2 p-3" aria-label={t('tab.tree')}>{node(root)}</ul>;
+  return <ul className="m-0 grid list-none gap-3 p-6" aria-label={t('tab.tree')}>{node(root)}</ul>;
 }
