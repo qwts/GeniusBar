@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { LayoutGrid } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { CompanionSession } from './components/CompanionSession';
 import { CompanionWindow, Desktop } from './components/Desktop';
 import { FirstLaunch, type DevTools, type HarnessAuth, type Starter } from './components/FirstLaunch';
 import { FleetList, type Hiding } from './components/FleetList';
 import { HealthHeader } from './components/HealthHeader';
 import { LaunchForm } from './components/LaunchForm';
+import { MenuBar } from './components/MenuBar';
 import { CliTools, type CliToolsApi } from './components/CliTools';
 import { RemoveServices } from './components/RemoveServices';
 import { SetupPanel } from './components/SetupPanel';
@@ -262,77 +262,22 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const attention = update ? { text: update.text, isError: update.isError }
     : footer?.isError ? { text: footer.text, isError: true }
     : null;
+  const unreadTotal = unread ? roster.reduce((sum, soul) => sum + unread(soul), 0) : 0;
   const notice = showSetup ? t('setupHint')
     : forest.length === 0 ? (showStarter ? t('setupHint') : empty ?? header.title)
     : null;
   return (
     <div className="gb flex h-full flex-col">
-      <Toolbar open={menuOpen} onOpenChange={setMenuOpen} tone={header.tone} title={header.title}
-        attention={attention} onReset={layoutActions.reset}>
+      <MenuBar open={menuOpen} onOpenChange={setMenuOpen} tone={header.tone} title={header.title}
+        attention={attention} onReset={layoutActions.reset} unread={unreadTotal} forest={forest} paused={paused} onJump={open}>
         {menu({ hidden: layout.hidden, onToggle: layoutActions.setHidden, onToggleTeam: layoutActions.setTeamHidden, onShowAll: layoutActions.showAll })}
-      </Toolbar>
+      </MenuBar>
       <Desktop forest={forest} layout={layout} paused={paused} unreadOf={unread} selectedKey={openKey} onOpen={open}
         notice={notice}>
         {selected && session && (
           <CompanionWindow title={displayName(selected)} onClose={() => setSelectedKey(null)}>{session}</CompanionWindow>
         )}
       </Desktop>
-    </div>
-  );
-}
-
-/**
- * Window mode's slim toolbar: the GeniusBar item, whose menu drops down as
- * a popover, plus the desktop's own controls. Escape or a click outside
- * closes the menu.
- */
-function Toolbar({ open, onOpenChange, tone, title, attention = null, onReset, children }: {
-  open: boolean; onOpenChange: (open: boolean) => void; tone: string; title: string;
-  attention?: { text: string; isError: boolean } | null; onReset: () => void; children: ReactNode;
-}) {
-  const { t } = useI18n();
-  const root = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const away = (e: PointerEvent) => { if (!root.current?.contains(e.target as Node)) onOpenChange(false); };
-    document.addEventListener('pointerdown', away);
-    return () => document.removeEventListener('pointerdown', away);
-  }, [open, onOpenChange]);
-  return (
-    <div className="relative z-40 flex h-9 shrink-0 items-center gap-2 border-b border-border bg-sidebar px-2">
-      <div ref={root} onKeyDown={(e) => { if (e.key === 'Escape') onOpenChange(false); }}>
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-haspopup="dialog"
-          aria-label={t('bar.menu')}
-          title={title}
-          onClick={() => onOpenChange(!open)}
-          className={`flex h-7 items-center gap-1.5 rounded px-1.5 hover:bg-accent ${open ? 'bg-accent' : ''}`}
-        >
-          <span className="grid size-4.5 place-items-center rounded-[4px] bg-foreground text-[10px] font-bold text-background" aria-hidden>G</span>
-          <span className="text-xs font-semibold">GeniusBar</span>
-          <span className={`dot dot-${tone}`} aria-hidden />
-        </button>
-        {open && (
-          <div role="dialog" aria-label={t('bar.menu')}
-            className="absolute top-full left-2 mt-1 flex max-h-[calc(100vh-3rem)] w-[22rem] flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-2xl">
-            {children}
-          </div>
-        )}
-      </div>
-      {attention && !open && (
-        <div role={attention.isError ? 'alert' : 'status'} className="min-w-0">
-          <button type="button" onClick={() => onOpenChange(true)} title={attention.text}
-            className={`max-w-[20rem] truncate rounded px-1.5 py-0.5 text-xs hover:bg-accent ${attention.isError ? 'text-destructive' : 'text-muted-foreground'}`}>
-            {attention.text}
-          </button>
-        </div>
-      )}
-      <button type="button" onClick={onReset} title={t('menu.resetLayout')} aria-label={t('menu.resetLayout')}
-        className="ml-auto rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground">
-        <LayoutGrid className="size-4" aria-hidden />
-      </button>
     </div>
   );
 }
