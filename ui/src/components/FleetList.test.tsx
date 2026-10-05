@@ -35,6 +35,14 @@ describe('FleetList', () => {
     expect(onOpen).toHaveBeenCalledWith(left);
   });
 
+  it('heads each team with its lead, then lists souls with no team last', () => {
+    render(<FleetList forest={buildSoulForest([left, ...sampleCensus.filter((s) => s !== left)])} paused onOpen={() => {}} />);
+    const lists = screen.getAllByRole('list').slice(1).map((l) => l.getAttribute('aria-label'));
+    expect(lists.indexOf('old')).toBeGreaterThan(lists.indexOf('luna'));
+    expect(screen.getByText('luna', { selector: 'p' })).toBeTruthy();
+    expect(screen.getByText('No team')).toBeTruthy();
+  });
+
   it('narrows the list as the owner searches', () => {
     render(<FleetList forest={forest} paused onOpen={() => {}} />);
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search companions…' }), { target: { value: 'agent_c' } });

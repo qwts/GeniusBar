@@ -82,7 +82,8 @@ describe('App', () => {
     expect(screen.getByRole('status').textContent).toContain('Can’t reach the background service');
     expect(screen.getAllByText(`Last updated · ${lastRefresh.toLocaleTimeString()}`)).toHaveLength(2);
     expect(screen.getAllByRole('button', { name: /Ready|Starting|Unavailable/ })).toHaveLength(3);
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Refresh' }));
     expect(onRefresh).toHaveBeenCalledOnce();
   });
 
@@ -135,7 +136,7 @@ describe('App setup', () => {
     preferenceActions.setDefaultHarness('opencode');
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher} isStatic />);
-    fireEvent.click(screen.getByRole('button', { name: 'Launch package…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Launch soul…' }));
     const harness = screen.getByLabelText('Harness') as HTMLInputElement;
     expect(harness.value).toBe('opencode');
     // The list only suggests: a harness that is in neither the census nor the known list still launches.
@@ -151,7 +152,7 @@ describe('App setup', () => {
   it('launches with agent comms on by default, or off when turned off first (#71)', () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher} isStatic />);
-    fireEvent.click(screen.getByRole('button', { name: 'Launch package…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Launch soul…' }));
     const comms = screen.getByRole('switch', { name: 'Agent comms' }) as HTMLInputElement;
     expect(comms.checked).toBe(true);
     fireEvent.click(comms);
@@ -164,7 +165,7 @@ describe('App setup', () => {
   it('launches a package from the footer, and shows a refusal inline', () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     const { rerender } = render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher} isStatic />);
-    fireEvent.click(screen.getByRole('button', { name: 'Launch package…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Launch soul…' }));
     fireEvent.change(screen.getByLabelText('Package'), { target: { value: '/souls/helper' } });
     fireEvent.change(screen.getByLabelText('Harness'), { target: { value: 'claude' } });
     fireEvent.submit(screen.getByRole('form', { name: 'Launch a companion package' }));
@@ -244,7 +245,7 @@ describe('App setup', () => {
   it('keeps contact AutoFill off the launch name field (#80)', () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher} isStatic />);
-    fireEvent.click(screen.getByRole('button', { name: 'Launch package…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Launch soul…' }));
     expect(screen.getByLabelText('Name').getAttribute('autocomplete')).toBe('off');
   });
 
@@ -253,7 +254,7 @@ describe('App setup', () => {
     render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher}
       openedPackage={{ id: 1, path: '/Downloads/broken.soul', checking: false, error: 'unreadable' }} isStatic />);
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Launch package…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Launch soul…' }));
     expect((screen.getByLabelText('Package') as HTMLInputElement).value).toBe('');
     expect(screen.queryByRole('alert')).toBeNull();
   });
@@ -310,7 +311,7 @@ describe('App setup', () => {
 
   it('offers no launch without a launcher', () => {
     render(<App census={sampleCensus} connection={sampleConnection} isStatic />);
-    expect(screen.queryByRole('button', { name: 'Launch package…' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Launch soul…' })).toBeNull();
   });
 
   it('shows update states in the panel and acts on them (#34)', () => {
@@ -320,15 +321,19 @@ describe('App setup', () => {
     expect(screen.getByRole('status', { name: 'Update' }).textContent).toContain('GeniusBar 0.1.1 is available.');
     fireEvent.click(screen.getByRole('button', { name: 'Install and restart' }));
     expect(act).toHaveBeenCalledOnce();
-    // While the update needs action, the footer check hides.
-    expect(screen.queryByRole('button', { name: 'Check for Updates…' })).toBeNull();
+    // While the update needs action, the footer check hides (and so does an empty ⋯).
+    expect(screen.queryByRole('button', { name: 'More' })).toBeNull();
     cleanup();
     render(<App connection={sampleConnection} updates={{ ...updates, status: { state: 'idle', version: null } }} isStatic />);
-    fireEvent.click(screen.getByRole('button', { name: 'Check for Updates…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Check for Updates…' }));
+    expect(screen.queryByRole('menu')).toBeNull();
     expect(act).toHaveBeenCalledTimes(2);
     cleanup();
-    render(<App connection={sampleConnection} updates={{ ...updates, status: { state: 'disabled', version: null } }} isStatic />);
-    expect(screen.queryByRole('button', { name: 'Check for Updates…' })).toBeNull();
+    render(<App connection={sampleConnection} updates={{ ...updates, status: { state: 'disabled', version: null } }} onRefresh={() => {}} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    expect(screen.queryByRole('menuitem', { name: 'Check for Updates…' })).toBeNull();
+    expect(screen.getByRole('menuitem', { name: 'Refresh' })).toBeTruthy();
   });
 
   it('keeps the update line above an open companion session in the popup', () => {
@@ -358,11 +363,17 @@ describe('App setup', () => {
   it('removes services only after the owner confirms, and shows a failure inline', async () => {
     const onRemove = vi.fn<() => Promise<void>>(async () => { throw new Error('launchctl would not unload'); });
     render(<App connection={sampleConnection} onRemoveServices={onRemove} isStatic />);
-    fireEvent.click(screen.getByRole('button', { name: 'Remove services…' }));
+    const menuRemove = () => {
+      fireEvent.click(screen.getByRole('button', { name: 'More' }));
+      const item = screen.getByRole('menuitem', { name: 'Remove services…' });
+      expect(item.className).toContain('text-destructive');
+      fireEvent.click(item);
+    };
+    menuRemove();
     expect(onRemove).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('group', { name: 'Remove services' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Remove services…' }));
+    menuRemove();
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'launchctl would not unload');
     onRemove.mockResolvedValueOnce(undefined);
@@ -614,7 +625,8 @@ describe('CLI tools and migration in the rebuilt shell', () => {
     expect(onSetup).toHaveBeenLastCalledWith(true);
     fireEvent.click(screen.getByRole('button', { name: 'Conservarlos' }));
     expect(onSetup).toHaveBeenLastCalledWith(false);
-    fireEvent.click(screen.getByRole('button', { name: 'Herramientas de línea de comandos…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Más' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Herramientas de línea de comandos…' }));
     await screen.findByRole('button', { name: 'Instalar' });
     expect(cliTools.status).toHaveBeenCalledOnce();
   });

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Plus } from 'lucide-react';
+import { FooterMenu } from './components/FooterMenu';
 import { CompanionSession } from './components/CompanionSession';
 import { CompanionWindow, Desktop } from './components/Desktop';
 import { FirstLaunch, type DevTools, type HarnessAuth, type Starter } from './components/FirstLaunch';
@@ -86,11 +88,13 @@ export function App(props: AppProps) {
   );
 }
 
+const footerIcon = 'rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground';
+
 function LanguageSelect() {
   const { lang, setLang, t } = useI18n();
   return (
     <select aria-label={t('language')} value={lang} onChange={(e) => setLang(e.target.value as Lang)}
-      className="h-6 rounded border border-input bg-muted px-1 text-[11px] text-muted-foreground">
+      className="h-6 w-[76px] rounded border border-input bg-transparent px-1.5 text-[11px] text-foreground">
       {LANGS.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
     </select>
   );
@@ -128,6 +132,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const activePackage = openedPackage && openedPackage.id !== dismissedPackage ? openedPackage : undefined;
   // Window mode's menu is a popover; it opens itself when it has news.
   const [menuOpen, setMenuOpen] = useState(false);
+  const [panel, setPanel] = useState<'cli' | 'remove' | null>(null);
   // An installed soul opened from Finder is that companion, never a new
   // launch (#80); one not in the roster yet keeps the form, and the daemon
   // relaunches it rather than spawning another.
@@ -153,6 +158,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   // the panel carries the whole update flow when there is no tray (#34).
   const canCheckUpdates = Boolean(updates && !updateNotice(updates.status) && updates.status.state !== 'disabled');
   const showStarter = canOfferStarter && (starterOpen || forest.length === 0);
+  const canLaunchPackage = Boolean(launcher && !showSetup && !launchingPackage);
+  const launchPackage = () => { setSelectedKey(null); setLaunchingPackage(true); };
   useEffect(() => { if (showSetup || showStarter) setMenuOpen(true); }, [showSetup, showStarter]);
   const { defaultHarness } = usePreferences();
   const launch = useMemo(() => launcher && {
@@ -190,7 +197,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
 
   const menu = (hiding?: Hiding) => (
     <>
-      <HealthHeader connection={connection}><LanguageSelect /></HealthHeader>
+      <HealthHeader connection={connection} />
       {updates && <UpdateNotice status={updates.status} onAction={updates.act} />}
       {showStarter && starter && launcher && (
         <section className="panel" aria-label={t('firstCompanion')}>
@@ -227,22 +234,36 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
           </div>
         </section>
       )}
-      {(footer || onRefresh || onRemoveServices || cliTools || (launch && !showSetup) || canCheckUpdates) && (
-        <footer className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border px-3.5 py-2">
-          {footer && <span className={`mr-auto ${footer.isError ? 'error small' : 'muted small'}`}>{footer.text}</span>}
-          {canCheckUpdates && (
-            <button type="button" className="link" onClick={() => updates?.act()}>{t('checkUpdates')}</button>
-          )}
-          {launch && !showSetup && !launchingPackage && (
-            <button type="button" className="link" onClick={() => { setSelectedKey(null); setLaunchingPackage(true); }}>
-              {t('launchPackage')}
-            </button>
-          )}
-          {cliTools && <CliTools api={cliTools} />}
-          {onRemoveServices && !setup?.running && <RemoveServices onRemove={onRemoveServices} />}
-          {onRefresh && <button type="button" className="link" onClick={() => { setMetricsRefresh((value) => value + 1); onRefresh(); }}>{t('refresh')}</button>}
-        </footer>
-      )}
+      {/* The design's footer icon row; the rest sits in the ⋯ menu (Lovable audit §4, §7). */}
+      <footer className="border-t border-border">
+        <div className="flex items-center gap-1.5 p-2 text-xs">
+          <LanguageSelect />
+          {footer && <span className={`min-w-0 truncate ${footer.isError ? 'error small' : 'muted small'}`}>{footer.text}</span>}
+          <span className="ml-auto flex shrink-0 items-center gap-0.5">
+            {canLaunchPackage && (
+              <button type="button" className={footerIcon} aria-label={t('launchPackage')} title={t('launchPackage')} onClick={launchPackage}>
+                <Plus className="size-3.5" aria-hidden />
+              </button>
+            )}
+            {(canCheckUpdates || canLaunchPackage || cliTools || onRemoveServices || onRefresh) && (
+              <FooterMenu items={[
+                canCheckUpdates && { label: t('checkUpdates'), run: () => updates?.act() },
+                canLaunchPackage && { label: t('launchPackage'), run: launchPackage },
+                cliTools && { label: t('cli.action'), run: () => setPanel('cli') },
+                (onRefresh || (onRemoveServices && !setup?.running)) && 'separator',
+                onRefresh && { label: t('refresh'), run: () => { setMetricsRefresh((value) => value + 1); onRefresh(); } },
+                onRemoveServices && !setup?.running && { label: t('remove.action'), run: () => setPanel('remove'), destructive: true },
+              ]} />
+            )}
+          </span>
+        </div>
+        {panel === 'cli' && cliTools && (
+          <div className="border-t border-border px-3 py-2"><CliTools api={cliTools} startOpen onClose={() => setPanel(null)} /></div>
+        )}
+        {panel === 'remove' && onRemoveServices && (
+          <div className="border-t border-border px-3 py-2"><RemoveServices onRemove={onRemoveServices} startConfirming onClose={() => setPanel(null)} /></div>
+        )}
+      </footer>
     </>
   );
 
