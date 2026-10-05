@@ -1,5 +1,6 @@
 // Dev-only preview (`npm run dev`, then /preview.html?mode=tray|window,
-// plus &select=<agent id> to open a companion):
+// plus &select=<agent id> to open a companion, or &open=<path> to open a
+// package as Finder would):
 // the app on the fixed fixtures, without Tauri. Not part of the build.
 import { StrictMode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -43,7 +44,8 @@ function Preview() {
     setDraft: (key, draft) => setComposers((c) => ({ ...c, [key]: { ...(c[key] ?? emptyComposer), draft } })),
     send: async () => {},
   };
-  const app = <App mode={mode} select={params.get('select')} census={census} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}
+  const opened = params.get('open');
+  const app = <App mode={mode} select={params.get('select')} openedPackage={opened ? { id: 1, path: opened, checking: false, error: null } : undefined} census={census} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}
     onRefresh={() => {}} onRemoveServices={async () => {}} updates={{ status: { state: 'idle', version: null }, act: () => {} }}
     launcher={{ state: { phase: 'idle' }, launch: async () => {}, reset: () => {} }} />;
   // The tray popup is a fixed 384×560 window (tauri.conf.json).

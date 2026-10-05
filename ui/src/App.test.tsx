@@ -137,14 +137,15 @@ describe('App setup', () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher} isStatic />);
     fireEvent.click(screen.getByRole('button', { name: 'Launch soul…' }));
-    const harness = screen.getByLabelText('Harness') as HTMLInputElement;
+    const harness = screen.getByLabelText('Harness') as HTMLSelectElement;
     expect(harness.value).toBe('opencode');
-    // The list only suggests: a harness that is in neither the census nor the known list still launches.
-    const suggested = [...document.getElementById(harness.getAttribute('list')!)!.querySelectorAll('option')].map((o) => o.value);
-    expect(suggested).toEqual(expect.arrayContaining(['claude', 'opencode', 'muse', 'codex']));
-    expect(suggested).not.toContain('my-own-harness');
+    // The list only suggests: "Other…" launches a harness that is in neither the census nor the known list.
+    const listed = [...harness.options].map((o) => o.value);
+    expect(listed).toEqual(expect.arrayContaining(['claude', 'opencode', 'muse', 'codex', '__other']));
+    expect(listed).not.toContain('my-own-harness');
     fireEvent.change(screen.getByLabelText('Package'), { target: { value: '/souls/helper' } });
-    fireEvent.change(harness, { target: { value: 'my-own-harness' } });
+    fireEvent.change(harness, { target: { value: '__other' } });
+    fireEvent.change(within(screen.getByRole('dialog', { name: 'Launch a new companion' })).getByLabelText('Harness command'), { target: { value: 'my-own-harness' } });
     fireEvent.submit(screen.getByRole('form', { name: 'Launch a companion package' }));
     expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { package: '/souls/helper' }, harness: 'my-own-harness', name: '', comms: true });
   });
@@ -477,14 +478,38 @@ describe('App window mode', () => {
     expect(within(desktop()).getAllByRole('button', { name: 'Collapse team' }).length).toBeGreaterThan(0);
   });
 
-  it('opens the launch form from the desktop, and slims a solo card', () => {
+  it('opens the launch dialog from the desktop, and slims a solo card', () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     render(<App mode="window" census={sampleCensus} connection={sampleConnection} launcher={launcher} isStatic />);
     expect(within(desktop()).getByRole('region', { name: 'old' }).style.width).toBe('200px');
     expect(within(desktop()).getByRole('region', { name: 'luna' }).style.width).toBe('300px');
     fireEvent.click(within(desktop()).getByRole('button', { name: 'Launch companion' }));
-    const menu = screen.getByRole('dialog', { name: 'GeniusBar menu' });
-    expect(within(menu).getByRole('region', { name: 'Launch a companion package' })).toBeTruthy();
+    const dialog = screen.getByRole('dialog', { name: 'Launch a new companion' });
+    expect(within(dialog).getByRole('form', { name: 'Launch a companion package' })).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'GeniusBar menu' })).toBeNull();
+    // Comms says what it means, and Cancel closes the dialog.
+    expect(within(dialog).getByText('Managed')).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('switch', { name: 'Agent comms' }));
+    expect(within(dialog).getByText('Unmanaged')).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog', { name: 'Launch a new companion' })).toBeNull();
+  });
+
+  it('picks an account from the census, or takes another (Lovable 20.03.51)', () => {
+    const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    const census = [...sampleCensus, { ...sampleCensus[0], agentId: 'agent_z', account: 'zed' }];
+    render(<App mode="window" census={census} connection={sampleConnection} launcher={launcher} isStatic />);
+    fireEvent.click(within(desktop()).getByRole('button', { name: 'Launch companion' }));
+    const dialog = screen.getByRole('dialog', { name: 'Launch a new companion' });
+    const account = within(dialog).getByLabelText('Account') as HTMLSelectElement;
+    expect(account.value).toBe('');
+    expect([...account.options].map((o) => o.textContent)).toEqual(['Choose an account', 'user', 'zed', 'Other account…']);
+    fireEvent.change(account, { target: { value: '__other' } });
+    fireEvent.change(within(dialog).getByLabelText('Other account'), { target: { value: 'gb-agent' } });
+    fireEvent.change(within(dialog).getByLabelText('Package'), { target: { value: '/souls/helper.soul' } });
+    fireEvent.change(within(dialog).getByLabelText('Harness'), { target: { value: 'claude' } });
+    fireEvent.submit(within(dialog).getByRole('form'));
+    expect(launcher.launch).toHaveBeenCalledWith({ account: 'gb-agent', target: { package: '/souls/helper.soul' }, harness: 'claude', name: '', comms: true });
   });
 
   it('has no Launch button without a launcher', () => {

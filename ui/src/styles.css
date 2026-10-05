@@ -133,12 +133,27 @@
   .setup li.done, .setup li.running { color: var(--foreground); }
   .setup li.done svg { color: var(--success); }
   .setup li.running svg { color: var(--primary); }
-  .first-launch, .launch { display: grid; gap: 8px; }
+  .first-launch { display: grid; gap: 8px; }
   .first-launch p, .launch p { margin: 0; }
-  .launch label, .first-launch label { display: grid; grid-template-columns: 64px 1fr; gap: 8px; align-items: center; }
-  .launch label > span, .first-launch label > span { color: var(--muted-foreground); font-size: 12px; }
+  .first-launch label { display: grid; grid-template-columns: 64px 1fr; gap: 8px; align-items: center; }
+  .first-launch label > span { color: var(--muted-foreground); font-size: 12px; }
+  /* The launch dialog's numbered steps (Lovable 20.03.51). */
+  .launch { display: grid; gap: 20px; }
+  .launch fieldset { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }
+  .launch legend { padding: 0; }
   .launch input[readonly] { border-color: transparent; background: transparent; padding-left: 0; }
-  .launch .launch-step { margin: 4px 0 0; font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted-foreground); }
+  /* Switches are drawn as the design's toggle; still a checkbox underneath. */
+  .gb input[type="checkbox"][role="switch"] {
+    appearance: none; position: relative; flex-shrink: 0; width: 36px; height: 20px; margin: 0;
+    border-radius: 9999px; background: var(--input); transition: background 0.15s;
+  }
+  .gb input[type="checkbox"][role="switch"]::before {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+    border-radius: 9999px; background: var(--background); transition: transform 0.15s;
+  }
+  .gb input[type="checkbox"][role="switch"]:checked { background: var(--primary); }
+  .gb input[type="checkbox"][role="switch"]:checked::before { transform: translateX(16px); }
+  .gb input[type="checkbox"][role="switch"]:disabled { opacity: 0.5; }
 
   /* Form controls and plain buttons get the design's look by default. */
   .gb input:not([type]), .gb input[type="text"], .gb input[type="search"], .gb textarea, .gb select {
