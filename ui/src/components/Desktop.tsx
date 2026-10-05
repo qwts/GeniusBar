@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react';
-import { ChevronDown, EyeOff, MessageCircle, Plus, Users, X } from 'lucide-react';
+import { ChevronDown, EyeOff, MessageCircle, Plus, Shield, ShieldOff, Users, X } from 'lucide-react';
 import { displayHarness, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
 import { companionLabel, teamKeys, teamsOf, type Team } from '../model/fleet';
 import { useI18n } from '../lib/i18n';
@@ -249,9 +249,14 @@ function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = 
   );
 }
 
-/** A movable window over the desktop, hosting one companion's session. */
-export function CompanionWindow({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+/**
+ * A movable window over the desktop, hosting one companion's session, with
+ * the design's chrome: a close dot, the Dudle, the mono name and harness,
+ * and a pill for the census's hardened flag when it is known.
+ */
+export function CompanionWindow({ soul, paused, onClose, children }: { soul: CensusRow; paused: boolean; onClose: () => void; children: ReactNode }) {
   const { t } = useI18n();
+  const title = displayName(soul);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const drag = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const close = useRef<HTMLButtonElement>(null);
@@ -260,12 +265,12 @@ export function CompanionWindow({ title, onClose, children }: { title: string; o
     <section
       role="dialog"
       aria-label={title}
-      className="absolute top-1/2 left-1/2 z-30 flex h-[min(620px,calc(100%-3rem))] w-[min(720px,calc(100%-1rem))] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
+      className="absolute top-1/2 left-1/2 z-30 flex h-[min(660px,calc(100%-3.5rem))] w-[min(780px,calc(100%-1rem))] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
       style={{ transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px))` }}
       onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
     >
       <div
-        className="flex cursor-grab touch-none items-center gap-2 border-b border-border bg-sidebar px-3 py-1.5 select-none active:cursor-grabbing"
+        className="flex cursor-grab touch-none items-center gap-2 border-b border-border bg-sidebar px-3 py-2 select-none active:cursor-grabbing"
         onPointerDown={(e) => {
           if ((e.target as HTMLElement).closest('button')) return;
           e.currentTarget.setPointerCapture(e.pointerId);
@@ -278,10 +283,18 @@ export function CompanionWindow({ title, onClose, children }: { title: string; o
         onPointerUp={() => { drag.current = null; }}
       >
         <button ref={close} type="button" onClick={onClose} aria-label={t('closeWindow')} title={t('closeWindow')}
-          className="grid size-3.5 place-items-center rounded-full bg-destructive/80 text-destructive-foreground hover:bg-destructive">
+          className="grid size-4 place-items-center rounded-full bg-destructive/80 text-destructive-foreground hover:bg-destructive">
           <X className="size-2.5" aria-hidden />
         </button>
-        <span className="truncate font-mono text-[11px] text-muted-foreground">{title}</span>
+        <SoulDudle soul={soul} size={20} paused={paused} />
+        <span className="truncate font-mono text-xs font-semibold text-foreground">{title}</span>
+        <span className="truncate text-[11px] text-muted-foreground">{displayHarness(soul)}</span>
+        {typeof soul.hardened === 'boolean' && (
+          <span className={`ml-auto flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${soul.hardened ? 'border-success/50 text-success' : 'border-border text-muted-foreground'}`}>
+            {soul.hardened ? <Shield className="size-3" aria-hidden /> : <ShieldOff className="size-3" aria-hidden />}
+            {soul.hardened ? t('pill.hardened') : t('pill.notHardened')}
+          </span>
+        )}
       </div>
       <div className="flex min-h-0 flex-1 flex-col">{children}</div>
     </section>

@@ -1,4 +1,5 @@
-// Dev-only preview (`npm run dev`, then /preview.html?mode=tray|window):
+// Dev-only preview (`npm run dev`, then /preview.html?mode=tray|window,
+// plus &select=<agent id> to open a companion):
 // the app on the fixed fixtures, without Tauri. Not part of the build.
 import { StrictMode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -32,7 +33,8 @@ const { state } = mergeIncoming(emptyChat, [
 ]);
 
 function Preview() {
-  const mode = (new URLSearchParams(location.search).get('mode') === 'window' ? 'window' : 'tray') as AppMode;
+  const params = new URLSearchParams(location.search);
+  const mode = (params.get('mode') === 'window' ? 'window' : 'tray') as AppMode;
   const [composers, setComposers] = useState<ChatApi['composers']>({});
   const chat: ChatApi = {
     chat: state,
@@ -41,7 +43,7 @@ function Preview() {
     setDraft: (key, draft) => setComposers((c) => ({ ...c, [key]: { ...(c[key] ?? emptyComposer), draft } })),
     send: async () => {},
   };
-  const app = <App mode={mode} census={census} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}
+  const app = <App mode={mode} select={params.get('select')} census={census} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}
     onRefresh={() => {}} onRemoveServices={async () => {}} updates={{ status: { state: 'idle', version: null }, act: () => {} }}
     launcher={{ state: { phase: 'idle' }, launch: async () => {}, reset: () => {} }} />;
   // The tray popup is a fixed 384×560 window (tauri.conf.json).

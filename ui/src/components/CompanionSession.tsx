@@ -78,22 +78,22 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
         if (e.key === 'Escape') onClose();
       }}
     >
-      <div className="flex items-center gap-2.5 border-b border-border px-3 py-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-2">
         {showBack && (
           <button ref={back} type="button" aria-label={t('back')} title={t('back')} onClick={onClose}
             className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground">
             <ArrowLeft className="size-4" aria-hidden />
           </button>
         )}
-        <SoulDudle soul={soul} size={32} paused={paused} label={t('avatarFor', { name })} />
-        <div className="min-w-0">
-          <h2 className="m-0 truncate text-sm font-semibold">{name}</h2>
-          <p className="m-0 truncate text-[11px] text-muted-foreground">
+        <SoulDudle soul={soul} size={34} paused={paused} label={t('avatarFor', { name })} />
+        <div className="min-w-[9rem] flex-1">
+          <h2 className="m-0 truncate text-base font-semibold">{name}</h2>
+          <p className="m-0 truncate text-xs text-muted-foreground">
             {displayHarness(soul)} · {t(`presence.${soul.presence}`)}
           </p>
         </div>
-      </div>
-      <div role="tablist" aria-label={name} className="flex gap-1 border-b border-border px-2 pt-1"
+      {/* The design's segmented tabs, at the header's right. */}
+      <div role="tablist" aria-label={name} className="ml-auto flex gap-0.5 rounded-lg bg-muted p-1"
         onKeyDown={(e) => {
           const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
           if (!step) return;
@@ -111,12 +111,13 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
             aria-controls={`${ids}-panel`}
             tabIndex={active === id ? 0 : -1}
             onClick={() => setTab(id)}
-            className={`-mb-px border-b-2 px-2.5 py-1.5 text-xs font-medium ${active === id
-              ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
+            className={`rounded-md px-2.5 py-1 text-xs font-medium ${active === id
+              ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
           >
             {t(`tab.${id}`)}
           </button>
         ))}
+      </div>
       </div>
       <div id={`${ids}-panel`} role="tabpanel" aria-labelledby={`${ids}-tab-${active}`}
         className={`flex min-h-0 flex-1 flex-col ${active === 'chat' ? '' : 'overflow-y-auto'}`}>

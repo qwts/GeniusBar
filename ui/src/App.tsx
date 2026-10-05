@@ -14,7 +14,7 @@ import { SetupPanel } from './components/SetupPanel';
 import { UpdateNotice } from './components/UpdateNotice';
 import { I18nProvider, LANGS, useI18n, type Lang } from './lib/i18n';
 import { conversationOf, emptyComposer, unreadOf } from './model/chat';
-import { allSouls, buildSoulForest, displayName, findSoul, soulKey, type CensusRow } from './model/census';
+import { allSouls, buildSoulForest, findSoul, soulKey, type CensusRow } from './model/census';
 import { needsSetup, type ExistingServices, type SetupState } from './model/setup';
 import { disconnected, emptyRosterText, footerStatus, healthHeader, type ConnectionSnapshot } from './model/status';
 import { updateNotice } from './model/updates';
@@ -296,7 +296,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
       <Desktop forest={forest} layout={layout} paused={paused} unreadOf={unread} selectedKey={openKey} onOpen={open}
         notice={notice} onLaunch={launch && !showSetup ? () => { setSelectedKey(null); setLaunchingPackage(true); setMenuOpen(true); } : undefined}>
         {selected && session && (
-          <CompanionWindow title={displayName(selected)} onClose={() => setSelectedKey(null)}>{session}</CompanionWindow>
+          <CompanionWindow soul={selected} paused={paused} onClose={() => setSelectedKey(null)}>{session}</CompanionWindow>
         )}
       </Desktop>
     </div>
