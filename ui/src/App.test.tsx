@@ -495,6 +495,22 @@ describe('App window mode', () => {
     expect(screen.queryByRole('dialog', { name: 'Launch a new companion' })).toBeNull();
   });
 
+  it('closes the launch dialog on a backdrop click, but not on a drag out of a field', () => {
+    const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} launcher={launcher} isStatic />);
+    fireEvent.click(within(desktop()).getByRole('button', { name: 'Launch companion' }));
+    const dialog = screen.getByRole('dialog', { name: 'Launch a new companion' });
+    const backdrop = dialog.parentElement!;
+    // Selecting text in the path field and releasing over the backdrop keeps the dialog.
+    fireEvent.pointerDown(within(dialog).getByLabelText('Package'));
+    fireEvent.click(backdrop);
+    expect(screen.getByRole('dialog', { name: 'Launch a new companion' })).toBeTruthy();
+    // A press and release on the backdrop closes it.
+    fireEvent.pointerDown(backdrop);
+    fireEvent.click(backdrop);
+    expect(screen.queryByRole('dialog', { name: 'Launch a new companion' })).toBeNull();
+  });
+
   it('picks an account from the census, or takes another (Lovable 20.03.51)', () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     const census = [...sampleCensus, { ...sampleCensus[0], agentId: 'agent_z', account: 'zed' }];
