@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowLeft, Info, Radio, X } from 'lucide-react';
 import { runtimeMetrics, setSoulComms, soulComms, type RuntimeMetrics, type RuntimeObservation, type SoulComms } from '../bridge';
 import {
@@ -328,8 +329,13 @@ export function InfoButton({ soul }: { soul: CensusRow }) {
         className="rounded p-1 text-muted-foreground hover:text-foreground">
         <Info className="size-3.5" aria-hidden />
       </button>
-      {open && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}>
+      {/* Portalled to the body: the companion window's transform would otherwise
+          contain the fixed overlay, and a React pointerdown bubbling from the
+          sheet would start a drag in the title bar that holds this button. */}
+      {open && createPortal(
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
+          onPointerDown={(e) => e.stopPropagation()}>
           <section role="dialog" aria-modal="true" aria-label={`${t('details.title')} · ${name}`}
             onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } }}
             className="relative grid w-full max-w-md gap-3 rounded-lg border border-border bg-popover p-5 shadow-2xl">
@@ -345,7 +351,8 @@ export function InfoButton({ soul }: { soul: CensusRow }) {
               <CommsRow soul={soul} />
             </div>
           </section>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
