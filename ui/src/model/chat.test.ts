@@ -272,6 +272,33 @@ describe('aggregate memory bounds (#93)', () => {
     expect(bounded.conversations['account/big'].entries).toHaveLength(MAX_AGGREGATE_ENTRIES);
   });
 
+  it('keeps unread intact when only older, already-read entries are evicted', () => {
+    // unread describes the newest entries, so evicting the oldest ones from a
+    // conversation must not lower it.
+    const conversations: Record<string, Conversation> = {};
+    const ids = new Set<string>();
+    const smallEntries: ChatEntry[] = [];
+    for (let i = 0; i < 5; i++) {
+      const id = `small_${i}`;
+      smallEntries.push(entry(id, i));
+      ids.add(id);
+    }
+    conversations['account/small'] = { entries: smallEntries, unread: 2 };
+    const bigEntries: ChatEntry[] = [];
+    for (let i = 0; i < MAX_AGGREGATE_ENTRIES - 2; i++) {
+      const id = `big_${i}`;
+      bigEntries.push(entry(id, 1_000_000 + i));
+      ids.add(id);
+    }
+    conversations['account/big'] = { entries: bigEntries, unread: 0 };
+    const bounded = enforceAggregateBounds({ conversations, ids });
+    // Total was MAX + 3, so the three oldest (small_0..2) are evicted.
+    const small = bounded.conversations['account/small'];
+    expect(small.entries.map((e) => e.id)).toEqual(['small_3', 'small_4']);
+    expect(small.unread).toBe(2);
+    expect(bounded.ids.has('small_0')).toBe(false);
+  });
+
   it('is a no-op when within bounds', () => {
     const state = buildState(5, 10);
     expect(enforceAggregateBounds(state)).toBe(state);

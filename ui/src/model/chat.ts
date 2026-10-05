@@ -201,9 +201,6 @@ export function sendErrorText(code: string, _message: string): string {
   }
 }
 
-// Persistence. Acknowledged messages leave the broker mailbox, so the app's
-// copy is the only one: it is saved before each ack and reloaded at start.
-
 // ---- Aggregate bounds (#93) -----------------------------------------------
 
 /** Hard cap on the number of conversations retained in memory. */
@@ -266,8 +263,7 @@ export function enforceAggregateBounds(state: ChatState): ChatState {
     for (const [k, c] of Object.entries(convs)) {
       const entries = c.entries.filter((e) => !evictIds.has(e.id));
       if (entries.length === 0) continue;
-      const evictedUnread = c.entries.filter((e) => evictIds.has(e.id)).length;
-      nextConvs[k] = { entries, unread: Math.max(0, c.unread - evictedUnread) };
+      nextConvs[k] = { entries, unread: Math.min(c.unread, entries.length) };
       for (const e of entries) nextIds.add(e.id);
     }
     convs = nextConvs;
@@ -278,9 +274,7 @@ export function enforceAggregateBounds(state: ChatState): ChatState {
   return { conversations: convs, ids };
 }
 
-// ---- Persistence ----------------------------------------------------------
-
-// Acknowledged messages leave the broker mailbox, so the app's
+// Persistence. Acknowledged messages leave the broker mailbox, so the app's
 // copy is the only one: it is saved before each ack and reloaded at start.
 
 /** Entries kept per conversation on disk; older ones are dropped. */
