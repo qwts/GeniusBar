@@ -254,7 +254,12 @@ function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = 
  * the design's chrome: a close dot, the Dudle, the mono name and harness,
  * and a pill for the census's hardened flag when it is known.
  */
-export function CompanionWindow({ soul, paused, onClose, children }: { soul: CensusRow; paused: boolean; onClose: () => void; children: ReactNode }) {
+export function CompanionWindow({ soul, paused, onClose, actions, children }: {
+  soul: CensusRow; paused: boolean; onClose: () => void;
+  /** The chrome's right-hand controls after the pill, such as ⓘ. */
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
   const { t } = useI18n();
   const title = displayName(soul);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -288,13 +293,14 @@ export function CompanionWindow({ soul, paused, onClose, children }: { soul: Cen
         </button>
         <SoulDudle soul={soul} size={20} paused={paused} />
         <span className="truncate font-mono text-xs font-semibold text-foreground">{title}</span>
-        <span className="truncate text-[11px] text-muted-foreground">{displayHarness(soul)}</span>
+        <span className="mr-auto truncate text-[11px] text-muted-foreground">{displayHarness(soul)}</span>
         {typeof soul.hardened === 'boolean' && (
-          <span className={`ml-auto flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${soul.hardened ? 'border-success/50 text-success' : 'border-border text-muted-foreground'}`}>
+          <span className={`flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${soul.hardened ? 'border-success/50 text-success' : 'border-border text-muted-foreground'}`}>
             {soul.hardened ? <Shield className="size-3" aria-hidden /> : <ShieldOff className="size-3" aria-hidden />}
             {soul.hardened ? t('pill.hardened') : t('pill.notHardened')}
           </span>
         )}
+        {actions}
       </div>
       <div className="flex min-h-0 flex-1 flex-col">{children}</div>
     </section>
