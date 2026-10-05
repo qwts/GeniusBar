@@ -1,6 +1,6 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { displayName, type CensusRow } from '../model/census';
-import { canLaunch, harnessOptions, type LaunchState } from '../model/launch';
+import { canLaunch, harnessOptions, MAX_HARNESS, type LaunchState } from '../model/launch';
 import { useI18n } from '../lib/i18n';
 import type { LaunchApi } from '../useLaunch';
 
@@ -24,6 +24,8 @@ interface LaunchFormProps {
    * and the launch leaves the soul's own setting.
    */
   initialComms?: boolean;
+  /** Shown as Cancel beside Launch, when the form sits in a dialog. */
+  onCancel?: () => void;
 }
 
 export function LaunchStatus({ state }: { state: LaunchState }) {
@@ -56,28 +58,35 @@ export function LaunchStatus({ state }: { state: LaunchState }) {
   }
 }
 
+const OTHER = '__other';
+const legend = 'mb-2 font-mono text-[11px] font-semibold uppercase tracking-wide text-muted-foreground';
+const field = 'h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm text-foreground';
+
 /**
- * Launch form for an existing soul or a soul package, in three steps:
- * what to launch, the harness that runs it, and the account it runs as.
+ * Launch form for an existing soul or a soul package, drawn as Lovable's
+ * launch dialog (20.03.51) in four steps: the soul, the harness that runs
+ * it, the account it runs as, and its agent comms. Harness and account are
+ * picked from what GeniusBar knows, and "Other…" still takes any value.
  * One launch at a time; the result stays on screen and is never retried.
  */
 export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness = null, initialPackagePath = '',
-  checkingPackage = false, packageError: initialPackageError = null, initialComms }: LaunchFormProps) {
+  checkingPackage = false, packageError: initialPackageError = null, initialComms, onCancel }: LaunchFormProps) {
   const { t } = useI18n();
   const [account, setAccount] = useState(soul?.account ?? (accounts.length === 1 ? accounts[0] : ''));
+  const [otherAccount, setOtherAccount] = useState(!soul && accounts.length === 0);
   const [packagePath, setPackagePath] = useState(initialPackagePath);
   const [packageError, setPackageError] = useState(initialPackageError);
   const [harness, setHarness] = useState(soul?.harness ?? defaultHarness ?? '');
+  const [otherHarness, setOtherHarness] = useState(false);
   const [name, setName] = useState('');
   // Follows the soul's setting as it arrives, until the owner changes it here.
   const [chosenComms, setComms] = useState<boolean | undefined>(undefined);
   const comms = chosenComms ?? initialComms ?? (soul ? undefined : true);
   // The launcher is shared: show its result only in the form that started it.
   const [started, setStarted] = useState(false);
-  const ids = useId();
   const ready = canLaunch(launcher.state);
   const what = soul ? displayName(soul) : t('launch.aPackage');
-  const options = harnessOptions(harnesses, soul?.harness);
+  const options = harnessOptions(harnesses, soul?.harness, defaultHarness);
 
   useEffect(() => setPackageError(initialPackageError), [initialPackageError]);
 
@@ -98,56 +107,93 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
         });
       }}
     >
-      <datalist id={`${ids}-accounts`}>{accounts.map((a) => <option key={a} value={a} />)}</datalist>
-      {/* Free text, as before: any harness string can be launched; the list only suggests. */}
-      <datalist id={`${ids}-harnesses`}>{options.map((h) => <option key={h.id} value={h.id}>{h.label}</option>)}</datalist>
-      <h3 className="launch-step">{t('launch.step.what')}</h3>
-      {/* TODO(#65): offer SOP-provided soul templates here once agent-bot lists them. */}
-      {soul ? (
-        <p className="text-sm">{displayName(soul)}</p>
-      ) : (
-        <label>
-          <span>{t('launch.package')}</span>
-          <input value={packagePath} placeholder={t('launch.packagePlaceholder')} onChange={(e) => {
-            setPackagePath(e.target.value);
-            setPackageError(null);
-          }} />
+      <fieldset>
+        <legend className={legend}>{t('launch.step.what')}</legend>
+        {/* TODO(#65): offer SOP-provided soul templates (the design's presets) once agent-bot lists them. */}
+        {soul ? (
+          <p className="text-sm font-medium">{displayName(soul)}</p>
+        ) : (
+          <input value={packagePath} aria-label={t('launch.package')} placeholder={t('launch.packagePlaceholder')} className={field}
+            onChange={(e) => {
+              setPackagePath(e.target.value);
+              setPackageError(null);
+            }} />
+        )}
+        <label className="grid gap-1">
+          <span className="text-sm font-medium">{t('launch.name')}</span>
+          {/* Not a person's name: keep the web view from offering contact AutoFill (#80). */}
+          <input value={name} placeholder={t('launch.nameOptional')} autoComplete="off" className={field} onChange={(e) => setName(e.target.value)} />
         </label>
-      )}
-      <label>
-        <span>{t('launch.name')}</span>
-        {/* Not a person's name: keep the web view from offering contact AutoFill (#80). */}
-        <input value={name} placeholder={t('launch.nameOptional')} autoComplete="off" onChange={(e) => setName(e.target.value)} />
-      </label>
+      </fieldset>
+      <fieldset>
+        <legend className={legend}>{t('launch.step.harness')}</legend>
+        {/* Free text, as before: "Other…" launches any harness string; the list only suggests. */}
+        <select aria-label={t('field.harness')} value={otherHarness ? OTHER : harness} className={field}
+          onChange={(e) => {
+            const other = e.target.value === OTHER;
+            setOtherHarness(other);
+            setHarness(other ? '' : e.target.value);
+          }}>
+          {!harness && !otherHarness && <option value="" disabled>{t('launch.harnessPick')}</option>}
+          {options.map((h) => <option key={h.id} value={h.id}>{h.label}{h.id === defaultHarness ? ` · ${t('launch.harnessDefault')}` : ''}</option>)}
+          <option value={OTHER}>{t('harness.other')}</option>
+        </select>
+        {otherHarness && (
+          <input type="text" aria-label={t('harness.otherLabel')} placeholder={t('harness.otherPlaceholder')} value={harness}
+            maxLength={MAX_HARNESS} className={`${field} font-mono text-xs`} onChange={(e) => setHarness(e.target.value)} />
+        )}
+        <p className="text-xs text-muted-foreground">{t('launch.harnessHint')}</p>
+      </fieldset>
+      <fieldset>
+        <legend className={legend}>{t('launch.step.account')}</legend>
+        {soul ? (
+          <input value={account} readOnly aria-label={t('field.account')} className={`${field} font-mono text-xs`} />
+        ) : (
+          <>
+            {accounts.length > 0 && (
+              <select aria-label={t('field.account')} value={otherAccount ? OTHER : account} className={`${field} font-mono text-xs`}
+                onChange={(e) => {
+                  const other = e.target.value === OTHER;
+                  setOtherAccount(other);
+                  setAccount(other ? '' : e.target.value);
+                }}>
+                {!account && !otherAccount && <option value="" disabled>{t('launch.accountPick')}</option>}
+                {accounts.map((a) => <option key={a} value={a}>{a}</option>)}
+                <option value={OTHER}>{t('launch.accountOther')}</option>
+              </select>
+            )}
+            {otherAccount && (
+              <input type="text" value={account} aria-label={accounts.length > 0 ? t('launch.accountOtherLabel') : t('field.account')}
+                placeholder={t('launch.accountPlaceholder')} autoComplete="off" className={`${field} font-mono text-xs`}
+                onChange={(e) => setAccount(e.target.value)} />
+            )}
+          </>
+        )}
+        {/* TODO(#66): sandboxing through persona accounts; until then this states who it runs as. */}
+        <p className="font-mono text-xs text-muted-foreground">{account.trim() ? t('launch.runsAs', { account: account.trim() }) : t('launch.runsAsNone')}</p>
+      </fieldset>
       {comms !== undefined && (
-        <>
-          <label>
-            <span>{t('launch.comms')}</span>
-            <input type="checkbox" role="switch" className="justify-self-start" checked={comms} onChange={(e) => setComms(e.target.checked)} />
+        <fieldset>
+          <legend className={legend}>{t('launch.step.comms')}</legend>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" role="switch" aria-label={t('launch.comms')} checked={comms} onChange={(e) => setComms(e.target.checked)} />
+            {comms ? t('comms.managed') : t('comms.unmanaged')}
           </label>
-          <p className="muted small">{t('launch.commsHint')}</p>
-        </>
+          <p className="text-xs text-muted-foreground">{t('launch.commsHint')}</p>
+        </fieldset>
       )}
-      <h3 className="launch-step">{t('launch.step.harness')}</h3>
-      <label>
-        <span>{t('field.harness')}</span>
-        <input value={harness} list={`${ids}-harnesses`} placeholder={t('launch.harnessPick')}
-          onChange={(e) => setHarness(e.target.value)} />
-      </label>
-      <p className="muted small">{t('launch.harnessHint')}</p>
-      <h3 className="launch-step">{t('launch.step.account')}</h3>
-      <label>
-        <span>{t('field.account')}</span>
-        <input value={account} readOnly={Boolean(soul)} list={`${ids}-accounts`} onChange={(e) => setAccount(e.target.value)} />
-      </label>
-      {/* TODO(#66): sandboxing through persona accounts; until then this states who it runs as. */}
-      <p className="muted small">{account.trim() ? t('launch.runsAs', { account: account.trim() }) : t('launch.runsAsNone')}</p>
       {checkingPackage && <p className="muted small" role="status">{t('launch.checking')}</p>}
       {packageError && <p className="error small" role="alert">{packageError}</p>}
       {started ? <LaunchStatus state={launcher.state} />
         : !ready && <p className="muted small">{t('launch.busy')}</p>}
-      <div className="detail-actions">
-        <button type="submit" disabled={!ready || checkingPackage || Boolean(packageError)}>{t('launch.go')}</button>
+      <div className="flex items-center justify-end gap-2 pt-1">
+        {onCancel && (
+          <button type="button" onClick={onCancel} className="h-9 rounded-md px-4 text-sm font-medium hover:bg-accent">{t('cancel')}</button>
+        )}
+        <button type="submit" disabled={!ready || checkingPackage || Boolean(packageError)}
+          className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+          {t('launch.go')}
+        </button>
       </div>
     </form>
   );

@@ -7,6 +7,7 @@ import { FirstLaunch, type DevTools, type HarnessAuth, type Starter } from './co
 import { FleetList, type Hiding } from './components/FleetList';
 import { HealthHeader } from './components/HealthHeader';
 import { LaunchForm } from './components/LaunchForm';
+import { LaunchModal } from './components/LaunchModal';
 import { MenuBar } from './components/MenuBar';
 import { CliTools, type CliToolsApi } from './components/CliTools';
 import { RemoveServices } from './components/RemoveServices';
@@ -148,7 +149,6 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     }
     setSelectedKey(null);
     setLaunchingPackage(true);
-    setMenuOpen(true);
   }, [openedPackage?.id, openedSoul && soulKey(openedSoul)]);
   // The first launch stays open from the click until closed, so its result
   // and sign-in remain after the new soul fills the roster.
@@ -159,7 +159,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const canCheckUpdates = Boolean(updates && !updateNotice(updates.status) && updates.status.state !== 'disabled');
   const showStarter = canOfferStarter && (starterOpen || forest.length === 0);
   const canLaunchPackage = Boolean(launcher && !showSetup && !launchingPackage);
-  const launchPackage = () => { setSelectedKey(null); setLaunchingPackage(true); };
+  const launchPackage = () => { setSelectedKey(null); setLaunchingPackage(true); setMenuOpen(false); };
   useEffect(() => { if (showSetup || showStarter) setMenuOpen(true); }, [showSetup, showStarter]);
   const { defaultHarness } = usePreferences();
   const launch = useMemo(() => launcher && {
@@ -217,23 +217,6 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
           empty={!showStarter && empty && <p className="muted empty">{empty}</p>} />
       )}
       {launch && !showSetup && <DefaultHarness harnesses={launch.harnesses} />}
-      {launch && launchingPackage && !showSetup && (
-        <section className="panel border-t" aria-label={t('launchPackageTitle')}>
-          <h2>{t('launchPackageTitle')}</h2>
-          <LaunchForm key={activePackage?.id ?? 'manual'} {...launch}
-            initialPackagePath={activePackage?.path}
-            checkingPackage={activePackage?.checking}
-            packageError={activePackage?.error} />
-          <div className="detail-actions mt-2">
-            <button type="button" onClick={() => {
-              setLaunchingPackage(false);
-              if (openedPackage) setDismissedPackage(openedPackage.id);
-            }}>
-              {t('close')}
-            </button>
-          </div>
-        </section>
-      )}
       {/* The design's footer icon row; the rest sits in the ⋯ menu (Lovable audit §4, §7). */}
       <footer className="border-t border-border">
         <div className="flex items-center gap-1.5 p-2 text-xs">
@@ -267,11 +250,27 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     </>
   );
 
+  const closeLaunch = () => {
+    setLaunchingPackage(false);
+    if (openedPackage) setDismissedPackage(openedPackage.id);
+  };
+  // The design's launch dialog, over whichever mode is showing (Lovable 20.03.51).
+  const launchModal = launch && launchingPackage && !showSetup && (
+    <LaunchModal onClose={closeLaunch}>
+      <LaunchForm key={activePackage?.id ?? 'manual'} {...launch}
+        initialPackagePath={activePackage?.path}
+        checkingPackage={activePackage?.checking}
+        packageError={activePackage?.error}
+        onCancel={closeLaunch} />
+    </LaunchModal>
+  );
+
   if (mode === 'tray') {
     // An open session keeps the update line above it, as the panel did before R6.
     return (
       <main className="gb flex h-full flex-col bg-popover">
         {session ? <>{updates && <UpdateNotice status={updates.status} onAction={updates.act} />}{session}</> : menu()}
+        {launchModal}
       </main>
     );
   }
@@ -294,11 +293,12 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
         {menu({ hidden: layout.hidden, onToggle: layoutActions.setHidden, onToggleTeam: layoutActions.setTeamHidden, onShowAll: layoutActions.showAll })}
       </MenuBar>
       <Desktop forest={forest} layout={layout} paused={paused} unreadOf={unread} selectedKey={openKey} onOpen={open}
-        notice={notice} onLaunch={launch && !showSetup ? () => { setSelectedKey(null); setLaunchingPackage(true); setMenuOpen(true); } : undefined}>
+        notice={notice} onLaunch={launch && !showSetup ? () => { setSelectedKey(null); setLaunchingPackage(true); } : undefined}>
         {selected && session && (
           <CompanionWindow soul={selected} paused={paused} onClose={() => setSelectedKey(null)} actions={<InfoButton soul={selected} />}>{session}</CompanionWindow>
         )}
       </Desktop>
+      {launchModal}
     </div>
   );
 }
