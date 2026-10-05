@@ -502,10 +502,14 @@ describe('App window mode', () => {
     expect(win.contains(sheet)).toBe(false);
     expect(sheet.parentElement?.parentElement).toBe(document.body);
     const backdrop = sheet.parentElement!;
+    // jsdom has no pointer capture; the drag handler calls it before it moves anything.
+    const capture = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'setPointerCapture', { value: capture, configurable: true });
     fireEvent.pointerDown(backdrop, { pointerId: 1, clientX: 10, clientY: 10 });
     fireEvent.pointerMove(backdrop, { pointerId: 1, clientX: 90, clientY: 60 });
     fireEvent.pointerDown(sheet, { pointerId: 1, clientX: 10, clientY: 10 });
     fireEvent.pointerMove(sheet, { pointerId: 1, clientX: 90, clientY: 60 });
+    expect(capture).not.toHaveBeenCalled();
     expect(win.style.transform).toBe(before);
     fireEvent.keyDown(sheet, { key: 'Escape' });
     expect(screen.queryByRole('dialog', { name: 'Details · agent_c' })).toBeNull();
