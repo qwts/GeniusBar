@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Check, Circle, Download, Loader2, Terminal, TriangleAlert } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 
@@ -26,9 +26,15 @@ const errorText = (e: unknown, fallback: string) => {
  * can join without Homebrew. Another copy already there is shown and only
  * replaced after the user says so; Uninstall puts it back.
  */
-export function CliTools({ api }: { api: CliToolsApi }) {
+export function CliTools({ api, startOpen = false, onClose }: {
+  api: CliToolsApi;
+  /** Opened from a menu: starts on the panel, checking, and reports Close. */
+  startOpen?: boolean;
+  onClose?: () => void;
+}) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(startOpen);
+  const setOpen = (next: boolean) => { setOpenState(next); if (!next) onClose?.(); };
   const [status, setStatus] = useState<ToolsStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +44,7 @@ export function CliTools({ api }: { api: CliToolsApi }) {
     setError(null);
     try { setStatus(await action()); } catch (e) { setError(errorText(e, fallback)); } finally { setBusy(false); }
   };
+  useEffect(() => { if (startOpen) void run(api.status, t('cli.checkFailed')); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!open) {
     return (

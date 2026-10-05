@@ -8,9 +8,14 @@ type Phase = 'idle' | 'confirming' | 'removing' | 'removed';
  * deletes GeniusBar's broker and daemon login services. Pairings and chat
  * history stay; running setup again brings the services back.
  */
-export function RemoveServices({ onRemove }: { onRemove: () => Promise<void> }) {
+export function RemoveServices({ onRemove, startConfirming = false, onClose }: {
+  onRemove: () => Promise<void>;
+  /** Opened from a menu: starts at the question, and reports Cancel. */
+  startConfirming?: boolean;
+  onClose?: () => void;
+}) {
   const { t } = useI18n();
-  const [phase, setPhase] = useState<Phase>('idle');
+  const [phase, setPhase] = useState<Phase>(startConfirming ? 'confirming' : 'idle');
   const [error, setError] = useState<string | null>(null);
 
   if (phase === 'idle' || phase === 'removed') {
@@ -28,7 +33,7 @@ export function RemoveServices({ onRemove }: { onRemove: () => Promise<void> }) 
       <p className="small">{t('remove.confirm')}</p>
       {error && <p className="error small" role="alert">{error}</p>}
       <div className="detail-actions">
-        <button type="button" disabled={phase === 'removing'} onClick={() => setPhase('idle')}>{t('cancel')}</button>
+        <button type="button" disabled={phase === 'removing'} onClick={() => { setPhase('idle'); onClose?.(); }}>{t('cancel')}</button>
         <button
           type="button"
           disabled={phase === 'removing'}

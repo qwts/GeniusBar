@@ -40,6 +40,9 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty }: F
   const [query, setQuery] = useState('');
   const teams = useMemo(() => teamsOf(forest), [forest]);
   const shown = useMemo(() => searchTeams(teams, query), [teams, query]);
+  // As the design: teams under their lead's name, then souls with no team.
+  const ordered = useMemo(() => [...shown.filter((team) => team.members.length > 0), ...shown.filter((team) => !team.members.length)], [shown]);
+  const firstSolo = ordered.findIndex((team) => !team.members.length);
   // Whole teams by lead, unaffected by the search, for hiding a team at once.
   const teamOf = useMemo(() => new Map(teams.filter((team) => team.members.length > 0)
     .map((team) => [soulKey(team.lead), teamKeys(team)])), [teams]);
@@ -62,7 +65,7 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty }: F
           aria-description={t('showsDetails')}
           onClick={() => onOpen(soul)}
         >
-          <SoulDudle soul={soul} size={20} paused={paused} />
+          <SoulDudle soul={soul} size={18} paused={paused} />
           <span className="flex min-w-0 flex-col">
             <span className="truncate">{name}</span>
             {note && <span className="truncate text-[10px] text-muted-foreground">{note}</span>}
@@ -74,7 +77,7 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty }: F
                 {t('newCount', { count: unread })}
               </span>
             )}
-            <span className={`text-[11px] ${soul.presence === 'joined' ? 'text-success' : 'text-muted-foreground'}`}>
+            <span className="text-[11px] text-muted-foreground">
               {t(`presence.${soul.presence}`)}
             </span>
           </span>
@@ -124,9 +127,14 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty }: F
             />
           </div>
           <ul className="m-0 min-h-0 flex-1 list-none overflow-y-auto p-0 py-1">
-            {shown.length === 0 && <li className="px-3 py-2 text-sm text-muted-foreground">{t('bar.noResults')}</li>}
-            {shown.map((team) => (
+            {ordered.length === 0 && <li className="px-3 py-2 text-sm text-muted-foreground">{t('bar.noResults')}</li>}
+            {ordered.map((team, i) => (
               <li key={soulKey(team.lead)}>
+                {(team.members.length > 0 || i === firstSolo) && (
+                  <p className="m-0 px-3 pt-2 pb-0.5 font-mono text-[10px] tracking-wider text-muted-foreground uppercase" aria-hidden>
+                    {team.members.length > 0 ? displayName(team.lead) : t('team.none')}
+                  </p>
+                )}
                 <ul className="m-0 list-none p-0" aria-label={displayName(team.lead)}>
                   {team.leadMatches && row(team.lead, 0, teamOf.get(soulKey(team.lead)) ?? null)}
                   {team.members.map((m) => row(m.soul, m.depth))}
