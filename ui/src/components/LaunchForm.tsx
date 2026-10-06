@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { displayName, type CensusRow } from '../model/census';
-import { canLaunch, harnessOptions, MAX_HARNESS, type LaunchState } from '../model/launch';
+import { canLaunch, harnessOptions, MAX_HARNESS, preferredHarness, suggestedName, type LaunchState } from '../model/launch';
 import { useI18n } from '../lib/i18n';
 import type { LaunchApi } from '../useLaunch';
 
@@ -11,6 +11,9 @@ interface LaunchFormProps {
   harnesses: readonly string[];
   /** Pre-filled path when opened from Finder. */
   initialPackagePath?: string;
+  /** What the opened package's soul.json says (#120); prefilled until edited. */
+  packageName?: string;
+  preferredHarnesses?: readonly string[];
   /** File-open validation is performed by the shell using the Starter reader. */
   checkingPackage?: boolean;
   packageError?: string | null;
@@ -69,16 +72,26 @@ const field = 'h-9 w-full rounded-md border border-input bg-transparent px-3 tex
  * picked from what GeniusBar knows, and "Other…" still takes any value.
  * One launch at a time; the result stays on screen and is never retried.
  */
-export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness = null, initialPackagePath = '',
+export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness = null, initialPackagePath = '', packageName, preferredHarnesses,
   checkingPackage = false, packageError: initialPackageError = null, initialComms, onCancel }: LaunchFormProps) {
   const { t } = useI18n();
   const [account, setAccount] = useState(soul?.account ?? (accounts.length === 1 ? accounts[0] : ''));
   const [otherAccount, setOtherAccount] = useState(!soul && accounts.length === 0);
   const [packagePath, setPackagePath] = useState(initialPackagePath);
   const [packageError, setPackageError] = useState(initialPackageError);
-  const [harness, setHarness] = useState(soul?.harness ?? defaultHarness ?? '');
+  const packageHarness = soul ? null : preferredHarness(preferredHarnesses, harnesses);
+  const [harness, setHarness] = useState(soul?.harness ?? defaultHarness ?? packageHarness ?? '');
   const [otherHarness, setOtherHarness] = useState(false);
-  const [name, setName] = useState('');
+  const [name, setName] = useState(soul ? '' : suggestedName(packageName));
+  // The package's manifest arrives after the form opened (agent-bot's locate
+  // runs behind the Finder open): it prefills what the owner has not typed yet.
+  const [touched, setTouched] = useState<{ name?: boolean; harness?: boolean }>({});
+  useEffect(() => {
+    if (!soul && !touched.name) setName(suggestedName(packageName));
+  }, [packageName]);
+  useEffect(() => {
+    if (!soul && !touched.harness && !defaultHarness && packageHarness) setHarness(packageHarness);
+  }, [packageHarness]);
   // Follows the soul's setting as it arrives, until the owner changes it here.
   const [chosenComms, setComms] = useState<boolean | undefined>(undefined);
   const comms = chosenComms ?? initialComms ?? (soul ? undefined : true);
@@ -122,7 +135,8 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
         <label className="grid gap-1">
           <span className="text-sm font-medium">{t('launch.name')}</span>
           {/* Not a person's name: keep the web view from offering contact AutoFill (#80). */}
-          <input value={name} placeholder={t('launch.nameOptional')} autoComplete="off" className={field} onChange={(e) => setName(e.target.value)} />
+          <input value={name} placeholder={t('launch.nameOptional')} autoComplete="off" className={field}
+            onChange={(e) => { setTouched((was) => ({ ...was, name: true })); setName(e.target.value); }} />
         </label>
       </fieldset>
       <fieldset>
@@ -132,6 +146,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
           onChange={(e) => {
             const other = e.target.value === OTHER;
             setOtherHarness(other);
+            setTouched((was) => ({ ...was, harness: true }));
             setHarness(other ? '' : e.target.value);
           }}>
           {!harness && !otherHarness && <option value="" disabled>{t('launch.harnessPick')}</option>}
@@ -140,7 +155,8 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
         </select>
         {otherHarness && (
           <input type="text" aria-label={t('harness.otherLabel')} placeholder={t('harness.otherPlaceholder')} value={harness}
-            maxLength={MAX_HARNESS} className={`${field} font-mono text-xs`} onChange={(e) => setHarness(e.target.value)} />
+            maxLength={MAX_HARNESS} className={`${field} font-mono text-xs`}
+            onChange={(e) => { setTouched((was) => ({ ...was, harness: true })); setHarness(e.target.value); }} />
         )}
         <p className="text-xs text-muted-foreground">{t('launch.harnessHint')}</p>
       </fieldset>

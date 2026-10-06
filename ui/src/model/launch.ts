@@ -43,6 +43,23 @@ export function harnessOptions(seen: readonly string[], ...extra: (string | null
   return out;
 }
 
+/**
+ * The name to prefill for a package opened from Finder (#120): the first
+ * segment of its soul.json name, since launches name the new soul
+ * "<name> - <package>" and "VMTwo - Starter - VMTwo - Starter" is nobody's
+ * wish. Blank when the package says nothing.
+ */
+export function suggestedName(packageName: string | null | undefined): string {
+  const first = (packageName ?? '').split(' - ')[0].trim();
+  return first.slice(0, MAX_NAME);
+}
+
+/** The first harness a package prefers that this app can offer, if any. */
+export function preferredHarness(preferred: readonly string[] | null | undefined, seen: readonly string[]): string | null {
+  const offered = harnessOptions(seen).map((h) => h.id);
+  return preferred?.find((id) => offered.includes(id.trim())) ?? null;
+}
+
 // Limits from the wire contract; the broker enforces them too.
 export const MAX_PACKAGE = 4096;
 export const MAX_HARNESS = 64;

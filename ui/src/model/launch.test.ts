@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   harnessOptions,
+  preferredHarness,
+  suggestedName,
   applyStatus,
   applyStatusError,
   canLaunch,
@@ -73,5 +75,20 @@ describe('launch lifecycle', () => {
   it('explains a missing daemon for the account', () => {
     expect(launchErrorText('daemon-unavailable', '', 'persona')).toMatch(/can’t reach the agents on account persona/);
     expect(launchErrorText('weird', 'x')).toBe('GeniusBar couldn’t start this companion. Try again, and ask for help if the problem continues.');
+  });
+});
+
+describe('opened package prefill (#120)', () => {
+  it('suggests the first segment of the package name', () => {
+    expect(suggestedName('VMTwo - Starter')).toBe('VMTwo');
+    expect(suggestedName('  Luna ')).toBe('Luna');
+    expect(suggestedName(undefined)).toBe('');
+    expect(suggestedName('x'.repeat(200))).toHaveLength(128);
+  });
+  it('prefers the first harness the app can offer', () => {
+    expect(preferredHarness(['codex', 'opencode'], [])).toBe('opencode');
+    expect(preferredHarness(['codex'], ['codex'])).toBe('codex');
+    expect(preferredHarness(['codex'], [])).toBeNull();
+    expect(preferredHarness(undefined, ['claude'])).toBeNull();
   });
 });

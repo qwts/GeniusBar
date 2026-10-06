@@ -28,7 +28,7 @@ function Live({ snapshot }: { snapshot: SnapshotOptions | null }) {
   const chat = useChat({ enabled: inApp() && !snapshot });
   const launcher = useLaunch();
   const updates = useUpdates();
-  const [openedPackage, setOpenedPackage] = useState<{ id: number; path: string; checking: boolean; error: string | null; agentId?: string }>();
+  const [openedPackage, setOpenedPackage] = useState<{ id: number; path: string; checking: boolean; error: string | null; agentId?: string; name?: string; preferredHarnesses?: string[] }>();
   const packageSequence = useRef(0);
   const loadOpenedPackages = useCallback(async () => {
     const paths = await invoke<string[]>('take_opened_soul_packages');
@@ -40,13 +40,16 @@ function Live({ snapshot }: { snapshot: SnapshotOptions | null }) {
         // agent-bot says whether this folder is an installed soul, or a copy
         // of one that must not be launched (#80). An older bundle without
         // `soul locate` keeps the package flow.
-        const located = await invoke<{ status: string; agentId?: string; message?: string }>('locate_soul_package', { package: path })
+        const located = await invoke<{ status: string; agentId?: string; message?: string; name?: string; preferredHarnesses?: string[] }>('locate_soul_package', { package: path })
           .catch(() => null);
         const refused = located && located.status !== 'package' && located.status !== 'installed';
         setOpenedPackage((current) => current?.id === id ? {
           ...current,
           checking: false,
           ...(located?.status === 'installed' && located.agentId ? { agentId: located.agentId } : {}),
+          // A package says what it is (agent-bot 0.10.14+): the form prefills from it (#120).
+          ...(located?.status === 'package' && typeof located.name === 'string' ? { name: located.name } : {}),
+          ...(located?.status === 'package' && Array.isArray(located.preferredHarnesses) ? { preferredHarnesses: located.preferredHarnesses.filter((h) => typeof h === 'string') } : {}),
           ...(refused ? { error: located.message ?? 'This folder is a copy of another companion’s folder, so it can’t be launched.' } : {}),
         } : current);
       } catch {

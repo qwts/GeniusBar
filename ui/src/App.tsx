@@ -53,7 +53,11 @@ interface AppProps {
    * the installed soul it is (agent-bot `soul locate`, #80): that companion
    * opens instead of a new launch.
    */
-  openedPackage?: { id: number; path: string; checking: boolean; error: string | null; agentId?: string };
+  openedPackage?: {
+    id: number; path: string; checking: boolean; error: string | null; agentId?: string;
+    /** What the package's soul.json says, for prefilling the form (#120). */
+    name?: string; preferredHarnesses?: string[];
+  };
   /** Removes GeniusBar's login services (#9); without it there is no action. */
   onRemoveServices?: () => Promise<void>;
   /** The bundled starter soul (R4), offered while the roster is empty. */
@@ -259,6 +263,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     <LaunchModal onClose={closeLaunch}>
       <LaunchForm key={activePackage?.id ?? 'manual'} {...launch}
         initialPackagePath={activePackage?.path}
+        packageName={activePackage?.name}
+        preferredHarnesses={activePackage?.preferredHarnesses}
         checkingPackage={activePackage?.checking}
         packageError={activePackage?.error}
         onCancel={closeLaunch} />

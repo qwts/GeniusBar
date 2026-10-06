@@ -232,6 +232,34 @@ describe('App setup', () => {
     expect(screen.queryByRole('form', { name: 'Launch a companion package' })).toBeNull();
   });
 
+  it('prefills the name and harness from the opened package once agent-bot located it (#120)', () => {
+    const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    const path = '/Downloads/VMShare.soul';
+    const { rerender } = render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher}
+      openedPackage={{ id: 1, path, checking: true, error: null }} isStatic />);
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('');
+    rerender(<App census={sampleCensus} connection={sampleConnection} launcher={launcher}
+      openedPackage={{ id: 1, path, checking: false, error: null, name: 'VMTwo - Starter', preferredHarnesses: ['grokbot', 'codex', 'opencode'] }} isStatic />);
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('VMTwo');
+    // grokbot is unknown here; codex is seen in the census, so it wins over opencode.
+    expect((screen.getByLabelText('Harness') as HTMLSelectElement).value).toBe('codex');
+    fireEvent.submit(screen.getByRole('form', { name: 'Launch a companion package' }));
+    expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ target: { package: path }, harness: 'codex', name: 'VMTwo' }));
+  });
+
+  it('keeps what the owner typed when the opened package\'s manifest arrives later (#120)', () => {
+    const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    const path = '/Downloads/VMShare.soul';
+    const { rerender } = render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher}
+      openedPackage={{ id: 1, path, checking: true, error: null }} isStatic />);
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Pip' } });
+    fireEvent.change(screen.getByLabelText('Harness'), { target: { value: 'claude' } });
+    rerender(<App census={sampleCensus} connection={sampleConnection} launcher={launcher}
+      openedPackage={{ id: 1, path, checking: false, error: null, name: 'VMTwo - Starter', preferredHarnesses: ['opencode'] }} isStatic />);
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Pip');
+    expect((screen.getByLabelText('Harness') as HTMLSelectElement).value).toBe('claude');
+  });
+
   it('refuses to launch a copied soul folder and says why (#80)', () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher}
