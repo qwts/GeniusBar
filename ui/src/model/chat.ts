@@ -261,6 +261,13 @@ export interface ApprovalRecord {
   createdAt: string;
   expiresAt: string | null;
   status: string;
+  /** How far an approval reaches (agent-bot-identity #486); older bundles leave it out. */
+  scope?: 'once' | 'session' | undefined;
+  /**
+   * The decision, `approved_session` for a session grant; null while open.
+   * Older bundles leave it out: read `status` then.
+   */
+  decision?: string | null | undefined;
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -299,6 +306,8 @@ export function normalizeApproval(raw: unknown): ApprovalRecord | null {
     summary: typeof raw.summary === 'string' ? raw.summary : '',
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : '', expiresAt: stringOrNull(raw.expiresAt),
     status: raw.status,
+    ...(raw.scope === 'once' || raw.scope === 'session' ? { scope: raw.scope } : {}),
+    ...(raw.decision === null || typeof raw.decision === 'string' ? { decision: raw.decision } : {}),
   };
 }
 
