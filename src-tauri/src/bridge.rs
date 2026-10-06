@@ -1841,6 +1841,244 @@ mod soul_stop_tests {
     }
 }
 
+/// Pause all / Resume (#122, Lovable `togglePause`), with agent-bot's
+/// `soul pause|resume <agentId> --json` (agent-bot-identity #478): pause
+/// cancels the soul's running turn and holds its wakes, launches and chat
+/// until resume. Pause answers `{agentId, paused: true, stopped}`, resume
+/// `{agentId, paused: false}`. Not owner-gated by Touch ID. An older bundle
+/// without the commands answers with its `soul` usage line, which maps to
+/// `soul-pause-unsupported`.
+#[tauri::command]
+pub async fn soul_pause<R: Runtime>(
+    app: AppHandle<R>,
+    agent: String,
+) -> Result<Value, BridgeError> {
+    soul_pause_action(app, PauseAction::Pause, &agent).await
+}
+
+/// Lifts `soul_pause`; see there.
+#[tauri::command]
+pub async fn soul_resume<R: Runtime>(
+    app: AppHandle<R>,
+    agent: String,
+) -> Result<Value, BridgeError> {
+    soul_pause_action(app, PauseAction::Resume, &agent).await
+}
+
+/// Whether the bundled agent-bot has `soul pause`: `{supported}`. Runs the
+/// command with no soul, which pauses nothing: a bundle that has it answers
+/// with its own `soul pause` usage, an older one with the `soul` usage line.
+#[tauri::command]
+pub async fn soul_pause_probe<R: Runtime>(app: AppHandle<R>) -> Result<Value, BridgeError> {
+    let args = vec!["soul".into(), "pause".into(), "--json".into()];
+    let output = run_agent_bot(&app, args, "soul-pause-unavailable").await?;
+    parse_soul_pause_probe(&output.stdout, &output.stderr)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PauseAction {
+    Pause,
+    Resume,
+}
+
+impl PauseAction {
+    fn verb(self) -> &'static str {
+        match self {
+            Self::Pause => "pause",
+            Self::Resume => "resume",
+        }
+    }
+
+    fn failed(self) -> &'static str {
+        match self {
+            Self::Pause => "soul-pause-failed",
+            Self::Resume => "soul-resume-failed",
+        }
+    }
+
+    fn prefix(self) -> &'static str {
+        match self {
+            Self::Pause => "agent-bot soul pause: ",
+            Self::Resume => "agent-bot soul resume: ",
+        }
+    }
+}
+
+async fn soul_pause_action<R: Runtime>(
+    app: AppHandle<R>,
+    action: PauseAction,
+    agent: &str,
+) -> Result<Value, BridgeError> {
+    let args = soul_pause_args(action, agent)?;
+    let output = run_agent_bot(&app, args, "soul-pause-unavailable").await?;
+    parse_soul_pause(action, &output.stdout, &output.stderr)
+}
+
+fn soul_pause_args(
+    action: PauseAction,
+    agent: &str,
+) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    if agent.is_empty() || agent.starts_with('-') {
+        return Err(BridgeError::new(
+            "soul-pause-invalid",
+            "agent must be an agent id",
+        ));
+    }
+    Ok(vec![
+        "soul".into(),
+        action.verb().into(),
+        agent.into(),
+        "--json".into(),
+    ])
+}
+
+/// True when stderr is an older agent-bot's `soul` usage line, which does
+/// not list `soul pause`.
+fn soul_pause_missing(stdout: &[u8], stderr: &[u8]) -> bool {
+    let message = last_line(stderr);
+    serde_json::from_str::<Value>(&last_line(stdout)).is_err()
+        && message.contains("usage: agent-bot soul ")
+        && !message.contains("soul pause")
+}
+
+fn parse_soul_pause(
+    action: PauseAction,
+    stdout: &[u8],
+    stderr: &[u8],
+) -> Result<Value, BridgeError> {
+    if soul_pause_missing(stdout, stderr) {
+        return Err(BridgeError::new(
+            "soul-pause-unsupported",
+            "this agent-bot has no soul pause",
+        ));
+    }
+    parse_agent_bot_json(
+        stdout,
+        stderr,
+        action.failed(),
+        action.prefix(),
+        "agent-bot gave no pause result",
+        |value| {
+            value.get("agentId").and_then(Value::as_str).is_some()
+                && value.get("paused").and_then(Value::as_bool).is_some()
+        },
+    )
+}
+
+fn parse_soul_pause_probe(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    if soul_pause_missing(stdout, stderr) {
+        return Ok(serde_json::json!({ "supported": false }));
+    }
+    match parse_soul_pause(PauseAction::Pause, stdout, stderr) {
+        Err(error) if error.message.starts_with("usage: agent-bot soul pause") => {
+            Ok(serde_json::json!({ "supported": true }))
+        }
+        Err(error) => Err(error),
+        Ok(_) => Err(BridgeError::new(
+            "soul-pause-failed",
+            "agent-bot paused a soul it was not asked to",
+        )),
+    }
+}
+
+#[cfg(test)]
+mod soul_pause_tests {
+    use super::*;
+
+    const OLD_USAGE: &[u8] =
+        b"agent-bot: usage: agent-bot soul cold-wake <agentId> [on|off|show] | soul stop <agentId|name> [--json] | soul comms <agentId|name> [show|on|off] [--json]\n";
+
+    #[test]
+    fn builds_soul_pause_and_resume_arguments() {
+        assert_eq!(
+            soul_pause_args(PauseAction::Pause, "agent_1").unwrap(),
+            vec!["soul", "pause", "agent_1", "--json"]
+        );
+        assert_eq!(
+            soul_pause_args(PauseAction::Resume, "agent_1").unwrap(),
+            vec!["soul", "resume", "agent_1", "--json"]
+        );
+        for agent in ["", "--json", "-x"] {
+            assert_eq!(
+                soul_pause_args(PauseAction::Pause, agent).unwrap_err().code,
+                "soul-pause-invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_pause_and_resume_results_or_their_error() {
+        let paused = parse_soul_pause(
+            PauseAction::Pause,
+            b"{\"agentId\":\"agent_1\",\"paused\":true,\"stopped\":false}\n",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(paused["paused"], true);
+        assert_eq!(paused["stopped"], false);
+        let resumed = parse_soul_pause(
+            PauseAction::Resume,
+            b"{\"agentId\":\"agent_1\",\"paused\":false}\n",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(resumed["paused"], false);
+        assert_eq!(
+            parse_soul_pause(
+                PauseAction::Pause,
+                b"{\"error\":{\"code\":\"not-owner\",\"message\":\"soul pause is the owner's\"}}\n",
+                b"agent-bot soul pause: soul pause is the owner's\n"
+            ),
+            Err(BridgeError::new("not-owner", "soul pause is the owner's"))
+        );
+        assert_eq!(
+            parse_soul_pause(
+                PauseAction::Resume,
+                b"",
+                b"agent-bot soul resume: no population record for agent_9\n"
+            ),
+            Err(BridgeError::new(
+                "soul-resume-failed",
+                "no population record for agent_9"
+            ))
+        );
+        assert_eq!(
+            parse_soul_pause(PauseAction::Pause, b"{\"agentId\":\"agent_1\"}\n", b"").unwrap_err(),
+            BridgeError::new("soul-pause-failed", "agent-bot gave no pause result")
+        );
+    }
+
+    #[test]
+    fn an_older_bundle_is_unsupported_not_failed() {
+        assert_eq!(
+            parse_soul_pause(PauseAction::Resume, b"", OLD_USAGE)
+                .unwrap_err()
+                .code,
+            "soul-pause-unsupported"
+        );
+        assert_eq!(
+            parse_soul_pause_probe(b"", OLD_USAGE).unwrap(),
+            serde_json::json!({ "supported": false })
+        );
+    }
+
+    #[test]
+    fn probes_a_bundle_with_soul_pause() {
+        assert_eq!(
+            parse_soul_pause_probe(
+                b"{\"error\":{\"code\":\"soul-pause-failed\",\"message\":\"usage: agent-bot soul pause <agentId|name> [--json]\"}}\n",
+                b"agent-bot soul pause: usage: agent-bot soul pause <agentId|name> [--json]\n"
+            )
+            .unwrap(),
+            serde_json::json!({ "supported": true })
+        );
+        assert_eq!(
+            parse_soul_pause_probe(b"", b"").unwrap_err().code,
+            "soul-pause-failed"
+        );
+    }
+}
+
 /// A soul's model (#128), from agent-bot's `soul model <agentId> show
 /// --json`: `{agentId, model, available, listedAt, harness}`. `model` is the
 /// owner's choice or null for the harness default; `available` is the
@@ -2219,6 +2457,7 @@ fn parse_population_list(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeEr
                     "status": field("status"),
                     "managed": field("managed"),
                     "comms": field("comms"),
+                    "paused": field("paused"),
                 }))
             })
             .collect();
@@ -2260,6 +2499,7 @@ mod population_list_tests {
     "transcriptLocator": {"provider": "claude", "id": "t1"},
     "managed": true,
     "comms": true,
+    "paused": true,
     "mode": "safe",
     "model": null,
     "parentId": null
@@ -2280,6 +2520,9 @@ mod population_list_tests {
         assert!(souls[0].get("transcriptLocator").is_none());
         assert_eq!(souls[1]["comms"], false);
         assert_eq!(souls[1]["status"], "retired");
+        // `paused` (agent-bot-identity #478) is carried; an older record has none.
+        assert_eq!(souls[0]["paused"], true);
+        assert_eq!(souls[1]["paused"], Value::Null);
         assert_eq!(parse_population_list(b"[]\n", b"").unwrap(), json!([]));
     }
 

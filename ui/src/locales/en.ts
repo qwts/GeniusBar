@@ -269,6 +269,12 @@ export const en = {
   stop: 'Stop',
   stopping: 'Stopping…',
   stopFailed: 'Could not stop: {message}',
+  // Pause all / Resume (#122): with agent-bot `soul pause` / `soul resume`.
+  'quick.pause': 'Pause all',
+  'quick.resume': 'Resume',
+  paused: 'Companions paused',
+  pauseFailed: 'Could not pause: {message}',
+  resumeFailed: 'Could not resume: {message}',
 } as const;
 
 export type MessageKey = keyof typeof en;

@@ -13,7 +13,9 @@
 // computer-use perimeter shows, and &dudle=idle|working|awaiting|computer
 // also shows the floating Dudle's button (off in the app) in one state from
 // sampleFloating; with &dudle=computer the perimeter's Stop "stops" agent_c
-// after a moment, and hold Esc does the same):
+// after a moment, and hold Esc does the same); window mode's Pause all /
+// Resume (quick menu, and the "Companions paused" chip) act on an in-memory
+// samplePaused, and &paused=1 starts with luna paused so the chip shows:
 // the app on the fixed fixtures, without Tauri. Not part of the build.
 import { StrictMode, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -24,7 +26,8 @@ import { AuditSourceContext, type AuditSource } from './components/AuditLog';
 import { SoulSourceContext, type SoulSource } from './components/SoulNotices';
 import type { CensusRow } from './model/census';
 import { emptyChat, emptyComposer, mergeIncoming, type ChatState } from './model/chat';
-import { inboxMessage, sampleApprovals, sampleAudit, sampleBadges, sampleCensus, sampleColdWake, sampleConnection, sampleFloating, sampleModels, sampleModes, sampleOpenedPackages, samplePopulation, sampleSessionEntries } from './model/fixtures';
+import { inboxMessage, sampleApprovals, sampleAudit, sampleBadges, sampleCensus, sampleColdWake, sampleConnection, sampleFloating, sampleModels, sampleModes, sampleOpenedPackages, samplePaused, samplePopulation, sampleSessionEntries } from './model/fixtures';
+import type { Pauser } from './usePause';
 import type { ChatApi } from './useChat';
 import '@fontsource/ibm-plex-sans/latin-400.css';
 import '@fontsource/ibm-plex-sans/latin-500.css';
@@ -128,10 +131,24 @@ function Preview() {
       return { agentId, stopped: true };
     },
   }), []);
+  // Pause all / Resume (#122) on the fixtures, as agent-bot `soul pause` would.
+  const pauser = useMemo<Pauser>(() => {
+    let entries = samplePaused.map((e) => ({ ...e, paused: params.get('paused') === '1' ? e.paused : false }));
+    const set = (agentId: string, paused: boolean) => {
+      entries = entries.map((e) => (e.agentId === agentId ? { ...e, paused } : e));
+      return { agentId, paused };
+    };
+    return {
+      supported: async () => true,
+      list: async () => entries,
+      pause: async (agentId) => ({ ...set(agentId, true), stopped: false }),
+      resume: async (agentId) => set(agentId, false),
+    };
+  }, []);
   const opened = params.get('open');
   const fixture = opened === 'copy' || opened === 'described' ? sampleOpenedPackages[opened] : null;
   const openedPackage = opened ? { id: 1, checking: false, error: null, path: opened, ...fixture } : undefined;
-  const app = <App mode={mode} select={params.get('select')} openedPackage={openedPackage} census={souls} badges={floating ? { ...sampleBadges, computerUse: driving ?? floating.computerUse, busy: floating.busy } : sampleBadges} stopper={stopper} floatingButton={floating !== null} archiver={archiver} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}
+  const app = <App mode={mode} select={params.get('select')} openedPackage={openedPackage} census={souls} badges={floating ? { ...sampleBadges, computerUse: driving ?? floating.computerUse, busy: floating.busy } : sampleBadges} stopper={stopper} pauser={pauser} floatingButton={floating !== null} archiver={archiver} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}
     onRefresh={() => {}} onRemoveServices={async () => {}} updates={{ status: { state: 'idle', version: null }, act: () => {} }}
     launcher={{ state: { phase: 'idle' }, launch: async () => {}, reset: () => {} }} />;
   // The tray popup is a fixed 384×560 window (tauri.conf.json).

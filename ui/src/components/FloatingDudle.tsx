@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { History, MessageSquare, OctagonX } from 'lucide-react';
+import { History, MessageSquare, OctagonX, Pause, Play } from 'lucide-react';
 import type { SoulStopResult } from '../bridge';
 import { useI18n } from '../lib/i18n';
 import { displayName, type CensusRow } from '../model/census';
 import { deriveDudle } from '../model/dudle';
-import { HALT_HOLD_MS, menuStep, settleStop, STOP_SETTLE_MS, stopTargets, type FloatingState, type StopPhase } from '../model/floating';
+import { HALT_HOLD_MS, menuStep, pauseQuickAction, settleStop, STOP_SETTLE_MS, stopTargets, type FloatingState, type StopPhase } from '../model/floating';
 import { Dudle } from './Dudle';
 
 /**
@@ -33,6 +33,13 @@ interface FloatingDudleProps {
   onPrompt: (lead: CensusRow) => void;
   /** Opens the lead's Audit log. */
   onHistory: (lead: CensusRow) => void;
+  /** Some managed soul is paused (agent-bot `soul pause`): the item offers Resume. */
+  fleetPaused?: boolean;
+  /**
+   * Pause all / Resume (Lovable `togglePause`); absent, or an agent-bot
+   * without `soul pause`, offers no such item.
+   */
+  onTogglePause?: () => void;
   /**
    * Shows the floating button and its quick menu. Off by default, matching
    * the Lovable export where it is disabled; the perimeter shows either way.
@@ -47,10 +54,12 @@ interface FloatingDudleProps {
  * drives the screen. Drag to move; click, Enter or Space opens the menu.
  * The perimeter's Stop, and holding Escape ~0.6 s, halt the souls driving
  * the screen through agent-bot `soul stop`; it shows "stopping…" until the
- * daemon drops them. Pause/resume and toggling computer use are not offered:
- * agent-bot has no command for them yet.
+ * daemon drops them. The menu's Pause all / Resume item (when
+ * `onTogglePause` is given) acts on the whole fleet through agent-bot
+ * `soul pause` / `soul resume`. Toggling computer use is not offered:
+ * agent-bot has no command for it yet.
  */
-export function FloatingDudle({ lead, state, paused = false, computerUser, computerUse, stopper, onPrompt, onHistory, showButton = false }: FloatingDudleProps) {
+export function FloatingDudle({ lead, state, paused = false, computerUser, computerUse, stopper, onPrompt, onHistory, fleetPaused = false, onTogglePause, showButton = false }: FloatingDudleProps) {
   const { t } = useI18n();
   const stop = useStop(stopper, computerUse);
   const driven = computerUser !== null;
@@ -62,8 +71,10 @@ export function FloatingDudle({ lead, state, paused = false, computerUser, compu
   const items = useRef<(HTMLButtonElement | null)[]>([]);
 
   const close = () => { setOpen(false); btn.current?.focus(); };
+  const pause = pauseQuickAction(fleetPaused);
   const actions = lead ? [
     { icon: MessageSquare, label: t('quick.prompt'), run: () => onPrompt(lead) },
+    ...(onTogglePause ? [{ icon: pause.icon === 'play' ? Play : Pause, label: t(pause.label), run: onTogglePause }] : []),
     { icon: History, label: t('quick.history'), run: () => onHistory(lead) },
   ] : [];
 

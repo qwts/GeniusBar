@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BridgeError, call, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul } from './bridge';
+import { BridgeError, call, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported } from './bridge';
 
 describe('bridge', () => {
   it('invokes the shell command with the method and params', async () => {
@@ -363,15 +363,15 @@ describe('population list (#137 comms badges in one call)', () => {
     const fake = (async (cmd: string, args: unknown) => {
       calls.push([cmd, args]);
       return [
-        { agentId: 'agent_1', status: 'active', managed: true, comms: true },
-        { agentId: 'agent_2', status: 'active', managed: false, comms: false },
+        { agentId: 'agent_1', status: 'active', managed: true, comms: true, paused: true },
+        { agentId: 'agent_2', status: 'retired', managed: false, comms: false },
         { agentId: 'agent_3', status: 'active', comms: true },
       ];
     }) as never;
     await expect(populationList(fake)).resolves.toEqual([
-      { agentId: 'agent_1', comms: true, managed: true },
-      { agentId: 'agent_2', comms: false, managed: false },
-      { agentId: 'agent_3', comms: true, managed: false },
+      { agentId: 'agent_1', comms: true, managed: true, paused: true, status: 'active' },
+      { agentId: 'agent_2', comms: false, managed: false, paused: false, status: 'retired' },
+      { agentId: 'agent_3', comms: true, managed: false, paused: false, status: 'active' },
     ]);
     expect(calls).toEqual([['population_list', undefined]]);
   });
@@ -380,7 +380,7 @@ describe('population list (#137 comms badges in one call)', () => {
     expect(normalizePopulationList([
       { agentId: '', comms: true }, { agentId: 'agent_1' }, { comms: true }, null, 'agent_2',
       { agentId: 'agent_3', comms: 'yes', managed: true }, { agentId: 'agent_4', comms: false, managed: 'yes' },
-    ])).toEqual([{ agentId: 'agent_4', comms: false, managed: false }]);
+    ])).toEqual([{ agentId: 'agent_4', comms: false, managed: false, paused: false, status: null }]);
     expect(normalizePopulationList([])).toEqual([]);
     expect(normalizePopulationList({ souls: [] })).toBeNull();
     await expect(populationList((async () => null) as never)).resolves.toBeNull();
@@ -421,5 +421,43 @@ describe('soul stop (#122, agent-bot-identity #474)', () => {
     await expect(soulStopSupported((async () => ({ supported: false })) as never)).resolves.toBe(false);
     await expect(soulStopSupported((async () => { throw { code: 'soul-stop-unavailable', message: 'x' }; }) as never)).resolves.toBe(false);
     await expect(soulStopSupported()).resolves.toBe(false);
+  });
+});
+
+describe('soul pause / resume (#122, agent-bot-identity #478)', () => {
+  it('pauses and resumes the soul through agent-bot', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => {
+      calls.push([cmd, args]);
+      return cmd === 'soul_pause' ? { agentId: 'agent_1', paused: true, stopped: true } : { agentId: 'agent_1', paused: false };
+    }) as never;
+    await expect(pauseSoul('agent_1', fake)).resolves.toEqual({ agentId: 'agent_1', paused: true, stopped: true });
+    await expect(resumeSoul('agent_1', fake)).resolves.toEqual({ agentId: 'agent_1', paused: false });
+    expect(calls).toEqual([['soul_pause', { agent: 'agent_1' }], ['soul_resume', { agent: 'agent_1' }]]);
+  });
+
+  it('rejects with the shell error code, telling an older bundle apart', async () => {
+    const down = (async () => { throw { code: 'daemon-unavailable', message: 'the daemon is not running' }; }) as never;
+    await expect(pauseSoul('agent_1', down)).rejects.toMatchObject({ code: 'daemon-unavailable', message: 'the daemon is not running' });
+    const older = (async () => { throw { code: 'soul-pause-unsupported', message: 'this agent-bot has no soul pause' }; }) as never;
+    await expect(resumeSoul('agent_1', older)).rejects.toMatchObject({ code: 'soul-pause-unsupported' });
+    await expect(pauseSoul('agent_1', (async () => ({ agentId: 'agent_1' })) as never)).rejects.toMatchObject({ code: 'soul-pause-failed' });
+    await expect(resumeSoul('agent_1', (async () => { throw 'boom'; }) as never)).rejects.toMatchObject({ code: 'soul-resume-failed', message: 'boom' });
+  });
+
+  it('normalizes only a well-formed result', () => {
+    expect(normalizeSoulPause({ agentId: 'a', paused: true, stopped: false, extra: 1 })).toEqual({ agentId: 'a', paused: true, stopped: false });
+    expect(normalizeSoulPause({ agentId: 'a', paused: 'yes' })).toBeNull();
+    expect(normalizeSoulPause(null)).toBeNull();
+  });
+
+  it('probes whether the bundle has the command; false when it cannot say', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); return { supported: true }; }) as never;
+    await expect(soulPauseSupported(fake)).resolves.toBe(true);
+    expect(calls).toEqual([['soul_pause_probe', undefined]]);
+    await expect(soulPauseSupported((async () => ({ supported: false })) as never)).resolves.toBe(false);
+    await expect(soulPauseSupported((async () => { throw { code: 'soul-pause-unavailable', message: 'x' }; }) as never)).resolves.toBe(false);
+    await expect(soulPauseSupported()).resolves.toBe(false);
   });
 });

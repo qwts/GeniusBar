@@ -94,3 +94,11 @@ export function settleStop(stop: StopPhase, computerUse: ReadonlySet<string> = n
   if (stop.phase === 'failed' && computerUse.size === 0) return { phase: 'ready' };
   return stop;
 }
+
+/**
+ * The quick menu's Pause all / Resume item (Lovable `paused ? Play : Pause`):
+ * which icon and wording it shows for the fleet's state.
+ */
+export function pauseQuickAction(fleetPaused: boolean): { icon: 'play' | 'pause'; label: 'quick.resume' | 'quick.pause' } {
+  return fleetPaused ? { icon: 'play', label: 'quick.resume' } : { icon: 'pause', label: 'quick.pause' };
+}

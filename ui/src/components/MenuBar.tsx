@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
-import { LayoutGrid, Search } from 'lucide-react';
+import { LayoutGrid, Pause, Search } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { badgeText } from '../model/approvals';
 import { allSouls, displayHarness, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
@@ -19,16 +19,23 @@ function useClickAway(ref: RefObject<HTMLElement | null>, open: boolean, close: 
  * Window mode's menu bar, drawn as Lovable's: the app name and a View menu
  * on the left; the GeniusBar item (whose menu drops down as a popover),
  * the jump palette and the clock on the right. Escape or a click outside
- * closes a menu. ⌘K opens the palette.
+ * closes a menu. ⌘K opens the palette. While companions are paused
+ * (agent-bot `soul pause`), the design's "Companions paused" chip leads
+ * the right side; clicking it resumes them.
  */
-export function MenuBar({ open, onOpenChange, tone, title, attention = null, onReset, unread, approvals = 0, forest, paused, onJump, children }: {
+export function MenuBar({ open, onOpenChange, tone, title, attention = null, onReset, unread, approvals = 0, forest, paused, onJump, fleetPaused = false, onResume, children }: {
   open: boolean; onOpenChange: (open: boolean) => void; tone: string; title: string;
   attention?: { text: string; isError: boolean } | null; onReset: () => void;
   /** Unread messages across the fleet, badged on the GeniusBar item. */
   unread: number;
   /** Proposals waiting on the owner, badged on the G as the design does. */
   approvals?: number;
-  forest: readonly SoulNode[]; paused: boolean; onJump: (soul: CensusRow) => void; children: ReactNode;
+  forest: readonly SoulNode[]; paused: boolean; onJump: (soul: CensusRow) => void;
+  /** Some managed soul is paused; shows the chip when `onResume` is given too. */
+  fleetPaused?: boolean;
+  /** Resumes the paused companions (Lovable `togglePause` while paused). */
+  onResume?: () => void;
+  children: ReactNode;
 }) {
   const { t, lang } = useI18n();
   const item = useRef<HTMLDivElement>(null);
@@ -95,6 +102,11 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
         </div>
       )}
       <div className="ml-auto flex items-center gap-3 pr-1">
+        {fleetPaused && onResume && (
+          <button type="button" onClick={onResume} className="flex items-center gap-1 rounded bg-secondary px-2 py-0.5 text-secondary-foreground">
+            <Pause className="size-3" aria-hidden /> {t('paused')}
+          </button>
+        )}
         <button type="button" onClick={onReset} title={t('menu.resetLayout')} aria-label={t('menu.resetLayout')}
           className="rounded p-0.5 text-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
           <LayoutGrid className="size-4" aria-hidden />

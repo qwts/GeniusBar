@@ -67,11 +67,27 @@ describe('FloatingDudle', () => {
     expect(document.activeElement).toBe(button);
   });
 
-  it('offers only prompt and history: no pause, computer-use toggle or stop', () => {
+  it('without a pauser offers only prompt and history: no pause, computer-use toggle or stop', () => {
     const { button } = floating({ computerUser: 'luna' });
     fireEvent.keyDown(button!, { key: ' ' });
     expect(within(screen.getByRole('list')).getAllByRole('button')).toHaveLength(2);
     expect(screen.queryByRole('button', { name: /pause|resume|computer|stop/i })).toBeNull();
+  });
+
+  it('offers the design\'s Pause all, or Resume while the fleet is paused, between prompt and history', () => {
+    const onTogglePause = vi.fn();
+    const { button } = floating({ onTogglePause });
+    fireEvent.keyDown(button!, { key: 'Enter' });
+    expect(within(screen.getByRole('list')).getAllByRole('button').map((b) => b.getAttribute('aria-label')))
+      .toEqual(['Write a prompt', 'Pause all', 'Open history']);
+    fireEvent.click(screen.getByRole('button', { name: 'Pause all' }));
+    expect(onTogglePause).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('list')).toBeNull();
+    cleanup();
+    const paused = floating({ onTogglePause, fleetPaused: true });
+    fireEvent.keyDown(paused.button!, { key: 'Enter' });
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Pause all' })).toBeNull();
   });
 
   it('runs an action on the lead and closes', () => {

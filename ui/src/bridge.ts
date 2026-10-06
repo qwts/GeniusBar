@@ -525,6 +525,13 @@ export interface PopulationEntry {
   agentId: string;
   comms: boolean;
   managed: boolean;
+  /**
+   * Held by `soul pause` (agent-bot-identity #478); false from a bundle
+   * without the field. Optional so older fixtures still type.
+   */
+  paused?: boolean;
+  /** The census status (`retired` once archived); null when not reported. */
+  status?: string | null;
 }
 
 /**
@@ -537,7 +544,8 @@ export function normalizePopulationList(raw: unknown): PopulationEntry[] | null 
   if (!Array.isArray(raw)) return null;
   return raw.flatMap((r): PopulationEntry[] => (isRecord(r) && typeof r.agentId === 'string' && r.agentId !== ''
     && typeof r.comms === 'boolean'
-    ? [{ agentId: r.agentId, comms: r.comms, managed: r.managed === true }]
+    ? [{ agentId: r.agentId, comms: r.comms, managed: r.managed === true, paused: r.paused === true,
+      status: typeof r.status === 'string' ? r.status : null }]
     : []));
 }
 
@@ -601,6 +609,68 @@ export async function soulStopSupported(invokeImpl: typeof invoke = invoke): Pro
   if (!inApp() && invokeImpl === invoke) return false;
   try {
     const raw = await invokeImpl<unknown>('soul_stop_probe');
+    return isRecord(raw) && raw.supported === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * agent-bot's answer to `soul pause|resume <agentId> --json` (#122,
+ * agent-bot-identity #478): `paused` as the soul now is; pause also says
+ * whether a running turn was cancelled (`stopped`).
+ */
+export interface SoulPauseResult {
+  agentId: string;
+  paused: boolean;
+  stopped?: boolean;
+}
+
+export function normalizeSoulPause(raw: unknown): SoulPauseResult | null {
+  if (!isRecord(raw) || typeof raw.agentId !== 'string' || typeof raw.paused !== 'boolean') return null;
+  return typeof raw.stopped === 'boolean'
+    ? { agentId: raw.agentId, paused: raw.paused, stopped: raw.stopped }
+    : { agentId: raw.agentId, paused: raw.paused };
+}
+
+async function soulPauseCall(command: 'soul_pause' | 'soul_resume', agentId: string,
+  invokeImpl: typeof invoke): Promise<SoulPauseResult> {
+  const failed = command === 'soul_pause' ? 'soul-pause-failed' : 'soul-resume-failed';
+  let raw: unknown;
+  try {
+    raw = await invokeImpl<unknown>(command, { agent: agentId });
+  } catch (error) {
+    const e = error as { code?: unknown; message?: unknown };
+    throw new BridgeError(typeof e?.code === 'string' ? e.code : failed,
+      typeof e?.message === 'string' ? e.message : String(error));
+  }
+  const result = normalizeSoulPause(raw);
+  if (!result) throw new BridgeError(failed, 'agent-bot gave no pause result');
+  return result;
+}
+
+/**
+ * Pauses a soul: cancels its running turn and holds its wakes, launches
+ * and chat until `resumeSoul`. Rejects with a BridgeError;
+ * `soul-pause-unsupported` means the bundled agent-bot has no `soul pause`.
+ */
+export function pauseSoul(agentId: string, invokeImpl: typeof invoke = invoke): Promise<SoulPauseResult> {
+  return soulPauseCall('soul_pause', agentId, invokeImpl);
+}
+
+/** Lifts `pauseSoul`; rejects as it does. */
+export function resumeSoul(agentId: string, invokeImpl: typeof invoke = invoke): Promise<SoulPauseResult> {
+  return soulPauseCall('soul_resume', agentId, invokeImpl);
+}
+
+/**
+ * Whether the bundled agent-bot has `soul pause`; false outside the app, on
+ * an older bundle, or when agent-bot cannot say. Pauses nothing.
+ */
+export async function soulPauseSupported(invokeImpl: typeof invoke = invoke): Promise<boolean> {
+  if (!inApp() && invokeImpl === invoke) return false;
+  try {
+    const raw = await invokeImpl<unknown>('soul_pause_probe');
     return isRecord(raw) && raw.supported === true;
   } catch {
     return false;
