@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, Volume2, VolumeX } from 'lucide-react';
 import { ApprovalCounts, ApprovalsList } from './components/ApprovalsList';
 import { ArchiveDialog, ArchivedNotice, liveArchiver, type Archiver } from './components/ArchiveDialog';
-import { inApp, listSoulTemplates, liveComputerUse, soulStopSupported, stopSoul, type ComputerUseSwitch, type RemovedSoul } from './bridge';
+import { inApp, listSoulTemplates, liveComputerUse, popupVisible, soulStopSupported, stopSoul, type ComputerUseSwitch, type RemovedSoul } from './bridge';
 import { FooterMenu } from './components/FooterMenu';
 import { CompanionSession, ComputerUseContext, InfoButton, type SessionTab } from './components/CompanionSession';
 import { CompanionWindow, Desktop } from './components/Desktop';
@@ -101,6 +101,8 @@ interface AppProps {
   templateLister?: TemplateLister;
   /** The Customize dialog's profiles (agent-bot `soul profile`, #64); the app uses agent-bot when absent. */
   profileSource?: ProfileSource;
+  /** Whether the popup is showing, for the desktop window's chimes (#122); the app asks the shell when absent. */
+  popupShowing?: () => Promise<boolean>;
 }
 
 const liveStopper: Stopper = { supported: () => soulStopSupported(), stop: (agentId) => stopSoul(agentId) };
@@ -149,7 +151,7 @@ function LanguageSelect() {
 
 // The GeniusBar menu (the tray popup's content, and the toolbar popover in
 // window mode) and, from it, one companion's session.
-function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onOpenDesktop, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, floatingButton = false, archiver, stopper, pauser, computerUseSwitch, templateLister }: AppProps) {
+function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onOpenDesktop, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, floatingButton = false, archiver, stopper, pauser, computerUseSwitch, templateLister, popupShowing }: AppProps) {
   const { t } = useI18n();
   const forest = useMemo(() => buildSoulForest(census), [census]);
   const roster = useMemo(() => allSouls(forest), [forest]);
@@ -389,8 +391,10 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     </LaunchModal>
   );
 
-  // Sound cues (#122): "ask" on a new approval, "done" when a turn ends.
-  useChimes({ sound, waiting: waiting.length, busy: (badges ?? liveBadges).busy });
+  // Sound cues (#122): "ask" on a new approval, "done" when a turn ends. The
+  // desktop window yields to the popup while it shows, so each change chimes once.
+  useChimes({ sound, waiting: waiting.length, busy: (badges ?? liveBadges).busy,
+    yieldTo: mode === 'window' ? popupShowing ?? (inApp() && !isStatic ? popupVisible : undefined) : undefined });
 
   if (mode === 'tray') {
     // An open session keeps the update line above it, as the panel did before R6.
