@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BridgeError, call, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation } from './bridge';
+import { BridgeError, call, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeDaemonStatus, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul } from './bridge';
 
 describe('bridge', () => {
   it('invokes the shell command with the method and params', async () => {
@@ -289,5 +289,50 @@ describe('soul model (#128)', () => {
     const refused = (async () => { throw { code: 'soul-model-failed', message: 'the owner did not approve' }; }) as never;
     await expect(setSoulModel('agent_1', 'opus', refused)).rejects.toMatchObject({ code: 'soul-model-failed', message: 'the owner did not approve' });
     await expect(setSoulModel('agent_1', 'opus', (async () => ({})) as never)).rejects.toBeInstanceOf(BridgeError);
+  });
+});
+
+describe('archive a soul (#94)', () => {
+  it('runs soul remove through the shell and normalizes the result', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => {
+      calls.push([cmd, args]);
+      return { agentId: 'agent_1', name: 'luna', handle: 'luna', wake: 'off', comms: 'left', retired: true,
+        archived: [{ from: '/souls/luna', to: '/souls/.archive/luna' }, { from: 3 }] };
+    }) as never;
+    await expect(removeSoul('agent_1', fake)).resolves.toEqual({
+      agentId: 'agent_1', name: 'luna', comms: 'left', archived: [{ from: '/souls/luna', to: '/souls/.archive/luna' }],
+    });
+    expect(calls).toEqual([['soul_remove', { agent: 'agent_1' }]]);
+  });
+
+  it('rejects with agent-bot’s reason, keeping its code', async () => {
+    const running = (async () => { throw { code: 'soul-running', message: 'agent_1 is running; stop it before removing it' }; }) as never;
+    await expect(removeSoul('agent_1', running)).rejects.toMatchObject({ code: 'soul-running', message: 'agent_1 is running; stop it before removing it' });
+    // An older bundle answers without retiring.
+    await expect(removeSoul('agent_1', (async () => ({ agentId: 'agent_1' })) as never)).rejects.toBeInstanceOf(BridgeError);
+    expect(normalizeRemovedSoul({ agentId: 'a', retired: false })).toBeNull();
+  });
+});
+
+describe('daemon status (#122 computer-use badge)', () => {
+  it('reads daemon status, keeping well-formed computer-use entries', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => {
+      calls.push([cmd, args]);
+      return { running: true, pid: 1, computerUse: [{ agentId: 'agent_1', since: '2026-10-05T00:00:00.000Z' }, { agentId: '' }, { agentId: 'agent_2' }] };
+    }) as never;
+    await expect(daemonStatus(fake)).resolves.toEqual({
+      running: true,
+      computerUse: [{ agentId: 'agent_1', since: '2026-10-05T00:00:00.000Z' }, { agentId: 'agent_2', since: null }],
+    });
+    expect(calls).toEqual([['daemon_status', undefined]]);
+  });
+
+  it('is null when agent-bot cannot say, or outside the app', async () => {
+    await expect(daemonStatus((async () => null) as never)).resolves.toBeNull();
+    await expect(daemonStatus((async () => { throw new Error('no'); }) as never)).resolves.toBeNull();
+    await expect(daemonStatus()).resolves.toBeNull();
+    expect(normalizeDaemonStatus({ running: false })).toEqual({ running: false, computerUse: [] });
   });
 });

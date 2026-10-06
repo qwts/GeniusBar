@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react';
-import { ChevronDown, EyeOff, MessageCircle, Plus, Shield, ShieldOff, Users, X } from 'lucide-react';
+import { Archive, ChevronDown, EyeOff, MessageCircle, Monitor, Plus, Radio, Shield, ShieldOff, Users, X } from 'lucide-react';
 import { displayHarness, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
 import { companionLabel, teamKeys, teamsOf, type Team } from '../model/fleet';
 import { useI18n } from '../lib/i18n';
+import { noBadges, type SoulBadges } from '../model/refresh';
 import { layoutActions, type DesktopLayout } from '../state/layout';
 import { SoulDudle } from './FleetList';
 
@@ -24,13 +25,17 @@ interface DesktopProps {
   onLaunch?: () => void;
   /** The open companion's window. */
   children?: ReactNode;
+  /** Avatar badges (#122): agent comms on, driving the screen. */
+  badges?: SoulBadges;
+  /** Asks to archive a soul (#94); without it the menu has no Remove…. */
+  onArchive?: (soul: CensusRow) => void;
 }
 
 /**
  * Window mode's desktop (R6): every team as a card the user can drag,
  * collapse, and hide companions from. Teams nobody moved fill columns.
  */
-export function Desktop({ forest, layout, paused, unreadOf, selectedKey, onOpen, notice, onLaunch, children }: DesktopProps) {
+export function Desktop({ forest, layout, paused, unreadOf, selectedKey, onOpen, notice, onLaunch, children, badges = noBadges, onArchive }: DesktopProps) {
   const { t } = useI18n();
   const ref = useRef<HTMLElement>(null);
   const [width, setWidth] = useState(1100);
@@ -67,7 +72,7 @@ export function Desktop({ forest, layout, paused, unreadOf, selectedKey, onOpen,
         </div>
       ) : (
         placed.map(({ id, ...p }) => p.leadHidden && !p.visible.length ? null : (
-          <TeamCluster key={id} {...p} paused={paused} unreadOf={unreadOf} selectedKey={selectedKey} onOpen={onOpen} />
+          <TeamCluster key={id} {...p} paused={paused} unreadOf={unreadOf} selectedKey={selectedKey} onOpen={onOpen} badges={badges} onArchive={onArchive} />
         ))
       )}
       {onLaunch && (
@@ -92,6 +97,8 @@ interface ClusterProps {
   unreadOf?: (soul: CensusRow) => number;
   selectedKey: string | null;
   onOpen: (soul: CensusRow) => void;
+  badges: SoulBadges;
+  onArchive?: (soul: CensusRow) => void;
 }
 
 /**
@@ -100,7 +107,7 @@ interface ClusterProps {
  * counts, so hiding a team root hides it even when the team has visible
  * subagents to reach. Only the controls those subagents need stay.
  */
-function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unreadOf, selectedKey, onOpen }: ClusterProps) {
+function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unreadOf, selectedKey, onOpen, badges, onArchive }: ClusterProps) {
   const { t } = useI18n();
   const key = soulKey(team.lead);
   const drag = useRef<{ dx: number; dy: number } | null>(null);
@@ -151,7 +158,8 @@ function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unread
         ) : (
           <>
             <CompanionButton soul={team.lead} size={40} paused={paused} unread={unreadOf?.(team.lead) ?? 0}
-              selected={selectedKey === key} onOpen={onOpen} bare team={count > 0 ? teamKeys(team) : undefined} />
+              selected={selectedKey === key} onOpen={onOpen} bare team={count > 0 ? teamKeys(team) : undefined}
+              badges={badges} onArchive={onArchive} />
             <div className="min-w-0 flex-1 select-none">
               <p className="m-0 truncate text-sm font-semibold">{displayName(team.lead)}</p>
               <p className="m-0 truncate font-mono text-[10px] text-muted-foreground">
@@ -177,7 +185,7 @@ function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unread
           {visible.map((m) => (
             <li key={soulKey(m.soul)}>
               <CompanionButton soul={m.soul} size={32} paused={paused} unread={unreadOf?.(m.soul) ?? 0}
-                selected={selectedKey === soulKey(m.soul)} onOpen={onOpen} />
+                selected={selectedKey === soulKey(m.soul)} onOpen={onOpen} badges={badges} onArchive={onArchive} />
             </li>
           ))}
         </ul>
@@ -186,16 +194,21 @@ function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unread
   );
 }
 
-function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = false, team }: {
+function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = false, team, badges = noBadges, onArchive }: {
   soul: CensusRow; size: number; paused: boolean; unread: number; selected: boolean;
   onOpen: (soul: CensusRow) => void; bare?: boolean;
   /** A lead's whole team: hiding it hides the team card. */
   team?: readonly string[];
+  badges?: SoulBadges;
+  onArchive?: (soul: CensusRow) => void;
 }) {
   const { t } = useI18n();
   const [menu, setMenu] = useState(false);
   const first = useRef<HTMLButtonElement>(null);
-  const label = companionLabel(soul, t, unread);
+  const comms = badges.comms.has(soul.agentId);
+  const computer = badges.computerUse.has(soul.agentId);
+  const label = [companionLabel(soul, t, unread), comms && t('badge.comms'), computer && t('badge.computer')]
+    .filter(Boolean).join(', ');
   const menuItem = 'flex items-center gap-2 rounded-sm px-2 py-1.5 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-none';
   useEffect(() => { if (menu) first.current?.focus(); }, [menu]);
   return (
@@ -215,6 +228,16 @@ function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = 
           {unread > 0 && (
             <span className="absolute -top-1 -right-1.5 min-w-[14px] rounded-full bg-primary px-0.5 text-center font-mono text-[10px] font-bold leading-[14px] text-primary-foreground ring-2 ring-card" aria-hidden>
               {unread > 9 ? '9+' : unread}
+            </span>
+          )}
+          {comms && (
+            <span className="absolute -top-1 -left-1.5 flex size-3.5 items-center justify-center rounded-full bg-success ring-2 ring-card" aria-hidden>
+              <Radio className="size-2 text-[oklch(0.2_0.03_155)]" />
+            </span>
+          )}
+          {computer && (
+            <span className="absolute -right-1.5 -bottom-1 flex size-3.5 items-center justify-center rounded-full bg-warning ring-2 ring-card" aria-hidden>
+              <Monitor className="size-2 text-warning-foreground" />
             </span>
           )}
         </span>
@@ -241,6 +264,12 @@ function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = 
             <button type="button" role="menuitem" className={menuItem}
               onClick={() => { setMenu(false); layoutActions.setTeamHidden(team, true); }}>
               <EyeOff className="size-3.5" aria-hidden /> {t('bar.hideTeam')}
+            </button>
+          )}
+          {onArchive && (
+            <button type="button" role="menuitem" className={`${menuItem} text-destructive`}
+              onClick={() => { setMenu(false); onArchive(soul); }}>
+              <Archive className="size-3.5" aria-hidden /> {t('bar.remove')}
             </button>
           )}
         </div>
