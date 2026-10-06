@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Archive } from 'lucide-react';
 import { removeSoul, soulComms, type RemovedSoul } from '../bridge';
 import { displayName, type CensusRow } from '../model/census';
@@ -30,6 +30,7 @@ export function ArchiveDialog({ soul, archiver, onCancel, onArchived }: {
 }) {
   const { t } = useI18n();
   const name = displayName(soul);
+  const titleId = useId();
   const [running, setRunning] = useState<boolean | null | 'checking'>('checking');
   const [archiving, setArchiving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,10 +59,10 @@ export function ArchiveDialog({ soul, archiver, onCancel, onArchived }: {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"
       onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
-      <section role="alertdialog" aria-modal="true" aria-label={`${t('bar.archive')}: ${name}`}
+      <section role="alertdialog" aria-modal="true" aria-labelledby={titleId}
         onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } }}
         className="grid max-h-full w-full max-w-sm gap-3 overflow-y-auto rounded-lg border border-border bg-popover p-5 text-sm shadow-2xl">
-        <h2 className="m-0 flex items-center gap-2 text-base font-semibold tracking-tight">
+        <h2 id={titleId} className="m-0 flex items-center gap-2 text-base font-semibold tracking-tight">
           <Archive className="size-4 text-destructive" aria-hidden /> {t('bar.archiveConfirm', { name })}
         </h2>
         <p className="m-0 font-mono text-[11px] text-muted-foreground">{t('bar.archiveId', { id: soul.agentId })}</p>

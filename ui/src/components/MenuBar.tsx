@@ -202,7 +202,7 @@ function Palette({ forest, paused, onClose, onJump }: {
           {teams.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">{t('bar.noResults')}</p>}
           {teams.map((team) => (
             <div key={team.key} role="group" aria-label={team.heading}>
-              <p className="px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">{team.heading}</p>
+              <h3 className="m-0 px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">{team.heading}</h3>
               {team.souls.map((soul) => (
                 <button key={soulKey(soul)} type="button" onClick={() => onJump(soul)}
                   className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none">

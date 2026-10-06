@@ -33,3 +33,13 @@ describe('LaunchModal Escape (#116)', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 });
+
+describe('LaunchModal title (a11y audit)', () => {
+  it('names the dialog by its visible heading through aria-labelledby', () => {
+    const { dialog } = renderModal();
+    const heading = screen.getByRole('heading', { level: 2, name: 'Launch a new companion' });
+    expect(heading.id).not.toBe('');
+    expect(dialog.getAttribute('aria-labelledby')).toBe(heading.id);
+    expect(dialog.hasAttribute('aria-label')).toBe(false);
+  });
+});
