@@ -77,6 +77,7 @@ export const es: Catalog = {
   'pill.notHardened': 'Sin reforzar',
   back: 'Volver a la flota',
   closeWindow: 'Cerrar ventana',
+  sound: 'Sonidos',
   language: 'Idioma',
   more: 'Más',
   'team.none': 'Sin equipo',
