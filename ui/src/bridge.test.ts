@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BridgeError, call, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeDaemonStatus, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul } from './bridge';
+import { BridgeError, call, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul } from './bridge';
 
 describe('bridge', () => {
   it('invokes the shell command with the method and params', async () => {
@@ -347,5 +347,37 @@ describe('services installed (#118)', () => {
     await expect(servicesInstalled((async () => null) as never)).resolves.toBeNull();
     await expect(servicesInstalled((async () => { throw new Error('no'); }) as never)).resolves.toBeNull();
     await expect(servicesInstalled()).resolves.toBeNull();
+  });
+});
+
+describe('population list (#137 comms badges in one call)', () => {
+  it('reads population_list, keeping each soul agent id, comms and managed', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => {
+      calls.push([cmd, args]);
+      return [
+        { agentId: 'agent_1', status: 'active', managed: true, comms: true },
+        { agentId: 'agent_2', status: 'active', managed: false, comms: false },
+        { agentId: 'agent_3', status: 'active', comms: true },
+      ];
+    }) as never;
+    await expect(populationList(fake)).resolves.toEqual([
+      { agentId: 'agent_1', comms: true, managed: true },
+      { agentId: 'agent_2', comms: false, managed: false },
+      { agentId: 'agent_3', comms: true, managed: false },
+    ]);
+    expect(calls).toEqual([['population_list', undefined]]);
+  });
+
+  it('drops malformed rows and is null when the shell cannot say', async () => {
+    expect(normalizePopulationList([
+      { agentId: '', comms: true }, { agentId: 'agent_1' }, { comms: true }, null, 'agent_2',
+      { agentId: 'agent_3', comms: 'yes', managed: true }, { agentId: 'agent_4', comms: false, managed: 'yes' },
+    ])).toEqual([{ agentId: 'agent_4', comms: false, managed: false }]);
+    expect(normalizePopulationList([])).toEqual([]);
+    expect(normalizePopulationList({ souls: [] })).toBeNull();
+    await expect(populationList((async () => null) as never)).resolves.toBeNull();
+    await expect(populationList((async () => { throw new Error('unknown command population_list'); }) as never)).resolves.toBeNull();
+    await expect(populationList()).resolves.toBeNull();
   });
 });
