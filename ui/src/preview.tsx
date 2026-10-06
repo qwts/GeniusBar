@@ -7,7 +7,7 @@ import { createRoot } from 'react-dom/client';
 import { App, type AppMode } from './App';
 import type { CensusRow } from './model/census';
 import { emptyChat, emptyComposer, mergeIncoming, type ChatState } from './model/chat';
-import { inboxMessage, sampleCensus, sampleConnection, sampleSessionEntries } from './model/fixtures';
+import { inboxMessage, sampleApprovals, sampleCensus, sampleConnection, sampleSessionEntries } from './model/fixtures';
 import type { ChatApi } from './useChat';
 import '@fontsource/ibm-plex-sans/latin-400.css';
 import '@fontsource/ibm-plex-sans/latin-500.css';
@@ -46,6 +46,8 @@ function Preview() {
   const mode = (params.get('mode') === 'window' ? 'window' : 'tray') as AppMode;
   const [composers, setComposers] = useState<ChatApi['composers']>({});
   const [chatState, setChatState] = useState(state);
+  // The menu's approval list (#85): two pending proposals, decided locally.
+  const [records, setRecords] = useState(sampleApprovals);
   const chat: ChatApi = {
     chat: chatState,
     composers,
@@ -59,6 +61,8 @@ function Preview() {
       const entries = c.entries.map((e) => (e.id === entryId && e.kind === 'approval_request' ? { ...e, status: decision } : e));
       return { ...s, conversations: { ...s.conversations, [key]: { ...c, entries } } };
     }),
+    approvals: { records, local: new Map() },
+    decide: async (proposalId) => setRecords((r) => r.filter((p) => p.proposalId !== proposalId)),
   };
   const opened = params.get('open');
   const app = <App mode={mode} select={params.get('select')} openedPackage={opened ? { id: 1, path: opened, checking: false, error: null } : undefined} census={census} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}
