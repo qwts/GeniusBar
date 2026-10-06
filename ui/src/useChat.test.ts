@@ -184,7 +184,7 @@ describe('useChat persistence', () => {
     first.unmount();
     const second = renderHook(() => useChat({ enabled: false, callImpl, storage }));
     const key = Object.keys(second.result.current.chat.conversations)[0];
-    expect(second.result.current.chat.conversations[key].entries.map((e) => e.body)).toEqual(['kept']);
+    expect(second.result.current.chat.conversations[key].entries.map((e) => ('body' in e ? e.body : e.kind))).toEqual(['kept']);
   });
 });
 

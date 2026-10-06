@@ -11,15 +11,59 @@ const entries: ChatEntry[] = [
 ];
 
 describe('Conversation', () => {
-  it('lists messages oldest first and renders bodies as plain text', () => {
+  it('lists messages oldest first and renders bodies as safe Markdown, never HTML (#117)', () => {
     render(<Conversation name="luna" entries={entries} composer={emptyComposer} onDraft={() => {}} onSend={() => {}} />);
-    const items = screen.getByRole('list', { name: 'Conversation with luna' }).querySelectorAll('li');
+    const items = screen.getByRole('list', { name: 'Conversation with luna' }).querySelectorAll(':scope > li');
     expect(items).toHaveLength(2);
     expect(items[1].textContent).toContain('You');
     const body = items[0].querySelector('.chat-body')!;
-    expect(body.textContent).toBe('<b>bold</b> **not markdown**\n  indented');
+    expect(body.textContent).toBe('<b>bold</b> not markdown\n  indented');
     expect(body.querySelector('b')).toBeNull();
-    expect(body.querySelector('strong')).toBeNull();
+    expect(body.querySelector('strong')?.textContent).toBe('not markdown');
+  });
+
+  it('shows links as text with their address, not as live links', () => {
+    const linked: ChatEntry[] = [{ id: 'm', direction: 'in', body: 'See [docs](https://example.com) and `agent_550fe`', at: 1, seq: 1 }];
+    render(<Conversation name="luna" entries={linked} composer={emptyComposer} onDraft={() => {}} onSend={() => {}} />);
+    const body = document.querySelector('.chat-body')!;
+    expect(body.querySelector('a')).toBeNull();
+    expect(body.textContent).toBe('See docs (https://example.com) and agent_550fe');
+    expect(body.querySelector('code')?.textContent).toBe('agent_550fe');
+  });
+
+  it('renders tool calls, approval requests and asides in the stream', () => {
+    const mixed: ChatEntry[] = [
+      { id: 'm', direction: 'in', body: 'On it.', at: 1, seq: 1 },
+      { id: 't', kind: 'tool_call', tool: 'terminal', args: 'npm test', status: 'running', at: 2, seq: null },
+      { id: 'a', kind: 'approval_request', tool: 'terminal', args: 'git push', risk: 'external', status: 'pending', at: 3, seq: null },
+      { id: 's', kind: 'aside', from: 'luna', to: 'scout', body: 'CI?', reply: 'Green.', team: 'luna', at: 4, seq: null },
+    ];
+    render(<Conversation name="luna" entries={mixed} composer={emptyComposer} onDraft={() => {}} onSend={() => {}} />);
+    const items = screen.getByRole('list', { name: 'Conversation with luna' }).querySelectorAll(':scope > li');
+    expect(items).toHaveLength(4);
+    expect(screen.getByRole('group', { name: 'Tool call: terminal — Running' })).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toContain('luna wants to run terminal');
+    expect(screen.getByRole('button', { name: /luna → scout/ }).getAttribute('aria-expanded')).toBe('true');
+    expect(items[3].textContent).toContain('Green.');
+  });
+
+  it('passes approval decisions to onResolve, and disables them without it', () => {
+    const ask: ChatEntry[] = [{ id: 'a', kind: 'approval_request', tool: 'terminal', args: 'rm x', risk: 'destructive', status: 'pending', at: 1, seq: null }];
+    const onResolve = vi.fn();
+    const { rerender } = render(<Conversation name="luna" entries={ask} composer={emptyComposer} onDraft={() => {}} onSend={() => {}} onResolve={onResolve} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Approve for session' }));
+    expect(onResolve).toHaveBeenCalledWith('a', 'approved_session');
+
+    rerender(<Conversation name="luna" entries={ask} composer={emptyComposer} onDraft={() => {}} onSend={() => {}} />);
+    const deny = screen.getByRole('button', { name: 'Deny' }) as HTMLButtonElement;
+    expect(deny.disabled).toBe(true);
+    expect(deny.title).toBe('Approvals arrive in a later update');
+  });
+
+  it('announces the newest incoming message politely', () => {
+    render(<Conversation name="luna" entries={entries.slice(0, 1)} composer={emptyComposer} onDraft={() => {}} onSend={() => {}} />);
+    const live = document.querySelector('[aria-live="polite"]')!;
+    expect(live.textContent).toContain('luna: <b>bold</b>');
   });
 
   it('sends on submit and Cmd+Enter, never when blank', () => {

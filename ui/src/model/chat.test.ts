@@ -18,6 +18,9 @@ import {
   senderKey,
   unreadOf,
   fromStored,
+  isTextEntry,
+  needsApproval,
+  pendingApprovals,
   STORED_ENTRIES,
   toStored,
   type ChatEntry,
@@ -84,7 +87,7 @@ describe('addSent and markRead', () => {
     const sent = addSent(incoming, 'user/agent_p', { messageId: 'msg_s', body: 'reply', at: 5_000, seq: 9 });
     expect(addSent(sent, 'user/agent_p', { messageId: 'msg_s', body: 'reply', at: 6_000 })).toBe(sent);
     const entries = conversationOf(sent, 'user/agent_p').entries;
-    expect(entries.map((e) => [e.id, e.direction])).toEqual([['msg_1', 'in'], ['msg_s', 'out']]);
+    expect(entries.map((e) => [e.id, isTextEntry(e) ? e.direction : e.kind])).toEqual([['msg_1', 'in'], ['msg_s', 'out']]);
     expect(unreadOf(sent, 'user/agent_p')).toBe(1);
   });
 
@@ -351,5 +354,42 @@ describe('aggregate memory bounds (#93)', () => {
     const stored = JSON.stringify({ v: 1, conversations });
     const loaded = fromStored(stored);
     expect(Object.keys(loaded.conversations).length).toBeLessThanOrEqual(MAX_CONVERSATIONS);
+  });
+});
+
+describe('entry kinds', () => {
+  const entries: ChatEntry[] = [
+    { id: 'm1', direction: 'in', body: 'hi', at: 1, seq: 1 },
+    { id: 't1', kind: 'tool_call', tool: 'terminal', args: 'npm test', status: 'success', at: 2, seq: null },
+    { id: 'a1', kind: 'approval_request', tool: 'terminal', args: 'rm -rf dist', risk: 'destructive', status: 'pending', at: 3, seq: null },
+    { id: 'a2', kind: 'approval_request', tool: 'browser', args: 'open x', risk: 'external', status: 'approved', at: 4, seq: null },
+    { id: 's1', kind: 'aside', from: 'luna', to: 'scout', body: 'check CI', at: 5, seq: null },
+    { id: 'a3', kind: 'approval_request', tool: 'edit_file', args: 'a.ts', risk: 'destructive', status: 'pending', at: 6, seq: null },
+  ];
+
+  it('treats entries without a kind, and kind text, as text', () => {
+    expect(entries.filter(isTextEntry).map((e) => e.id)).toEqual(['m1']);
+    expect(isTextEntry({ id: 'x', kind: 'text', direction: 'out', body: '', at: 0, seq: null })).toBe(true);
+  });
+
+  it('lists pending approvals in order', () => {
+    expect(pendingApprovals(entries).map((e) => e.id)).toEqual(['a1', 'a3']);
+    expect(pendingApprovals([])).toEqual([]);
+  });
+
+  it('asks for approval only in Safe Mode, for risky tools not approved for the session', () => {
+    const none = new Set<string>();
+    expect(needsApproval('destructive', 'safe', none, 'terminal')).toBe(true);
+    expect(needsApproval('external', 'safe', none, 'browser')).toBe(true);
+    expect(needsApproval('safe', 'safe', none, 'read_file')).toBe(false);
+    expect(needsApproval('destructive', 'autopilot', none, 'terminal')).toBe(false);
+    expect(needsApproval('destructive', 'safe', new Set(['terminal']), 'terminal')).toBe(false);
+    expect(needsApproval('destructive', 'safe', new Set(['browser']), 'terminal')).toBe(true);
+  });
+
+  it('keeps only text entries on reload', () => {
+    const state: ChatState = { conversations: { 'user/agent_p': { entries, unread: 0 } }, ids: new Set(entries.map((e) => e.id)) };
+    const back = fromStored(toStored(state));
+    expect(conversationOf(back, 'user/agent_p').entries.map((e) => e.id)).toEqual(['m1']);
   });
 });

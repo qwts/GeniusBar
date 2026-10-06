@@ -25,15 +25,95 @@ export interface InboxMessage {
   wake?: string;
 }
 
-/** One line of a conversation, either direction. Bodies are plain text. */
-export interface ChatEntry {
+// ---- Entry kinds (Lovable Phase 2, #122) -----------------------------------
+//
+// A conversation holds text messages (from the broker, as before) and, once
+// agent-bot puts them on the chat stream, tool calls, approval requests and
+// asides between agents. Field names follow the Lovable model
+// (src/model/chat.ts); text entries keep GeniusBar's shape and need no
+// `kind`, so everything stored or built before still is a text entry.
+
+export type ToolStatus = 'running' | 'success' | 'failed';
+export type ApprovalStatus = 'pending' | 'approved' | 'approved_session' | 'denied';
+/** How the owner answers an approval request. */
+export type ApprovalDecision = Exclude<ApprovalStatus, 'pending'>;
+export type Risk = 'safe' | 'external' | 'destructive';
+
+interface EntryBase {
   id: string;
-  direction: 'in' | 'out';
-  body: string;
   /** Epoch ms: broker time for incoming, local time for sent. */
   at: number;
   /** Broker sequence when known; orders entries sent in the same ms. */
   seq: number | null;
+}
+
+/** One message of a conversation, either direction. Bodies are untrusted text (rendered as safe Markdown). */
+export interface TextEntry extends EntryBase {
+  kind?: 'text';
+  direction: 'in' | 'out';
+  body: string;
+}
+
+/** A tool the companion ran, with its outcome. */
+export interface ToolCallEntry extends EntryBase {
+  kind: 'tool_call';
+  tool: string;
+  args: string;
+  status: ToolStatus;
+  output?: string | undefined;
+  /** Unified-diff lines ("+…" / "-…") when the tool changed a file. */
+  diff?: string | undefined;
+}
+
+/** A tool call waiting for (or answered by) the owner. */
+export interface ApprovalEntry extends EntryBase {
+  kind: 'approval_request';
+  tool: string;
+  args: string;
+  risk: Risk;
+  status: ApprovalStatus;
+}
+
+/** Background coordination between two agents, not addressed to the owner. */
+export interface AsideEntry extends EntryBase {
+  kind: 'aside';
+  from: string;
+  to: string;
+  body: string;
+  /** The other agent's answer, shown inline under the aside. */
+  reply?: string | undefined;
+  /** Team the exchange happened in (lead's name). */
+  team?: string | undefined;
+}
+
+/** One line of a conversation. */
+export type ChatEntry = TextEntry | ToolCallEntry | ApprovalEntry | AsideEntry;
+
+export function isTextEntry(entry: ChatEntry): entry is TextEntry {
+  return entry.kind === undefined || entry.kind === 'text';
+}
+
+/** Approval requests still waiting for an answer, oldest first. */
+export function pendingApprovals(entries: readonly ChatEntry[]): ApprovalEntry[] {
+  return entries.filter(
+    (e): e is ApprovalEntry => e.kind === 'approval_request' && e.status === 'pending',
+  );
+}
+
+/**
+ * Whether a tool call must stop for approval: never in Auto-Pilot, never
+ * for read-only tools, otherwise unless the tool was approved for the
+ * session.
+ */
+export function needsApproval(
+  risk: Risk,
+  mode: 'safe' | 'autopilot',
+  sessionApproved: ReadonlySet<string>,
+  tool: string,
+): boolean {
+  if (mode === 'autopilot') return false;
+  if (risk === 'safe') return false;
+  return !sessionApproved.has(tool);
 }
 
 export interface Conversation {
@@ -306,8 +386,10 @@ export function toStored(state: ChatState, keep: ReadonlySet<string> = new Set()
   return JSON.stringify({ v: 1, conversations });
 }
 
-const isEntry = (e: unknown): e is ChatEntry => {
-  const x = e as ChatEntry;
+// Only text entries are persisted for now; the other kinds come from the
+// live stream and are not restored.
+const isEntry = (e: unknown): e is TextEntry => {
+  const x = e as TextEntry;
   return typeof x?.id === 'string' && (x.direction === 'in' || x.direction === 'out')
     && typeof x.body === 'string' && typeof x.at === 'number' && (x.seq === null || typeof x.seq === 'number');
 };
