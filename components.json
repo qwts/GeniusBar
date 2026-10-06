@@ -16,8 +16,8 @@
     },
     "agent-bot": {
       "repo": "qwts/agent-bot-identity",
-      "tag": "v0.10.17",
-      "ref": "e0d9a7719a6c42beb687fae0d4aaf835fa4100ec"
+      "tag": "v0.10.18",
+      "ref": "d7f7924a50335c4a038d38b90451fd482433fcab"
     }
   }
 }
