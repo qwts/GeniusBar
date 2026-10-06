@@ -3620,7 +3620,7 @@ const MAX_REASON_CHARS: usize = 200;
 /// revision moved since the dialog read it (`soul-revision-stale`), copies
 /// the package into a private temporary directory (no symlink is followed;
 /// working state is left out), applies the edits there, and runs `soul
-/// revision edit <agentId> <copy> <reason>`, which owner-gates the change
+/// revision edit <agentId> <copy> <reason> --apply`, which owner-gates the change
 /// itself (as `soul remove` does; GeniusBar presents no principal). The copy
 /// is removed afterwards. Answers the revision record (`revision`,
 /// `parentRevision`, `author`, `reason`, `authorization`, ...).
@@ -3925,6 +3925,7 @@ fn soul_revision_edit_args(
         agent_id.into(),
         package.as_os_str().to_owned(),
         reason.into(),
+        "--apply".into(),
     ])
 }
 
@@ -4193,7 +4194,8 @@ mod soul_revision_edit_tests {
                 "edit",
                 "agent_p",
                 "/tmp/geniusbar-revision-1/edit.soul",
-                "Edited in GeniusBar"
+                "Edited in GeniusBar",
+                "--apply"
             ]
         );
         assert!(soul_revision_edit_args("luna", package, "r").is_err());
