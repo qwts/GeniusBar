@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useI18n } from '../lib/i18n';
 import { canLaunch } from '../model/launch';
 import type { LaunchApi } from '../useLaunch';
@@ -13,6 +13,8 @@ export interface Starter {
   harnesses: readonly string[];
   /** Whether git works; a stock Mac first needs Apple's command line tools. */
   devTools: boolean;
+  /** Whether Apple's installer for them is open now (#101); older shells leave it out. */
+  devToolsInstalling?: boolean;
 }
 
 /** Opens Apple's installer for the command line tools, then checks again. */
@@ -58,20 +60,76 @@ function HarnessSignIn({ auth, harness, soul }: { auth: HarnessAuth; harness: st
   }
 }
 
-/** Shown instead of the launch until git works on this Mac. */
-function DevToolsNeeded({ devTools }: { devTools?: DevTools }) {
-  const [opened, setOpened] = useState(false);
+/** How often the waiting step checks again while Apple's installer runs. */
+export const DEV_TOOLS_POLL_MS = 5000;
+/** Checks after which an installer that never opened counts as cancelled. */
+const INSTALLER_NEVER_OPENED_POLLS = 3;
+
+type DevToolsStep = 'explain' | 'opening' | 'waiting' | 'cancelled';
+
+/**
+ * Shown instead of the launch until git works on this Mac (#101). It says
+ * why before macOS asks, waits while Apple's installer runs, and says how
+ * to resume if the owner cancels it. The shell's starter probe
+ * (`xcode-select -p`, and whether the installer is open) decides; the
+ * launch takes over by itself once the tools are there.
+ */
+function DevToolsNeeded({ devTools, installing }: { devTools?: DevTools; installing?: boolean }) {
+  const { t } = useI18n();
+  const [step, setStep] = useState<DevToolsStep>('explain');
   const [error, setError] = useState<string>();
+  // Whether this attempt's installer was seen open, and how many checks ran.
+  const seen = useRef(false);
+  const polls = useRef(0);
+  const recheck = useRef(devTools?.recheck);
+  recheck.current = devTools?.recheck;
+  const install = () => {
+    if (!devTools) return;
+    seen.current = false;
+    polls.current = 0;
+    setError(undefined);
+    setStep('opening');
+    devTools.install().then(() => setStep('waiting'), (e: unknown) => {
+      setError(e instanceof Error ? e.message : String(e));
+      setStep('cancelled');
+    });
+  };
+  // Poll the probe only while waiting; leaving the step stops it.
+  useEffect(() => {
+    if (step !== 'waiting') return;
+    const timer = setInterval(() => {
+      polls.current += 1;
+      if (installing === false && !seen.current && polls.current > INSTALLER_NEVER_OPENED_POLLS) setStep('cancelled');
+      else recheck.current?.();
+    }, DEV_TOOLS_POLL_MS);
+    return () => clearInterval(timer);
+  }, [step, installing]);
+  // The installer closing without the tools means the owner cancelled it.
+  useEffect(() => {
+    if (step !== 'waiting' || installing === undefined) return;
+    if (installing) seen.current = true;
+    else if (seen.current) setStep('cancelled');
+  }, [step, installing]);
   return (
     <div role="status">
-      <p>Your companion needs Apple's command line developer tools first. It's a free install from Apple and takes a few minutes.</p>
+      {(step === 'explain' || step === 'opening') && <p>{t('setup.clt.explain')}</p>}
+      {step === 'opening' && <p className="muted small">{t('setup.clt.opening')}</p>}
+      {step === 'waiting' && <p>{t('setup.clt.waiting')}</p>}
+      {step === 'cancelled' && (
+        <>
+          <p>{t('setup.clt.cancelled')}</p>
+          <p><code className="selectable">xcode-select --install</code></p>
+        </>
+      )}
       {error && <p className="error small" role="alert">{error}</p>}
-      {devTools && (
+      {devTools && step === 'explain' && (
         <div className="detail-actions">
-          <button type="button" onClick={() => {
-            devTools.install().then(() => setOpened(true), (e: unknown) => setError(e instanceof Error ? e.message : String(e)));
-          }}>Install developer tools</button>
-          {opened && <button type="button" onClick={devTools.recheck}>I've installed them</button>}
+          <button type="button" onClick={install}>{t('setup.clt.continue')}</button>
+        </div>
+      )}
+      {devTools && step === 'cancelled' && (
+        <div className="detail-actions">
+          <button type="button" onClick={install}>{t('setup.clt.retry')}</button>
         </div>
       )}
     </div>
@@ -90,7 +148,7 @@ export function FirstLaunch({ starter, launcher, auth, devTools, onStart }:
   const [comms, setComms] = useState(true);
   const [started, setStarted] = useState(false);
   const ids = useId();
-  if (!starter.devTools && !started) return <DevToolsNeeded devTools={devTools} />;
+  if (!starter.devTools && !started) return <DevToolsNeeded devTools={devTools} installing={starter.devToolsInstalling} />;
   const ready = canLaunch(launcher.state) && harness.trim() !== '';
   return (
     <form
