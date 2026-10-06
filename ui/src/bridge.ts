@@ -123,6 +123,132 @@ export async function setSoulComms(agentId: string, comms: boolean, invokeImpl: 
 }
 
 /**
+ * A soul's cold-wake setting (#122, "Wake on new messages"), from
+ * `soul cold-wake <agentId> show --json`. `on` is any wake lane (an ACP
+ * turn, a resumed session, a webhook); `lane` names it, null when off.
+ */
+export interface SoulColdWake {
+  on: boolean;
+  lane: string | null;
+}
+
+export function normalizeSoulColdWake(raw: unknown): SoulColdWake | null {
+  if (!isRecord(raw)) return null;
+  const lane = typeof raw.lane === 'string' && raw.lane !== '' ? raw.lane : null;
+  const { setting } = raw;
+  // agent-bot 0.10.14 says 'on' | 'off' | 'resume' | 'webhook'; the stored
+  // shape (true, false or a lane object) is accepted too.
+  if (typeof setting === 'string') return { on: lane !== null || setting !== 'off', lane };
+  if (typeof setting === 'boolean') return { on: setting || lane !== null, lane: lane ?? (setting ? 'acp' : null) };
+  if (isRecord(setting)) return { on: true, lane: lane ?? (typeof setting.lane === 'string' ? setting.lane : null) };
+  if (setting === null || setting === undefined) return lane === null ? null : { on: true, lane };
+  return null;
+}
+
+/** The soul's wake setting, or null when agent-bot cannot say (outside the app, an older bundle, a refusal). */
+export async function soulColdWake(agentId: string, invokeImpl: typeof invoke = invoke): Promise<SoulColdWake | null> {
+  if (!inApp() && invokeImpl === invoke) return null;
+  try {
+    return normalizeSoulColdWake(await invokeImpl<unknown>('soul_cold_wake', { agent: agentId, action: 'show' }));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Turns waking on new messages on or off. agent-bot asks the owner (its
+ * consent dialog, Touch ID); a refusal rejects with its reason, and the
+ * setting stays as it was.
+ */
+export async function setSoulColdWake(agentId: string, on: boolean, invokeImpl: typeof invoke = invoke): Promise<SoulColdWake> {
+  let raw: unknown;
+  try {
+    raw = await invokeImpl<unknown>('soul_cold_wake', { agent: agentId, action: on ? 'on' : 'off' });
+  } catch (error) {
+    const e = error as { code?: unknown; message?: unknown };
+    throw new BridgeError(typeof e?.code === 'string' ? e.code : 'cold-wake-failed',
+      typeof e?.message === 'string' ? e.message : String(error));
+  }
+  const state = normalizeSoulColdWake(raw);
+  if (!state) throw new BridgeError('cold-wake-failed', 'agent-bot gave no wake setting');
+  return state;
+}
+
+/** A harness sign-in a daemon turn found missing or expired (#84). */
+export interface HarnessAuthFailure {
+  status: 'signed-out' | 'expired';
+  harness: string;
+  since: string | null;
+}
+
+/**
+ * What agent-bot's population census keeps about a soul that the broker's
+ * census does not (#122): its GitHub App slug (null when it joined without
+ * one) and a failed harness sign-in (null when none is recorded).
+ */
+export interface SoulPopulation {
+  agentId: string;
+  appSlug: string | null;
+  harnessAuth: HarnessAuthFailure | null;
+}
+
+export function normalizeSoulPopulation(raw: unknown): SoulPopulation | null {
+  if (!isRecord(raw) || typeof raw.agentId !== 'string') return null;
+  const auth = raw.harnessAuth;
+  const harnessAuth: HarnessAuthFailure | null = isRecord(auth) && (auth.status === 'signed-out' || auth.status === 'expired')
+    && typeof auth.harness === 'string' && auth.harness !== ''
+    ? { status: auth.status as HarnessAuthFailure['status'], harness: auth.harness, since: typeof auth.since === 'string' ? auth.since : null }
+    : null;
+  return {
+    agentId: raw.agentId,
+    appSlug: typeof raw.appSlug === 'string' && raw.appSlug !== '' ? raw.appSlug : null,
+    harnessAuth,
+  };
+}
+
+/** The soul's census record, or null when agent-bot cannot say. */
+export async function soulPopulation(agentId: string, invokeImpl: typeof invoke = invoke): Promise<SoulPopulation | null> {
+  if (!inApp() && invokeImpl === invoke) return null;
+  try {
+    return normalizeSoulPopulation(await invokeImpl<unknown>('soul_population', { agent: agentId }));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether the soul's harness is signed in (`harness auth status H --soul ID`,
+ * ADR-0276); null when agent-bot cannot say.
+ */
+export async function harnessSignedIn(harness: string, agentId: string, invokeImpl: typeof invoke = invoke): Promise<boolean | null> {
+  if (!inApp() && invokeImpl === invoke) return null;
+  try {
+    const raw = await invokeImpl<unknown>('harness_auth', { action: 'status', harness, soul: agentId });
+    return isRecord(raw) && typeof raw.loggedIn === 'boolean' ? raw.loggedIn : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Runs the harness's own sign-in for the soul (`harness auth login H --soul
+ * ID`; it may open a browser). A signed-in harness clears the recorded
+ * failure in agent-bot. Rejects with agent-bot's reason.
+ */
+export async function harnessSignIn(harness: string, agentId: string, invokeImpl: typeof invoke = invoke): Promise<boolean> {
+  let raw: unknown;
+  try {
+    raw = await invokeImpl<unknown>('harness_auth', { action: 'login', harness, soul: agentId });
+  } catch (error) {
+    const e = error as { code?: unknown; message?: unknown };
+    throw new BridgeError(typeof e?.code === 'string' ? e.code : 'harness-auth-failed',
+      typeof e?.message === 'string' ? e.message : String(error));
+  }
+  if (!isRecord(raw) || typeof raw.loggedIn !== 'boolean') throw new BridgeError('harness-auth-failed', 'agent-bot gave no sign-in state');
+  return raw.loggedIn;
+}
+
+/**
  * A page of a soul's asides from agent-bot (`soul asides --json`, #122),
  * oldest first after `after`; null when agent-bot cannot say (outside the
  * app, an older bundle, a refusal).

@@ -1,15 +1,17 @@
 // Dev-only preview (`npm run dev`, then /preview.html?mode=tray|window,
 // plus &select=<agent id> to open a companion (its Audit log tab shows
-// sampleAudit), or &open=<path> to open a
+// sampleAudit; its Details show samplePopulation and sampleColdWake, and
+// &select=agent_s shows the expired sign-in banner), or &open=<path> to open a
 // package as Finder would):
 // the app on the fixed fixtures, without Tauri. Not part of the build.
 import { StrictMode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App, type AppMode } from './App';
 import { AuditSourceContext, type AuditSource } from './components/AuditLog';
+import { SoulSourceContext, type SoulSource } from './components/SoulNotices';
 import type { CensusRow } from './model/census';
 import { emptyChat, emptyComposer, mergeIncoming, type ChatState } from './model/chat';
-import { inboxMessage, sampleApprovals, sampleAudit, sampleCensus, sampleConnection, sampleSessionEntries } from './model/fixtures';
+import { inboxMessage, sampleApprovals, sampleAudit, sampleCensus, sampleColdWake, sampleConnection, samplePopulation, sampleSessionEntries } from './model/fixtures';
 import type { ChatApi } from './useChat';
 import '@fontsource/ibm-plex-sans/latin-400.css';
 import '@fontsource/ibm-plex-sans/latin-500.css';
@@ -46,6 +48,22 @@ const state: ChatState = {
 // The Audit log tab (#122) reads the fixture rather than agent-bot.
 const audit: AuditSource = async (agentId) => sampleAudit.filter((r) => agentId === null || r.agentId === agentId);
 
+// Details rows and the sign-in banner (#122) read fixtures; changes land
+// locally, as agent-bot would apply them once the owner approves.
+const population = { ...samplePopulation };
+const wakes = { ...sampleColdWake };
+const soulSource: SoulSource = {
+  population: async (agentId) => population[agentId] ?? null,
+  coldWake: async (agentId) => wakes[agentId] ?? null,
+  setColdWake: async (agentId, on) => (wakes[agentId] = { on, lane: on ? 'acp' : null }),
+  signedIn: async (_harness, agentId) => (agentId in population ? true : null),
+  signIn: async (_harness, agentId) => {
+    const record = population[agentId];
+    if (record) population[agentId] = { ...record, harnessAuth: null };
+    return true;
+  },
+};
+
 function Preview() {
   const params = new URLSearchParams(location.search);
   const mode = (params.get('mode') === 'window' ? 'window' : 'tray') as AppMode;
@@ -77,4 +95,4 @@ function Preview() {
   return mode === 'tray' ? <div style={{ width: 384, height: 560, margin: 16, outline: '1px solid #444' }}>{app}</div> : app;
 }
 
-createRoot(document.getElementById('root')!).render(<StrictMode><AuditSourceContext.Provider value={audit}><Preview /></AuditSourceContext.Provider></StrictMode>);
+createRoot(document.getElementById('root')!).render(<StrictMode><AuditSourceContext.Provider value={audit}><SoulSourceContext.Provider value={soulSource}><Preview /></SoulSourceContext.Provider></AuditSourceContext.Provider></StrictMode>);
