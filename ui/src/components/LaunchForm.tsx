@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check } from 'lucide-react';
 import { displayName, type CensusRow } from '../model/census';
-import { canLaunch, harnessOptions, MAX_HARNESS, normalPackagePath, preferredHarness, prefillHarness, suggestedName, type LaunchState } from '../model/launch';
+import { canLaunch, harnessOptions, MAX_BRIEF, MAX_HARNESS, normalPackagePath, preferredHarness, prefillHarness, suggestedName, type LaunchState } from '../model/launch';
 import { useI18n } from '../lib/i18n';
 import { radioGroupKeys } from '../lib/radioGroup';
 import { chosenTemplate, CUSTOM_SOUL, initialChoice } from '../model/templates';
@@ -100,9 +100,9 @@ const field = 'h-9 w-full rounded-md border border-input bg-transparent px-3 tex
 
 /**
  * Launch form for an existing soul or a soul package, drawn as Lovable's
- * launch dialog (20.03.51) in four steps: the soul, the harness that runs
- * it (and its model, #128, not yet in the design), the account it runs as,
- * and its agent comms. Harness, model and account are picked from what
+ * launch dialog (20.03.51) in four steps: the soul (and its brief, #120,
+ * not yet in the design), the harness that runs it (and its model, #128,
+ * not yet in the design), the account it runs as, and its agent comms. Harness, model and account are picked from what
  * GeniusBar knows, and "Other…" still takes any value.
  * One launch at a time; the result stays on screen and is never retried.
  */
@@ -137,6 +137,12 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
   const [name, setName] = useState(soul || copyOf ? '' : suggestedName(packageName));
   // The package's manifest arrives after the form opened (agent-bot's locate
   // runs behind the Finder open): it prefills what the owner has not typed yet.
+  // The brief (#120): what this companion is here to do. The census does not
+  // carry a soul's saved brief, so a relaunch starts blank, and blank sends
+  // none, which keeps the brief agent-bot already has.
+  const [brief, setBrief] = useState('');
+  const briefLength = brief.trim().length;
+  const briefTooLong = briefLength > MAX_BRIEF;
   const [touched, setTouched] = useState<{ name?: boolean; harness?: boolean }>({});
   useEffect(() => {
     if (!soul && !copyOf && !touched.name) setName(suggestedName(packageName));
@@ -180,7 +186,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
       aria-label={t('launch.formLabel', { what })}
       onSubmit={(e) => {
         e.preventDefault();
-        if (!ready || checkingPackage || pathError || needsName) return;
+        if (!ready || checkingPackage || pathError || needsName || briefTooLong) return;
         setStarted(true);
         const path = normalPackagePath(packagePath);
         if (!soul && custom) setPackagePath(path);
@@ -191,6 +197,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
           name: soul ? '' : name,
           ...(comms === undefined ? {} : { comms }),
           ...(model?.trim() ? { model: model.trim() } : {}),
+          ...(brief.trim() ? { brief } : {}),
         });
       }}
     >
@@ -239,6 +246,18 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
           <p id="launch-copy-hint" className="text-xs text-muted-foreground">{t('launch.copyHint', { name: copyOf.name || copyOf.agentId })}</p>
         )}
         {!soul && custom && packageDescription && <p className="text-xs text-muted-foreground">{packageDescription}</p>}
+        <label className="grid gap-1">
+          <span className="text-sm font-medium">{t('launch.brief')}</span>
+          <textarea value={brief} rows={3} placeholder={t('launch.briefPlaceholder')} autoComplete="off"
+            aria-describedby="launch-brief-hint launch-brief-count" aria-invalid={briefTooLong || undefined}
+            className="min-h-16 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm text-foreground"
+            onChange={(e) => setBrief(e.target.value)} />
+        </label>
+        <p className="flex justify-between gap-2 text-xs text-muted-foreground">
+          <span id="launch-brief-hint">{soul ? t('launch.briefKeep') : t('launch.briefHint')}</span>
+          <span id="launch-brief-count" className={`shrink-0 font-mono ${briefTooLong ? 'text-destructive' : ''}`}>{briefLength} / {MAX_BRIEF}</span>
+        </p>
+        {briefTooLong && <p className="error small" role="alert">{t('launch.briefTooLong', { max: MAX_BRIEF })}</p>}
       </fieldset>
       <fieldset>
         <legend className={legend}>{t('launch.step.harness')}</legend>
@@ -308,7 +327,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
         {onCancel && (
           <button type="button" onClick={onCancel} className="h-9 rounded-md px-4 text-sm font-medium hover:bg-accent">{t('cancel')}</button>
         )}
-        <button type="submit" disabled={!ready || checkingPackage || Boolean(pathError) || needsName}
+        <button type="submit" disabled={!ready || checkingPackage || Boolean(pathError) || needsName || briefTooLong}
           className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
           {t('launch.go')}
         </button>

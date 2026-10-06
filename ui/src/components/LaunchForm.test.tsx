@@ -252,3 +252,65 @@ describe('LaunchForm soul templates (#65)', () => {
     expect(screen.queryByRole('radiogroup')).toBeNull();
   });
 });
+
+describe('LaunchForm brief (#120)', () => {
+  const briefField = () => screen.getByLabelText('Brief') as HTMLTextAreaElement;
+
+  it('sends no brief when the field is blank', () => {
+    const launcher = launcherIn({ phase: 'idle' });
+    render(form(launcher, { initialPackagePath: '/souls/helper.soul' }));
+    fireEvent.change(briefField(), { target: { value: '   ' } });
+    fireEvent.submit(screen.getByRole('form'));
+    expect(launcher.launch).toHaveBeenCalledOnce();
+    expect(vi.mocked(launcher.launch).mock.calls[0][0]).not.toHaveProperty('brief');
+  });
+
+  it('sends a typed brief for a package and counts it against 4000', () => {
+    const launcher = launcherIn({ phase: 'idle' });
+    render(form(launcher, { initialPackagePath: '/souls/helper.soul' }));
+    fireEvent.change(briefField(), { target: { value: '  Keep the notes.\nFlag gaps.  ' } });
+    expect(screen.getByText('26 / 4000')).toBeTruthy();
+    fireEvent.submit(screen.getByRole('form'));
+    expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ brief: '  Keep the notes.\nFlag gaps.  ' }));
+  });
+
+  it('refuses 4001 characters inline and keeps Launch off', () => {
+    const launcher = launcherIn({ phase: 'idle' });
+    render(form(launcher, { initialPackagePath: '/souls/helper.soul' }));
+    fireEvent.change(briefField(), { target: { value: 'x'.repeat(4001) } });
+    expect(screen.getByRole('alert').textContent).toBe('The brief is longer than 4000 characters.');
+    expect(briefField().getAttribute('aria-invalid')).toBe('true');
+    expect(launchButton().disabled).toBe(true);
+    fireEvent.submit(screen.getByRole('form'));
+    expect(launcher.launch).not.toHaveBeenCalled();
+    fireEvent.change(briefField(), { target: { value: 'x'.repeat(4000) } });
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(launchButton().disabled).toBe(false);
+  });
+
+  it('offers a blank brief on relaunch that keeps the saved one, and sends a new one when typed', () => {
+    const launcher = launcherIn({ phase: 'idle' });
+    render(form(launcher, { soul: starter }));
+    // The census carries no saved brief, so a relaunch starts blank.
+    expect(briefField().value).toBe('');
+    expect(screen.getByText('What this companion is here to do. Leave blank to keep its current brief.')).toBeTruthy();
+    fireEvent.submit(screen.getByRole('form'));
+    expect(vi.mocked(launcher.launch).mock.calls[0][0]).not.toHaveProperty('brief');
+    cleanup();
+    const again = launcherIn({ phase: 'idle' });
+    render(form(again, { soul: starter }));
+    fireEvent.change(briefField(), { target: { value: 'Review open PRs' } });
+    fireEvent.submit(screen.getByRole('form'));
+    expect(again.launch).toHaveBeenCalledWith(expect.objectContaining({ target: { soul: 'agent_s' }, brief: 'Review open PRs' }));
+  });
+
+  it('shows the brief for a template launch too', async () => {
+    const launcher = launcherIn({ phase: 'idle' });
+    const listTemplates = vi.fn(async (): Promise<SoulTemplateList> => sampleTemplates);
+    render(form(launcher, { listTemplates }));
+    await screen.findAllByRole('radio');
+    fireEvent.change(briefField(), { target: { value: 'Triage the inbox' } });
+    fireEvent.submit(screen.getByRole('form'));
+    expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ brief: 'Triage the inbox' }));
+  });
+});

@@ -37,6 +37,26 @@ describe('useLaunch', () => {
     expect(calls).toEqual(['launch']);
   });
 
+  it('sends a trimmed brief, none when blank, and refuses one over 4000 characters (#120)', async () => {
+    const sent: Record<string, unknown>[] = [];
+    const callImpl = (async (method: string, params: Record<string, unknown>) => {
+      if (method === 'launch') sent.push(params);
+      return method === 'launch' ? { requestId: `launch_${sent.length}` } : { status: 'launched' };
+    }) as never;
+    const { result } = renderHook(() => useLaunch({ callImpl, pollMs: 5 }));
+    await act(() => result.current.launch({ ...request, brief: '  Ship the docs.  ' }));
+    await waitFor(() => expect(result.current.state.phase).toBe('launched'));
+    act(() => result.current.reset());
+    await act(() => result.current.launch({ ...request, brief: '   ' }));
+    await waitFor(() => expect(result.current.state.phase).toBe('launched'));
+    act(() => result.current.reset());
+    await act(() => result.current.launch({ ...request, brief: 'x'.repeat(4001) }));
+    expect(result.current.state).toMatchObject({ phase: 'error', text: 'The brief is longer than 4000 characters.' });
+    expect(sent).toHaveLength(2);
+    expect(sent[0].brief).toBe('Ship the docs.');
+    expect('brief' in sent[1]).toBe(false);
+  });
+
   it('rejects an invalid request without calling the bridge', async () => {
     let called = false;
     const callImpl = (async () => { called = true; }) as never;
