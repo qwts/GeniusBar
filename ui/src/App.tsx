@@ -31,6 +31,9 @@ import { updateNotice } from './model/updates';
 import { layoutActions, useLayout } from './state/layout';
 import { usePreferences } from './state/preferences';
 import { DefaultHarness } from './components/DefaultHarness';
+import { defaultSandboxSource, SandboxProvider, useSandbox, type SandboxSource } from './components/Sandbox';
+import { SandboxCard } from './components/SandboxCard';
+import { SandboxChip } from './components/SandboxChip';
 import type { ChatApi } from './useChat';
 import type { LaunchApi } from './useLaunch';
 import type { UpdateApi } from './useUpdates';
@@ -103,6 +106,8 @@ interface AppProps {
   profileSource?: ProfileSource;
   /** Whether the popup is showing, for the desktop window's chimes (#122); the app asks the shell when absent. */
   popupShowing?: () => Promise<boolean>;
+  /** Sandboxing (agent-bot `sandbox`, #66); the app uses agent-bot when absent, null hides it. */
+  sandboxSource?: SandboxSource | null;
 }
 
 const liveStopper: Stopper = { supported: () => soulStopSupported(), stop: (agentId) => stopSoul(agentId) };
@@ -126,11 +131,14 @@ export function App(props: AppProps) {
   // The Details rows' computer-use switch (#122); the quick menu's comes as a prop in Shell.
   const computerUse = props.computerUseSwitch ?? (inApp() && !props.isStatic ? liveComputerUse : null);
   const profiles = props.profileSource ?? (inApp() && !props.isStatic ? liveProfileSource : null);
+  const sandbox = props.sandboxSource === undefined ? defaultSandboxSource(props.isStatic) : props.sandboxSource;
   return (
     <I18nProvider>
       <ComputerUseContext.Provider value={computerUse}>
         <ProfileSourceContext.Provider value={profiles}>
-          <Shell {...props} />
+          <SandboxProvider source={sandbox}>
+            <Shell {...props} />
+          </SandboxProvider>
         </ProfileSourceContext.Provider>
       </ComputerUseContext.Provider>
     </I18nProvider>
@@ -153,6 +161,7 @@ function LanguageSelect() {
 // window mode) and, from it, one companion's session.
 function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onOpenDesktop, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, floatingButton = false, archiver, stopper, pauser, computerUseSwitch, templateLister, popupShowing }: AppProps) {
   const { t } = useI18n();
+  const sandbox = useSandbox();
   const forest = useMemo(() => buildSoulForest(census), [census]);
   const roster = useMemo(() => allSouls(forest), [forest]);
   // Selection holds the roster key and resolves against each census, so
@@ -320,6 +329,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
           empty={!showStarter && empty && <p className="muted empty">{empty}</p>} />
       )}
       {launch && !showSetup && <DefaultHarness harnesses={launch.harnesses} />}
+      {!showSetup && <SandboxCard />}
       {/* The design's footer icon row; the rest sits in the ⋯ menu (Lovable audit §4, §7). */}
       <footer className="border-t border-border">
         <div className="flex items-center gap-1.5 p-2 text-xs">
@@ -432,7 +442,11 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
         badges={shownBadges} onArchive={archiveWith && setArchiving}
         notice={notice} onLaunch={launch && !showSetup ? () => { setSelectedKey(null); setLaunchingPackage(true); } : undefined}>
         {selected && session && (
-          <CompanionWindow soul={selected} paused={paused} onClose={() => setSelectedKey(null)} actions={<InfoButton soul={selected} />}>{session}</CompanionWindow>
+          // The sandbox chip is the design's title-bar pill; while agent-bot
+          // resolves this soul it replaces the census's hardened pill.
+          <CompanionWindow soul={sandbox.soul(selected.agentId) ? { ...selected, hardened: undefined } : selected}
+            paused={paused} onClose={() => setSelectedKey(null)}
+            actions={<><SandboxChip soul={selected} /><InfoButton soul={selected} /></>}>{session}</CompanionWindow>
         )}
       </Desktop>
       <FloatingDudle showButton={floatingButton} lead={floatingLead(forest, layout.hidden)} paused={paused}
