@@ -12,6 +12,11 @@ describe('needsSetup', () => {
     expect(needsSetup({ ...disconnected, unpaired: true })).toBe(false);
     expect(needsSetup({ ...disconnected, bridgeConnected: true, brokerUnreachable: true, lastRefresh: new Date() })).toBe(false);
   });
+
+  it('is not offered while installed services are starting (#118)', () => {
+    expect(needsSetup({ ...disconnected, bridgeConnected: true, brokerUnreachable: true, starting: true })).toBe(false);
+    expect(needsSetup({ ...disconnected, bridgeConnected: true, unpaired: true, starting: true })).toBe(true);
+  });
 });
 
 describe('applyProgress', () => {

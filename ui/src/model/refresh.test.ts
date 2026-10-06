@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyCensus, commsOf, computerUseOf, sameSet } from './refresh';
-import { disconnected, unpairedMessage } from './status';
+import { disconnected, STARTING_WINDOW_MS, unpairedMessage } from './status';
+import { needsSetup } from './setup';
 
 const now = new Date('2026-10-02T01:00:00Z');
 const later = new Date('2026-10-02T01:00:05Z');
@@ -31,6 +32,55 @@ describe('applyCensus', () => {
   it('other errors are reported without claiming an outage', () => {
     const s = applyCensus(disconnected, { ok: false, code: 'rate-limited', message: 'slow down' }, now);
     expect(s).toMatchObject({ bridgeConnected: true, brokerUnreachable: false, lastError: 'slow down' });
+  });
+});
+
+describe('services starting after login (#118)', () => {
+  const at = (ms: number) => new Date(now.getTime() + ms);
+  const timeout = { ok: false as const, code: 'broker-timeout', message: 'broker request timed out after 5000ms' };
+  const refused = { ok: false as const, code: 'broker-unreachable', message: 'cannot reach the broker: ECONNREFUSED' };
+  const bridged = applyCensus(disconnected, { ok: false, code: 'bridge-unavailable', message: 'starting' }, now);
+
+  it('a timeout with the services installed is starting, not setup', () => {
+    const s = applyCensus(bridged, timeout, now, true);
+    expect(s).toMatchObject({ bridgeConnected: true, brokerUnreachable: true, starting: true, failingSince: now, lastRefresh: null });
+    expect(needsSetup(s)).toBe(false);
+    // Still starting a little later; the first failure is kept.
+    const again = applyCensus(s, refused, at(60_000), true);
+    expect(again).toMatchObject({ starting: true, failingSince: now });
+    expect(needsSetup(again)).toBe(false);
+  });
+
+  it('refused with nothing installed offers setup as before', () => {
+    const s = applyCensus(bridged, refused, now, false);
+    expect(s).toMatchObject({ brokerUnreachable: true, starting: false });
+    expect(needsSetup(s)).toBe(true);
+    // The default (installation unknown) behaves the same.
+    expect(needsSetup(applyCensus(bridged, refused, now))).toBe(true);
+  });
+
+  it('starting that recovers is connected', () => {
+    const starting = applyCensus(applyCensus(bridged, timeout, now, true), timeout, at(90_000), true);
+    const s = applyCensus(starting, { ok: true, souls: [] }, at(120_000));
+    expect(s).toMatchObject({ bridgeConnected: true, brokerUnreachable: false, starting: false, failingSince: null, lastRefresh: at(120_000) });
+    expect(needsSetup(s)).toBe(false);
+  });
+
+  it('starting past the window falls back to setup', () => {
+    const starting = applyCensus(bridged, timeout, now, true);
+    const near = applyCensus(starting, timeout, at(STARTING_WINDOW_MS - 1), true);
+    expect(near.starting).toBe(true);
+    const over = applyCensus(near, timeout, at(STARTING_WINDOW_MS), true);
+    expect(over).toMatchObject({ brokerUnreachable: true, starting: false, failingSince: now });
+    expect(needsSetup(over)).toBe(true);
+  });
+
+  it('is never starting once a census answered in this run, or when unpaired', () => {
+    const ok = applyCensus(disconnected, { ok: true, souls: [] }, now);
+    expect(applyCensus(ok, timeout, later, true).starting).toBe(false);
+    const unpaired = applyCensus(applyCensus(bridged, timeout, now, true), { ok: false, code: 'unauthenticated', message: 'who?' }, later, true);
+    expect(unpaired).toMatchObject({ unpaired: true, starting: false, failingSince: null });
+    expect(needsSetup(unpaired)).toBe(true);
   });
 });
 

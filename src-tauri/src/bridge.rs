@@ -1937,3 +1937,61 @@ mod soul_remove_tests {
         assert_eq!(parse_daemon_status(b"usage: agent-bot ...\n"), Value::Null);
     }
 }
+
+/// Whether GeniusBar's login services are registered (#118): their
+/// LaunchAgent plists exist. A plain file check, with no Node or agent-bot
+/// run, so it answers at once even while a busy Mac is still starting the
+/// services; the popup then says "starting" instead of offering setup.
+#[tauri::command]
+pub fn services_installed<R: Runtime>(app: AppHandle<R>) -> Value {
+    match app.path().home_dir() {
+        Ok(home) => services_installed_in(&home.join("Library").join("LaunchAgents")),
+        Err(_) => json!({ "broker": false, "daemon": false }),
+    }
+}
+
+fn services_installed_in(agents: &std::path::Path) -> Value {
+    let label = |name: &str| {
+        HOST_ENV
+            .iter()
+            .find(|(key, _)| *key == name)
+            .map(|(_, value)| *value)
+            .unwrap_or_default()
+    };
+    let installed = |name: &str| agents.join(format!("{}.plist", label(name))).is_file();
+    json!({
+        "broker": installed("AGENT_COMMS_SERVICE_LABEL"),
+        "daemon": installed("AGENT_BOT_SERVICE_LABEL"),
+    })
+}
+
+#[cfg(test)]
+mod services_installed_tests {
+    use super::*;
+
+    #[test]
+    fn reports_which_service_plists_exist() {
+        let agents =
+            std::env::temp_dir().join(format!("gb-services-installed-{}", std::process::id()));
+        std::fs::create_dir_all(&agents).unwrap();
+        assert_eq!(
+            services_installed_in(&agents),
+            json!({ "broker": false, "daemon": false })
+        );
+        std::fs::write(agents.join("app.geniusbar.broker.plist"), "<plist/>").unwrap();
+        assert_eq!(
+            services_installed_in(&agents),
+            json!({ "broker": true, "daemon": false })
+        );
+        std::fs::write(agents.join("app.geniusbar.agent-bot.plist"), "<plist/>").unwrap();
+        assert_eq!(
+            services_installed_in(&agents),
+            json!({ "broker": true, "daemon": true })
+        );
+        std::fs::remove_dir_all(&agents).unwrap();
+        assert_eq!(
+            services_installed_in(&agents),
+            json!({ "broker": false, "daemon": false })
+        );
+    }
+}

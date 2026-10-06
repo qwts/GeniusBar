@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { useI18n } from '../lib/i18n';
 import { credentialNote, healthHeader, type ConnectionSnapshot } from '../model/status';
 
 /**
@@ -7,7 +8,8 @@ import { credentialNote, healthHeader, type ConnectionSnapshot } from '../model/
  * (destructive when it fails), then the credential state.
  */
 export function HealthHeader({ connection, children }: { connection: ConnectionSnapshot; children?: ReactNode }) {
-  const header = healthHeader(connection);
+  const { t } = useI18n();
+  const header = healthHeader(connection, t);
   const note = credentialNote(connection);
   return (
     <header className="border-b border-border px-3 py-2.5">

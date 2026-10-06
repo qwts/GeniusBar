@@ -341,7 +341,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     );
   }
 
-  const header = healthHeader(connection);
+  const header = healthHeader(connection, t);
   // The menu is a popover, so its update line and an error footer also show
   // beside the GeniusBar button while it is closed.
   const update = updates ? updateNotice(updates.status) : null;

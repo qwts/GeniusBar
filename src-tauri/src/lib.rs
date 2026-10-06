@@ -251,6 +251,7 @@ pub fn run() {
             bridge::soul_model,
             bridge::soul_remove,
             bridge::daemon_status,
+            bridge::services_installed,
             tray::set_tray_badge,
             updates::update_status,
             updates::update_action,

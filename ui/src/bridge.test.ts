@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BridgeError, call, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeDaemonStatus, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul } from './bridge';
+import { BridgeError, call, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeDaemonStatus, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul } from './bridge';
 
 describe('bridge', () => {
   it('invokes the shell command with the method and params', async () => {
@@ -334,5 +334,18 @@ describe('daemon status (#122 computer-use badge)', () => {
     await expect(daemonStatus((async () => { throw new Error('no'); }) as never)).resolves.toBeNull();
     await expect(daemonStatus()).resolves.toBeNull();
     expect(normalizeDaemonStatus({ running: false })).toEqual({ running: false, computerUse: [] });
+  });
+});
+
+describe('services installed (#118)', () => {
+  it('reads services_installed, and is null when the shell cannot say', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); return { broker: true, daemon: false }; }) as never;
+    await expect(servicesInstalled(fake)).resolves.toEqual({ broker: true, daemon: false });
+    expect(calls).toEqual([['services_installed', undefined]]);
+    await expect(servicesInstalled((async () => ({ broker: 'yes' })) as never)).resolves.toEqual({ broker: false, daemon: false });
+    await expect(servicesInstalled((async () => null) as never)).resolves.toBeNull();
+    await expect(servicesInstalled((async () => { throw new Error('no'); }) as never)).resolves.toBeNull();
+    await expect(servicesInstalled()).resolves.toBeNull();
   });
 });

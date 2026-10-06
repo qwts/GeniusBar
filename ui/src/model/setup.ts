@@ -49,9 +49,12 @@ export const idleSetup: SetupState = {
   error: null,
 };
 
-/** Setup is offered when GeniusBar is unpaired, or no broker has answered yet. */
+/**
+ * Setup is offered when GeniusBar is unpaired, or no broker has answered
+ * yet, unless its installed services are still starting (#118).
+ */
 export function needsSetup(c: ConnectionSnapshot): boolean {
-  return c.bridgeConnected && (c.unpaired || (c.brokerUnreachable && c.lastRefresh === null));
+  return c.bridgeConnected && (c.unpaired || (c.brokerUnreachable && c.lastRefresh === null && !c.starting));
 }
 
 export function applyProgress(s: SetupState, progress: { step?: unknown; state?: unknown }): SetupState {
