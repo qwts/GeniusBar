@@ -1,10 +1,21 @@
-import { useRef, useState } from 'react';
-import { History, MessageSquare } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { History, MessageSquare, OctagonX } from 'lucide-react';
+import type { SoulStopResult } from '../bridge';
 import { useI18n } from '../lib/i18n';
 import { displayName, type CensusRow } from '../model/census';
 import { deriveDudle } from '../model/dudle';
-import { menuStep, type FloatingState } from '../model/floating';
+import { HALT_HOLD_MS, menuStep, settleStop, STOP_SETTLE_MS, stopTargets, type FloatingState, type StopPhase } from '../model/floating';
 import { Dudle } from './Dudle';
+
+/**
+ * Halting a soul's turn (agent-bot `soul stop`, agent-bot-identity #474).
+ * `supported` is asked once; an older bundle without the command answers
+ * false and the perimeter offers no Stop.
+ */
+export interface Stopper {
+  supported: () => Promise<boolean>;
+  stop: (agentId: string) => Promise<SoulStopResult>;
+}
 
 interface FloatingDudleProps {
   /** The soul it shows and its quick actions act on (floatingLead). */
@@ -14,6 +25,10 @@ interface FloatingDudleProps {
   paused?: boolean;
   /** Who drives the screen (computerUserName); null hides the perimeter. */
   computerUser: string | null;
+  /** Agent IDs driving the screen (daemon status `computerUse`): what Stop halts. */
+  computerUse?: ReadonlySet<string>;
+  /** Stop and hold-Escape; absent (or an older agent-bot) offers neither. */
+  stopper?: Stopper;
   /** Opens the lead's chat with its composer focused. */
   onPrompt: (lead: CensusRow) => void;
   /** Opens the lead's Audit log. */
@@ -30,11 +45,16 @@ interface FloatingDudleProps {
  * Dudle at the bottom right, drawn idle, working or awaiting (with the
  * awaiting dot), a radial quick menu, and the orange perimeter while a soul
  * drives the screen. Drag to move; click, Enter or Space opens the menu.
- * Pause/resume, toggle computer use and Stop are not offered: agent-bot has
- * no command for them yet.
+ * The perimeter's Stop, and holding Escape ~0.6 s, halt the souls driving
+ * the screen through agent-bot `soul stop`; it shows "stopping…" until the
+ * daemon drops them. Pause/resume and toggling computer use are not offered:
+ * agent-bot has no command for them yet.
  */
-export function FloatingDudle({ lead, state, paused = false, computerUser, onPrompt, onHistory, showButton = false }: FloatingDudleProps) {
+export function FloatingDudle({ lead, state, paused = false, computerUser, computerUse, stopper, onPrompt, onHistory, showButton = false }: FloatingDudleProps) {
   const { t } = useI18n();
+  const stop = useStop(stopper, computerUse);
+  const driven = computerUser !== null;
+  useHoldEscape(driven && stop.offered, stop.halt);
   const [pos, setPos] = useState({ x: 24, y: 104 }); // from bottom-right
   const [open, setOpen] = useState(false);
   const drag = useRef<{ sx: number; sy: number; px: number; py: number; moved: boolean } | null>(null);
@@ -52,9 +72,20 @@ export function FloatingDudle({ lead, state, paused = false, computerUser, onPro
       {computerUser !== null && (
         <>
           <div className="perimeter pointer-events-none fixed inset-0 z-40" aria-hidden />
-          <div role="status" className="pointer-events-none fixed left-1/2 top-3 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full bg-warning px-4 py-1.5 text-xs font-semibold text-warning-foreground shadow-lg">
-            {t('computerActive', { name: computerUser })}
+          <div role={stop.offered ? 'alert' : 'status'} className="pointer-events-none fixed left-1/2 top-3 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full bg-warning px-4 py-1.5 text-xs font-semibold text-warning-foreground shadow-lg">
+            {stop.offered ? t('computerActiveStop', { name: computerUser }) : t('computerActive', { name: computerUser })}
+            {stop.offered && (
+              <button type="button" onClick={() => { void stop.halt(); }} disabled={stop.phase.phase === 'stopping'}
+                className="pointer-events-auto flex items-center gap-1 rounded-full bg-warning-foreground px-2.5 py-0.5 text-warning outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-70">
+                <OctagonX className="size-3.5" aria-hidden /> {stop.phase.phase === 'stopping' ? t('stopping') : t('stop')}
+              </button>
+            )}
           </div>
+          {stop.offered && stop.phase.phase === 'failed' && (
+            <p className="pointer-events-none fixed left-1/2 top-12 z-50 m-0 -translate-x-1/2 rounded-md bg-card px-3 py-1 text-xs text-destructive shadow-lg">
+              {t('stopFailed', { message: stop.phase.message })}
+            </p>
+          )}
         </>
       )}
       {showButton && lead && (
@@ -131,4 +162,84 @@ export function FloatingDudle({ lead, state, paused = false, computerUser, onPro
       )}
     </>
   );
+}
+
+/**
+ * The perimeter's Stop: probes `stopper` once, halts every soul driving the
+ * screen, and holds "stopping…" until the daemon drops them (or
+ * STOP_SETTLE_MS passes). A rejection shows its message; one that says the
+ * bundle has no `soul stop` hides Stop instead.
+ */
+function useStop(stopper: Stopper | undefined, computerUse: ReadonlySet<string> | undefined) {
+  const [supported, setSupported] = useState(false);
+  const [phase, setPhase] = useState<StopPhase>({ phase: 'ready' });
+  const live = useRef({ phase, computerUse, stopper });
+  live.current = { phase, computerUse, stopper };
+
+  useEffect(() => {
+    setSupported(false);
+    if (!stopper) return;
+    let current = true;
+    stopper.supported().then((ok) => { if (current) setSupported(ok); }, () => {});
+    return () => { current = false; };
+  }, [stopper]);
+
+  useEffect(() => {
+    const next = settleStop(phase, computerUse);
+    if (next !== phase) setPhase(next);
+  }, [phase, computerUse]);
+
+  useEffect(() => {
+    if (phase.phase !== 'stopping') return;
+    const timer = setTimeout(() => setPhase({ phase: 'ready' }), STOP_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [phase]);
+
+  const halt = useCallback(async () => {
+    const { phase: now, computerUse: driving, stopper: stopWith } = live.current;
+    const agentIds = stopTargets(driving);
+    if (!stopWith || now.phase === 'stopping' || agentIds.length === 0) return;
+    const stopping: StopPhase = { phase: 'stopping', agentIds };
+    live.current.phase = stopping;
+    setPhase(stopping);
+    try {
+      await Promise.all(agentIds.map((id) => stopWith.stop(id)));
+    } catch (error) {
+      const e = error as { code?: unknown; message?: unknown };
+      if (e?.code === 'soul-stop-unsupported') setSupported(false);
+      setPhase({ phase: 'failed', message: typeof e?.message === 'string' ? e.message : String(error) });
+    }
+  }, []);
+
+  return { offered: supported && stopper !== undefined, phase, halt };
+}
+
+/**
+ * Holding Escape HALT_HOLD_MS while `active` runs `halt` once per hold. A
+ * quick press still closes menus as before (nothing is prevented), and the
+ * window listens in capture so a menu's own Escape handling does not hide
+ * the hold.
+ */
+function useHoldEscape(active: boolean, halt: () => Promise<void>) {
+  useEffect(() => {
+    if (!active) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let held = false;
+    const release = () => { clearTimeout(timer); timer = undefined; held = false; };
+    const down = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || held) return;
+      held = true;
+      timer = setTimeout(() => { timer = undefined; void halt(); }, HALT_HOLD_MS);
+    };
+    const up = (e: KeyboardEvent) => { if (e.key === 'Escape') release(); };
+    window.addEventListener('keydown', down, true);
+    window.addEventListener('keyup', up, true);
+    window.addEventListener('blur', release);
+    return () => {
+      window.removeEventListener('keydown', down, true);
+      window.removeEventListener('keyup', up, true);
+      window.removeEventListener('blur', release);
+      release();
+    };
+  }, [active, halt]);
 }

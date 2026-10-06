@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildSoulForest, type CensusRow } from './census';
-import { computerUserName, floatingLead, floatingState, menuStep } from './floating';
+import { computerUserName, floatingLead, floatingState, HALT_HOLD_MS, menuStep, settleStop, stopTargets, type StopPhase } from './floating';
 
 const row = (agentId: string, name: string | null, parent: string | null = null, presence: CensusRow['presence'] = 'joined'): CensusRow =>
   ({ account: 'user', agentId, name, harness: 'claude', parent, presence, unacked: 0, lastWake: null });
@@ -62,5 +62,31 @@ describe('menuStep', () => {
     expect(menuStep('End', 0, 2)).toBe(1);
     expect(menuStep('a', 0, 2)).toBeNull();
     expect(menuStep('ArrowDown', 0, 0)).toBeNull();
+  });
+});
+
+describe('computer-use Stop', () => {
+  it('halts every soul driving the screen', () => {
+    expect(stopTargets(new Set(['agent_c', 'agent_p']))).toEqual(['agent_c', 'agent_p']);
+    expect(stopTargets()).toEqual([]);
+  });
+
+  it('stays stopping until the daemon drops the stopped souls', () => {
+    const stopping: StopPhase = { phase: 'stopping', agentIds: ['agent_c'] };
+    expect(settleStop(stopping, new Set(['agent_c']))).toBe(stopping);
+    expect(settleStop(stopping, new Set(['agent_p']))).toEqual({ phase: 'ready' });
+    expect(settleStop(stopping, new Set())).toEqual({ phase: 'ready' });
+  });
+
+  it('keeps a failure while the screen is still driven, and ready stays ready', () => {
+    const failed: StopPhase = { phase: 'failed', message: 'down' };
+    expect(settleStop(failed, new Set(['agent_c']))).toBe(failed);
+    expect(settleStop(failed, new Set())).toEqual({ phase: 'ready' });
+    const ready: StopPhase = { phase: 'ready' };
+    expect(settleStop(ready, new Set(['agent_c']))).toBe(ready);
+  });
+
+  it('holds Escape for the design\'s ~0.6 s', () => {
+    expect(HALT_HOLD_MS).toBe(600);
   });
 });

@@ -554,3 +554,55 @@ export async function populationList(invokeImpl: typeof invoke = invoke): Promis
     return null;
   }
 }
+
+/**
+ * agent-bot's answer to `soul stop <agentId> --json` (#122, agent-bot-identity
+ * #474): `stopped` when a running turn was cancelled; otherwise `reason`
+ * (`idle`: no turn was running).
+ */
+export interface SoulStopResult {
+  agentId: string;
+  stopped: boolean;
+  reason?: string;
+}
+
+export function normalizeSoulStop(raw: unknown): SoulStopResult | null {
+  if (!isRecord(raw) || typeof raw.agentId !== 'string' || typeof raw.stopped !== 'boolean') return null;
+  return typeof raw.reason === 'string'
+    ? { agentId: raw.agentId, stopped: raw.stopped, reason: raw.reason }
+    : { agentId: raw.agentId, stopped: raw.stopped };
+}
+
+/**
+ * Cancels the soul's running turn (the computer-use Stop). The daemon drops
+ * it from `busy` / `computerUse` once the turn settles. Rejects with a
+ * BridgeError; `soul-stop-unsupported` means the bundled agent-bot has no
+ * `soul stop`.
+ */
+export async function stopSoul(agentId: string, invokeImpl: typeof invoke = invoke): Promise<SoulStopResult> {
+  let raw: unknown;
+  try {
+    raw = await invokeImpl<unknown>('soul_stop', { agent: agentId });
+  } catch (error) {
+    const e = error as { code?: unknown; message?: unknown };
+    throw new BridgeError(typeof e?.code === 'string' ? e.code : 'soul-stop-failed',
+      typeof e?.message === 'string' ? e.message : String(error));
+  }
+  const result = normalizeSoulStop(raw);
+  if (!result) throw new BridgeError('soul-stop-failed', 'agent-bot gave no stop result');
+  return result;
+}
+
+/**
+ * Whether the bundled agent-bot has `soul stop`; false outside the app, on
+ * an older bundle, or when agent-bot cannot say. Stops nothing.
+ */
+export async function soulStopSupported(invokeImpl: typeof invoke = invoke): Promise<boolean> {
+  if (!inApp() && invokeImpl === invoke) return false;
+  try {
+    const raw = await invokeImpl<unknown>('soul_stop_probe');
+    return isRecord(raw) && raw.supported === true;
+  } catch {
+    return false;
+  }
+}

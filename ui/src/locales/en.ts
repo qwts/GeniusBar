@@ -264,6 +264,11 @@ export const en = {
   'quick.prompt': 'Write a prompt',
   'quick.history': 'Open history',
   computerActive: '{name} is using the computer',
+  // The perimeter's Stop (#122): with agent-bot `soul stop`.
+  computerActiveStop: '{name} is controlling the screen. Hold Esc or press Stop to halt.',
+  stop: 'Stop',
+  stopping: 'Stopping…',
+  stopFailed: 'Could not stop: {message}',
 } as const;
 
 export type MessageKey = keyof typeof en;

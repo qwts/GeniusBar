@@ -7,7 +7,9 @@ import type { CensusRow } from '../model/census';
 import { sampleCensus, sampleConnection } from '../model/fixtures';
 import { layoutActions } from '../state/layout';
 import type { ChatApi } from '../useChat';
-import { FloatingDudle } from './FloatingDudle';
+import { BridgeError } from '../bridge';
+import { HALT_HOLD_MS, STOP_SETTLE_MS } from '../model/floating';
+import { FloatingDudle, type Stopper } from './FloatingDudle';
 
 afterEach(() => { cleanup(); globalThis.localStorage?.clear(); layoutActions.forget(); });
 
@@ -159,5 +161,150 @@ describe('FloatingDudle in the desktop', () => {
     layoutActions.setHidden('user/agent_p', true);
     desk({ census: roster });
     await waitFor(() => expect(screen.getByRole('button', { name: 'Companion quick actions' }).getAttribute('title')).toBe('nova'));
+  });
+});
+
+describe('FloatingDudle Stop (agent-bot soul stop)', () => {
+  const driving = new Set(['agent_c']);
+  const stopperWith = (stop: Stopper['stop'] = async (agentId) => ({ agentId, stopped: true }), supported = true): Stopper =>
+    ({ supported: vi.fn(async () => supported), stop: vi.fn(stop) });
+  const perimeter = (stopper: Stopper, computerUse: ReadonlySet<string> = driving) =>
+    <I18nProvider><FloatingDudle lead={luna} state="working" computerUser={computerUse.size ? 'coder' : null} computerUse={computerUse} stopper={stopper} paused onPrompt={vi.fn()} onHistory={vi.fn()} /></I18nProvider>;
+  const settle = () => act(async () => {});
+
+  it('offers the design\'s Stop in an alert, probing agent-bot once', async () => {
+    const stopper = stopperWith();
+    const view = render(perimeter(stopper));
+    await settle();
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain('coder is controlling the screen. Hold Esc or press Stop to halt.');
+    expect(within(alert).getByRole('button', { name: 'Stop' })).toBeTruthy();
+    view.rerender(perimeter(stopper, new Set(['agent_c'])));
+    await settle();
+    expect(stopper.supported).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops the soul driving the screen and shows stopping until the daemon drops it', async () => {
+    const stopper = stopperWith();
+    const view = render(perimeter(stopper));
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    await settle();
+    expect(stopper.stop).toHaveBeenCalledWith('agent_c');
+    const button = screen.getByRole('button', { name: 'Stopping…' }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+    expect(stopper.stop).toHaveBeenCalledTimes(1);
+    view.rerender(perimeter(stopper, new Set()));
+    await settle();
+    expect(document.querySelector('.perimeter')).toBeNull();
+    view.rerender(perimeter(stopper, driving));
+    await settle();
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
+  });
+
+  it('offers Stop again if the daemon never drops the soul', async () => {
+    vi.useFakeTimers();
+    try {
+      render(perimeter(stopperWith()));
+      await settle();
+      fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+      await settle();
+      expect(screen.getByRole('button', { name: 'Stopping…' })).toBeTruthy();
+      await act(async () => { vi.advanceTimersByTime(STOP_SETTLE_MS); });
+      expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows a failure in the error style and lets the owner try again', async () => {
+    const stopper = stopperWith(async () => { throw new BridgeError('daemon-unavailable', 'the daemon is not running'); });
+    render(perimeter(stopper));
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    await settle();
+    const failure = screen.getByText('Could not stop: the daemon is not running');
+    expect(failure.className).toContain('text-destructive');
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
+  });
+
+  it('halts on Escape held ~0.6 s, not on a quick press', async () => {
+    vi.useFakeTimers();
+    try {
+      const stopper = stopperWith();
+      render(perimeter(stopper));
+      await settle();
+      fireEvent.keyDown(window, { key: 'Escape' });
+      await act(async () => { vi.advanceTimersByTime(300); });
+      fireEvent.keyUp(window, { key: 'Escape' });
+      await act(async () => { vi.advanceTimersByTime(1000); });
+      expect(stopper.stop).not.toHaveBeenCalled();
+      fireEvent.keyDown(window, { key: 'Escape' });
+      fireEvent.keyDown(window, { key: 'Escape', repeat: true });
+      await act(async () => { vi.advanceTimersByTime(HALT_HOLD_MS - 1); });
+      expect(stopper.stop).not.toHaveBeenCalled();
+      await act(async () => { vi.advanceTimersByTime(1); });
+      expect(stopper.stop).toHaveBeenCalledWith('agent_c');
+      expect(stopper.stop).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('button', { name: 'Stopping…' })).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a quick Escape still closes the quick menu without halting', async () => {
+    vi.useFakeTimers();
+    try {
+      const stopper = stopperWith();
+      render(<I18nProvider><FloatingDudle lead={luna} state="working" computerUser="coder" computerUse={driving} stopper={stopper} paused showButton onPrompt={vi.fn()} onHistory={vi.fn()} /></I18nProvider>);
+      await settle();
+      fireEvent.keyDown(screen.getByRole('button', { name: 'Companion quick actions' }), { key: 'Enter' });
+      const menu = screen.getByRole('list', { name: 'Companion quick actions' });
+      fireEvent.keyDown(within(menu).getAllByRole('button')[0], { key: 'Escape' });
+      fireEvent.keyUp(window, { key: 'Escape' });
+      expect(screen.queryByRole('list')).toBeNull();
+      await act(async () => { vi.advanceTimersByTime(HALT_HOLD_MS * 2); });
+      expect(stopper.stop).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('hides Stop and the Escape hold on an agent-bot without soul stop', async () => {
+    vi.useFakeTimers();
+    try {
+      const stopper = stopperWith(undefined, false);
+      render(perimeter(stopper));
+      await settle();
+      expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+      expect(screen.getByRole('status').textContent).toBe('coder is using the computer');
+      fireEvent.keyDown(window, { key: 'Escape' });
+      await act(async () => { vi.advanceTimersByTime(HALT_HOLD_MS * 2); });
+      expect(stopper.stop).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('hides Stop when a stop says the bundle has no soul stop', async () => {
+    render(perimeter(stopperWith(async () => { throw new BridgeError('soul-stop-unsupported', 'this agent-bot has no soul stop'); })));
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    await settle();
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+    expect(screen.getByRole('status').textContent).toBe('coder is using the computer');
+  });
+
+  it('in the desktop, stops the soul the daemon reports driving the screen', async () => {
+    const stopper = stopperWith();
+    const chat: ChatApi = { chat: emptyChat, composers: {}, open: vi.fn(), setDraft: vi.fn(), send: vi.fn() };
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic chat={chat} stopper={stopper}
+      badges={{ comms: new Set(), computerUse: new Set(['agent_p']), busy: new Set(['agent_p']) }} />);
+    await settle();
+    expect(screen.getByText('luna is controlling the screen. Hold Esc or press Stop to halt.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    await settle();
+    expect(stopper.stop).toHaveBeenCalledWith('agent_p');
   });
 });
