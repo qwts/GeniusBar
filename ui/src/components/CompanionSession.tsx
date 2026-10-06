@@ -23,6 +23,7 @@ import { CustomizeDialog } from './CustomizeDialog';
 import { SoulDudle } from './FleetList';
 import { LaunchForm } from './LaunchForm';
 import { ModelSelect } from './ModelField';
+import { ActsAs, useIdentityApps } from './IdentityApps';
 import { useSandbox } from './Sandbox';
 import { runsAsText, SandboxChip } from './SandboxChip';
 import { SoulNotices, SoulSourceContext, useSoulMode, useSoulModel, useSoulPopulation } from './SoulNotices';
@@ -364,6 +365,9 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
   const { reload: reloadSandbox } = sandbox;
   useEffect(() => { reloadSandbox(); }, [reloadSandbox, soul.agentId, metricsRefresh]);
   const sandboxed = sandbox.soul(soul.agentId);
+  const identities = useIdentityApps();
+  const { reload: reloadIdentities } = identities;
+  useEffect(() => { reloadIdentities(); }, [reloadIdentities, soul.agentId, metricsRefresh]);
   const snapshot = 'unavailable' in metrics ? null : metrics;
   const observations = snapshot?.souls[soul.agentId]?.observations ?? [];
   const errors = snapshot?.errors.filter((error) => error.agentId === soul.agentId) ?? [];
@@ -492,7 +496,11 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
       <span className={signIn === 'ok' ? 'text-success' : 'text-destructive'}>{t(SIGN_IN_TEXT[signIn])}</span>
     )]);
   }
-  if (population) {
+  // The GitHub App row (#67, #122): the App this companion acts as, from
+  // agent-bot's managed Apps; the census's App name while those are hidden.
+  if (identities.apps) {
+    rows.push([t('identity.actsAs'), <ActsAs agentId={soul.agentId} name={displayName(soul)} />]);
+  } else if (population) {
     rows.push([t('keyd.title'), population.appSlug ? t('keyd.connected', { app: population.appSlug }) : t('keyd.none')]);
   }
 

@@ -34,6 +34,8 @@ import { DefaultHarness } from './components/DefaultHarness';
 import { defaultSandboxSource, SandboxProvider, useSandbox, type SandboxSource } from './components/Sandbox';
 import { SandboxCard } from './components/SandboxCard';
 import { SandboxChip } from './components/SandboxChip';
+import { defaultIdentityAppsSource, IdentityAppsProvider, type IdentityAppsSource } from './components/IdentityApps';
+import { IdentityAppsCard } from './components/IdentityAppsCard';
 import type { ChatApi } from './useChat';
 import type { LaunchApi } from './useLaunch';
 import type { UpdateApi } from './useUpdates';
@@ -108,6 +110,8 @@ interface AppProps {
   popupShowing?: () => Promise<boolean>;
   /** Sandboxing (agent-bot `sandbox`, #66); the app uses agent-bot when absent, null hides it. */
   sandboxSource?: SandboxSource | null;
+  /** GitHub identities (agent-bot `identity apps`, #67); the app uses agent-bot when absent, null hides them. */
+  identityAppsSource?: IdentityAppsSource | null;
 }
 
 const liveStopper: Stopper = { supported: () => soulStopSupported(), stop: (agentId) => stopSoul(agentId) };
@@ -132,12 +136,15 @@ export function App(props: AppProps) {
   const computerUse = props.computerUseSwitch ?? (inApp() && !props.isStatic ? liveComputerUse : null);
   const profiles = props.profileSource ?? (inApp() && !props.isStatic ? liveProfileSource : null);
   const sandbox = props.sandboxSource === undefined ? defaultSandboxSource(props.isStatic) : props.sandboxSource;
+  const identities = props.identityAppsSource === undefined ? defaultIdentityAppsSource(props.isStatic) : props.identityAppsSource;
   return (
     <I18nProvider>
       <ComputerUseContext.Provider value={computerUse}>
         <ProfileSourceContext.Provider value={profiles}>
           <SandboxProvider source={sandbox}>
-            <Shell {...props} />
+            <IdentityAppsProvider source={identities}>
+              <Shell {...props} />
+            </IdentityAppsProvider>
           </SandboxProvider>
         </ProfileSourceContext.Provider>
       </ComputerUseContext.Provider>
@@ -330,6 +337,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
       )}
       {launch && !showSetup && <DefaultHarness harnesses={launch.harnesses} />}
       {!showSetup && <SandboxCard />}
+      {!showSetup && <IdentityAppsCard roster={roster} />}
       {/* The design's footer icon row; the rest sits in the ⋯ menu (Lovable audit §4, §7). */}
       <footer className="border-t border-border">
         <div className="flex items-center gap-1.5 p-2 text-xs">

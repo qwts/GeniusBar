@@ -368,6 +368,7 @@ pub fn run() {
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_shell::init())
         .manage(bridge::Bridge::default())
+        .manage(bridge::IdentityJobs::default())
         .manage(soul_package::PendingSoulPackages::default())
         .manage(Dismissed::default())
         .manage(updates::Updates::default())
@@ -415,6 +416,14 @@ pub fn run() {
             bridge::daemon_status,
             bridge::services_installed,
             bridge::population_list,
+            bridge::identity_apps_list,
+            bridge::identity_app_create,
+            bridge::identity_app_create_status,
+            bridge::identity_app_create_cancel,
+            bridge::identity_app_connect,
+            bridge::identity_app_rotate_key,
+            bridge::identity_app_assign,
+            bridge::identity_app_open,
             tray::set_tray_badge,
             updates::update_status,
             updates::update_action,
