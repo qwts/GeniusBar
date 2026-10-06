@@ -260,4 +260,9 @@ export const es: Catalog = {
   yes: 'sí',
   no: 'no',
   unknown: 'desconocido',
+  // El Dudle flotante del escritorio (#122).
+  dudleMenu: 'Acciones rápidas',
+  'quick.prompt': 'Escribir instrucción',
+  'quick.history': 'Abrir historial',
+  computerActive: '{name} está usando el equipo',
 };

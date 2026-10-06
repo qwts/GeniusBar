@@ -329,6 +329,13 @@ describe('daemon status (#122 computer-use badge)', () => {
     expect(calls).toEqual([['daemon_status', undefined]]);
   });
 
+  it('reads the souls mid-turn, when the daemon reports them', async () => {
+    const fake = (async () => ({ running: true, computerUse: [], busy: ['agent_1', '', 7, 'agent_2'] })) as never;
+    await expect(daemonStatus(fake)).resolves.toEqual({ running: true, computerUse: [], busy: ['agent_1', 'agent_2'] });
+    expect(normalizeDaemonStatus({ running: true, busy: 'agent_1' })).toEqual({ running: true, computerUse: [] });
+    expect(normalizeDaemonStatus({ running: true })).not.toHaveProperty('busy');
+  });
+
   it('is null when agent-bot cannot say, or outside the app', async () => {
     await expect(daemonStatus((async () => null) as never)).resolves.toBeNull();
     await expect(daemonStatus((async () => { throw new Error('no'); }) as never)).resolves.toBeNull();

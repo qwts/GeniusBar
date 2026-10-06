@@ -4,8 +4,9 @@ import { ApprovalCounts, ApprovalsList } from './components/ApprovalsList';
 import { ArchiveDialog, ArchivedNotice, liveArchiver, type Archiver } from './components/ArchiveDialog';
 import { inApp, type RemovedSoul } from './bridge';
 import { FooterMenu } from './components/FooterMenu';
-import { CompanionSession, InfoButton } from './components/CompanionSession';
+import { CompanionSession, InfoButton, type SessionTab } from './components/CompanionSession';
 import { CompanionWindow, Desktop } from './components/Desktop';
+import { FloatingDudle } from './components/FloatingDudle';
 import { FirstLaunch, type DevTools, type HarnessAuth, type Starter } from './components/FirstLaunch';
 import { FleetList, type Hiding } from './components/FleetList';
 import { HealthHeader } from './components/HealthHeader';
@@ -21,6 +22,7 @@ import { menuApprovals, workingCount } from './model/approvals';
 import { canLaunch } from './model/launch';
 import { conversationOf, emptyComposer, unreadOf } from './model/chat';
 import { allSouls, buildSoulForest, displayName, findSoul, soulKey, type CensusRow } from './model/census';
+import { computerUserName, floatingLead, floatingState } from './model/floating';
 import type { SoulBadges } from './model/refresh';
 import { useBadges } from './useBadges';
 import { needsSetup, type ExistingServices, type SetupState } from './model/setup';
@@ -79,6 +81,8 @@ interface AppProps {
   updates?: UpdateApi;
   /** Desktop avatar badges (#122); the app reads agent-bot when absent. */
   badges?: SoulBadges;
+  /** Shows the floating Dudle's button (off, as in the Lovable export); preview only for now. */
+  floatingButton?: boolean;
   /** Archiving souls (#94); the app uses agent-bot when absent. */
   archiver?: Archiver;
 }
@@ -120,7 +124,7 @@ function LanguageSelect() {
 
 // The GeniusBar menu (the tray popup's content, and the toolbar popover in
 // window mode) and, from it, one companion's session.
-function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, archiver }: AppProps) {
+function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, floatingButton = false, archiver }: AppProps) {
   const { t } = useI18n();
   const forest = useMemo(() => buildSoulForest(census), [census]);
   const roster = useMemo(() => allSouls(forest), [forest]);
@@ -222,9 +226,23 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     setSelectedKey(soulKey(soul));
     setMenuOpen(false);
   };
+  // The floating Dudle's quick menu opens its lead on a given tab; the
+  // session remounts so the tab applies even when it is already open.
+  const [quick, setQuick] = useState<{ tab: SessionTab; n: number }>({ tab: 'chat', n: 0 });
+  const openOn = (soul: CensusRow, tab: SessionTab) => {
+    open(soul);
+    setQuick((q) => ({ tab, n: q.n + 1 }));
+  };
+  const prompt = (soul: CensusRow) => {
+    openOn(soul, 'chat');
+    // After the window focuses its close button on mount.
+    setTimeout(() => document.querySelector<HTMLTextAreaElement>('[role="tabpanel"] textarea')?.focus(), 50);
+  };
 
   const session = selected && (
     <CompanionSession
+      key={quick.n}
+      initialTab={quick.n > 0 ? quick.tab : undefined}
       soul={selected}
       forest={forest}
       roster={roster}
@@ -352,6 +370,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const attention = update ? { text: update.text, isError: update.isError }
     : footer?.isError ? { text: footer.text, isError: true }
     : null;
+  const shownBadges = badges ?? liveBadges;
   const unreadTotal = unread ? roster.reduce((sum, soul) => sum + unread(soul), 0) : 0;
   const notice = showSetup ? t('setupHint')
     : forest.length === 0 ? (showStarter ? t('setupHint') : empty ?? header.title)
@@ -363,12 +382,16 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
         {menu({ hidden: layout.hidden, onToggle: layoutActions.setHidden, onToggleTeam: layoutActions.setTeamHidden, onShowAll: layoutActions.showAll })}
       </MenuBar>
       <Desktop forest={forest} layout={layout} paused={paused} unreadOf={unread} selectedKey={openKey} onOpen={open}
-        badges={badges ?? liveBadges} onArchive={archiveWith && setArchiving}
+        badges={shownBadges} onArchive={archiveWith && setArchiving}
         notice={notice} onLaunch={launch && !showSetup ? () => { setSelectedKey(null); setLaunchingPackage(true); } : undefined}>
         {selected && session && (
           <CompanionWindow soul={selected} paused={paused} onClose={() => setSelectedKey(null)} actions={<InfoButton soul={selected} />}>{session}</CompanionWindow>
         )}
       </Desktop>
+      <FloatingDudle showButton={floatingButton} lead={floatingLead(forest, layout.hidden)} paused={paused}
+        state={floatingState({ roster, approvals: waiting.length, busy: shownBadges.busy, computerUse: shownBadges.computerUse })}
+        computerUser={computerUserName(roster, shownBadges.computerUse)}
+        onPrompt={prompt} onHistory={(soul) => openOn(soul, 'audit')} />
       {launchModal}
       {archiveUi}
     </div>

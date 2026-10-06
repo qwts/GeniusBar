@@ -84,6 +84,22 @@ describe('useBadges (#122, #137)', () => {
     expect(fake.status).toHaveBeenCalledTimes(2);
   });
 
+  it('reports the souls mid-turn and keeps the census cadence while any is', async () => {
+    vi.useFakeTimers();
+    let busy = ['agent_p'];
+    const fake = sources([], []);
+    fake.status = vi.fn(async (): Promise<DaemonStatus> => ({ running: true, computerUse: [], busy }));
+    const { result } = renderHook(() => useBadges(['agent_p'], true, fake));
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(fake.status).toHaveBeenCalledTimes(2);
+    expect([...result.current.busy]).toEqual(['agent_p']);
+    busy = [];
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(result.current.busy.size).toBe(0);
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(fake.status).toHaveBeenCalledTimes(3);
+  });
+
   it('polls on the census cadence while a soul drives the screen, then slows once it stops', async () => {
     vi.useFakeTimers();
     let using = ['agent_c'];

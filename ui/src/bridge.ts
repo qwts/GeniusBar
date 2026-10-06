@@ -461,6 +461,8 @@ export interface DaemonStatus {
   running: boolean;
   /** Souls driving the screen right now. */
   computerUse: { agentId: string; since: string | null }[];
+  /** Souls with a turn in flight; absent from an older bundle. */
+  busy?: string[];
 }
 
 export function normalizeDaemonStatus(raw: unknown): DaemonStatus | null {
@@ -471,6 +473,7 @@ export function normalizeDaemonStatus(raw: unknown): DaemonStatus | null {
       ? raw.computerUse.filter((c): c is Record<string, unknown> & { agentId: string } => isRecord(c) && typeof c.agentId === 'string' && c.agentId !== '')
         .map((c) => ({ agentId: c.agentId, since: typeof c.since === 'string' ? c.since : null }))
       : [],
+    ...(Array.isArray(raw.busy) ? { busy: raw.busy.filter((id): id is string => typeof id === 'string' && id !== '') } : {}),
   };
 }
 

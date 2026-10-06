@@ -42,7 +42,8 @@ export interface LaunchProps {
   defaultHarness?: string | null;
 }
 
-type Tab = 'chat' | 'tree' | 'details' | 'audit';
+export type SessionTab = 'chat' | 'tree' | 'details' | 'audit';
+type Tab = SessionTab;
 
 interface CompanionSessionProps {
   soul: CensusRow;
@@ -59,6 +60,8 @@ interface CompanionSessionProps {
   /** The popup's back button; a desktop window has its own close button. */
   showBack?: boolean;
   metricsRefresh?: number;
+  /** The tab it opens on, when it has that tab (the floating Dudle's quick menu). */
+  initialTab?: SessionTab;
 }
 
 /**
@@ -66,12 +69,12 @@ interface CompanionSessionProps {
  * tree, and the read-only details with Launch. Without chat it opens on
  * the details.
  */
-export function CompanionSession({ soul, forest, roster, paused = false, chat, launch, onOpen, onClose, showBack = false, metricsRefresh = 0 }: CompanionSessionProps) {
+export function CompanionSession({ soul, forest, roster, paused = false, chat, launch, onOpen, onClose, showBack = false, metricsRefresh = 0, initialTab }: CompanionSessionProps) {
   const { t } = useI18n();
   const ids = useId();
   const back = useRef<HTMLButtonElement>(null);
   const tabs: Tab[] = chat ? ['chat', 'tree', 'details', 'audit'] : ['details', 'tree', 'audit'];
-  const [tab, setTab] = useState<Tab>(tabs[0]);
+  const [tab, setTab] = useState<Tab>(initialTab && tabs.includes(initialTab) ? initialTab : tabs[0]);
   const active = tabs.includes(tab) ? tab : tabs[0];
   const name = displayName(soul);
   useEffect(() => { if (showBack) back.current?.focus(); }, [showBack]);

@@ -160,7 +160,21 @@ export const sampleModels: Readonly<Record<string, SoulModel>> = {
 };
 
 /** Desktop badges for preview (#122): luna has agent comms on, agent_c drives the screen. */
-export const sampleBadges: SoulBadges = { comms: new Set(['agent_p']), computerUse: new Set(['agent_c']) };
+export const sampleBadges: SoulBadges = { comms: new Set(['agent_p']), computerUse: new Set(['agent_c']), busy: new Set() };
+
+/**
+ * The floating Dudle's states for preview (`&dudle=`, #122): idle (nothing
+ * pending), working (luna mid-turn), awaiting (the pending approvals) and
+ * computer (agent_c drives the screen, so the perimeter shows).
+ */
+export const sampleFloating: Readonly<Record<'idle' | 'working' | 'awaiting' | 'computer', {
+  approvals: boolean; busy: ReadonlySet<string>; computerUse: ReadonlySet<string>;
+}>> = {
+  idle: { approvals: false, busy: new Set(), computerUse: new Set() },
+  working: { approvals: false, busy: new Set(['agent_p']), computerUse: new Set() },
+  awaiting: { approvals: true, busy: new Set(), computerUse: new Set() },
+  computer: { approvals: false, busy: new Set(), computerUse: new Set(['agent_c']) },
+};
 
 /**
  * Finder-opened packages as `soul locate` describes them, for the launch
