@@ -35,7 +35,8 @@ function Live({ snapshot }: { snapshot: SnapshotOptions | null }) {
   }, [waiting, snapshot]);
   const launcher = useLaunch();
   const updates = useUpdates();
-  const [openedPackage, setOpenedPackage] = useState<{ id: number; path: string; checking: boolean; error: string | null; agentId?: string; name?: string; preferredHarnesses?: string[] }>();
+  const [openedPackage, setOpenedPackage] = useState<{ id: number; path: string; checking: boolean; error: string | null; agentId?: string; name?: string;
+    preferredHarnesses?: string[]; description?: string; copyOf?: { name: string | null; agentId: string } }>();
   const packageSequence = useRef(0);
   const loadOpenedPackages = useCallback(async () => {
     const paths = await invoke<string[]>('take_opened_soul_packages');
@@ -44,20 +45,26 @@ function Live({ snapshot }: { snapshot: SnapshotOptions | null }) {
       setOpenedPackage({ id, path, checking: true, error: null });
       try {
         await invoke('validate_soul_package', { package: path });
-        // agent-bot says whether this folder is an installed soul, or a copy
-        // of one that must not be launched (#80). An older bundle without
-        // `soul locate` keeps the package flow.
-        const located = await invoke<{ status: string; agentId?: string; message?: string; name?: string; preferredHarnesses?: string[] }>('locate_soul_package', { package: path })
+        // agent-bot says whether this folder is an installed soul, a copy of
+        // one, or one that must not be launched (#80). A copy launches under
+        // a new name, which agent-bot's daemon forks into a new soul (#110);
+        // an older daemon still refuses it, and LaunchStatus shows why.
+        // An older bundle without `soul locate` keeps the package flow.
+        const located = await invoke<{ status: string; agentId?: string; message?: string; name?: string; description?: string; preferredHarnesses?: string[] }>('locate_soul_package', { package: path })
           .catch(() => null);
-        const refused = located && located.status !== 'package' && located.status !== 'installed';
+        const refused = located && !['package', 'installed', 'copy'].includes(located.status);
+        const copyOf = located?.status === 'copy' && typeof located.agentId === 'string'
+          ? { agentId: located.agentId, name: typeof located.name === 'string' ? located.name : null } : null;
         setOpenedPackage((current) => current?.id === id ? {
           ...current,
           checking: false,
           ...(located?.status === 'installed' && located.agentId ? { agentId: located.agentId } : {}),
           // A package says what it is (agent-bot 0.10.14+): the form prefills from it (#120).
           ...(located?.status === 'package' && typeof located.name === 'string' ? { name: located.name } : {}),
+          ...(located?.status === 'package' && typeof located.description === 'string' ? { description: located.description } : {}),
           ...(located?.status === 'package' && Array.isArray(located.preferredHarnesses) ? { preferredHarnesses: located.preferredHarnesses.filter((h) => typeof h === 'string') } : {}),
-          ...(refused ? { error: located.message ?? 'This folder is a copy of another companion’s folder, so it can’t be launched.' } : {}),
+          ...(copyOf ? { copyOf } : {}),
+          ...(refused ? { error: located.message ?? 'This folder can’t be launched as a companion.' } : {}),
         } : current);
       } catch {
         setOpenedPackage((current) => current?.id === id ? {

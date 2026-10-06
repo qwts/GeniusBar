@@ -116,6 +116,8 @@ export const en = {
   'launch.packagePlaceholder': 'Path to soul, ending with .soul',
   'launch.name': 'Name',
   'launch.nameOptional': 'Optional',
+  'launch.nameRequired': 'Required',
+  'launch.copyHint': 'It becomes a new companion copied from {name}, so give it a name of its own.',
   'launch.harnessPick': 'Choose a harness',
   'launch.harnessHint': 'GeniusBar doesn’t run models itself — the harness does.',
   'launch.runsAs': 'Runs as {account}',

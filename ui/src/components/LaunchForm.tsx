@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { displayName, type CensusRow } from '../model/census';
-import { canLaunch, harnessOptions, MAX_HARNESS, normalPackagePath, preferredHarness, suggestedName, type LaunchState } from '../model/launch';
+import { canLaunch, harnessOptions, MAX_HARNESS, normalPackagePath, preferredHarness, prefillHarness, suggestedName, type LaunchState } from '../model/launch';
 import { useI18n } from '../lib/i18n';
 import type { LaunchApi } from '../useLaunch';
 import { ModelField } from './ModelField';
@@ -15,6 +15,13 @@ interface LaunchFormProps {
   /** What the opened package's soul.json says (#120); prefilled until edited. */
   packageName?: string;
   preferredHarnesses?: readonly string[];
+  /** The package's soul.json description (#120), shown read-only under the name. */
+  packageDescription?: string;
+  /**
+   * The opened folder is a copy of this companion's folder (#110): the
+   * launch must be named, and agent-bot's daemon forks it into a new soul.
+   */
+  copyOf?: { name: string | null; agentId: string };
   /** File-open validation is performed by the shell using the Starter reader. */
   checkingPackage?: boolean;
   packageError?: string | null;
@@ -85,27 +92,30 @@ const field = 'h-9 w-full rounded-md border border-input bg-transparent px-3 tex
  * One launch at a time; the result stays on screen and is never retried.
  */
 export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness = null, initialPackagePath = '', packageName, preferredHarnesses,
-  checkingPackage = false, packageError: initialPackageError = null, initialComms, onCancel, onLaunched, roster = [] }: LaunchFormProps) {
+  packageDescription, copyOf, checkingPackage = false, packageError: initialPackageError = null, initialComms, onCancel, onLaunched, roster = [] }: LaunchFormProps) {
   const { t } = useI18n();
   const [account, setAccount] = useState(soul?.account ?? (accounts.length === 1 ? accounts[0] : ''));
   const [otherAccount, setOtherAccount] = useState(!soul && accounts.length === 0);
   const [packagePath, setPackagePath] = useState(() => normalPackagePath(initialPackagePath));
   const [packageError, setPackageError] = useState(initialPackageError);
   const packageHarness = soul ? null : preferredHarness(preferredHarnesses, harnesses);
-  const [harness, setHarness] = useState(soul?.harness ?? defaultHarness ?? packageHarness ?? '');
+  // The package's own preference wins over the viewer's default (#120).
+  const [harness, setHarness] = useState(prefillHarness(soul?.harness, packageHarness, defaultHarness));
   const [otherHarness, setOtherHarness] = useState(false);
   // The model (#128): null is the harness default; a new harness starts over.
   const [model, setModel] = useState<string | null>(null);
   useEffect(() => setModel(null), [harness]);
-  const [name, setName] = useState(soul ? '' : suggestedName(packageName));
+  // An existing soul keeps its name (#79): the form has no Name for it.
+  // A copied folder starts blank, since it becomes a new companion (#110).
+  const [name, setName] = useState(soul || copyOf ? '' : suggestedName(packageName));
   // The package's manifest arrives after the form opened (agent-bot's locate
   // runs behind the Finder open): it prefills what the owner has not typed yet.
   const [touched, setTouched] = useState<{ name?: boolean; harness?: boolean }>({});
   useEffect(() => {
-    if (!soul && !touched.name) setName(suggestedName(packageName));
+    if (!soul && !copyOf && !touched.name) setName(suggestedName(packageName));
   }, [packageName]);
   useEffect(() => {
-    if (!soul && !touched.harness && !defaultHarness && packageHarness) setHarness(packageHarness);
+    if (!soul && !touched.harness && packageHarness) setHarness(packageHarness);
   }, [packageHarness]);
   // Follows the soul's setting as it arrives, until the owner changes it here.
   const [chosenComms, setComms] = useState<boolean | undefined>(undefined);
@@ -124,6 +134,8 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
     onLaunched(launchedAgent);
   }, [launched, launchedAgent, onLaunched]);
   const what = soul ? displayName(soul) : t('launch.aPackage');
+  // A copy launches only under a new name; the daemon refuses it unnamed.
+  const needsName = Boolean(copyOf && !soul) && name.trim() === '';
   const options = harnessOptions(harnesses, soul?.harness, defaultHarness);
 
   useEffect(() => setPackageError(initialPackageError), [initialPackageError]);
@@ -134,7 +146,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
       aria-label={t('launch.formLabel', { what })}
       onSubmit={(e) => {
         e.preventDefault();
-        if (!ready || checkingPackage || packageError) return;
+        if (!ready || checkingPackage || packageError || needsName) return;
         setStarted(true);
         const path = normalPackagePath(packagePath);
         if (!soul) setPackagePath(path);
@@ -142,7 +154,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
           account,
           target: soul ? { soul: soul.agentId } : { package: path },
           harness,
-          name,
+          name: soul ? '' : name,
           ...(comms === undefined ? {} : { comms }),
           ...(model?.trim() ? { model: model.trim() } : {}),
         });
@@ -161,12 +173,19 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
             }}
             onBlur={(e) => setPackagePath(normalPackagePath(e.target.value))} />
         )}
-        <label className="grid gap-1">
-          <span className="text-sm font-medium">{t('launch.name')}</span>
-          {/* Not a person's name: keep the web view from offering contact AutoFill (#80). */}
-          <input value={name} placeholder={t('launch.nameOptional')} autoComplete="off" className={field}
-            onChange={(e) => { setTouched((was) => ({ ...was, name: true })); setName(e.target.value); }} />
-        </label>
+        {!soul && (
+          <label className="grid gap-1">
+            <span className="text-sm font-medium">{t('launch.name')}</span>
+            {/* Not a person's name: keep the web view from offering contact AutoFill (#80). */}
+            <input value={name} placeholder={copyOf ? t('launch.nameRequired') : t('launch.nameOptional')} autoComplete="off" className={field}
+              required={Boolean(copyOf)} aria-describedby={copyOf ? 'launch-copy-hint' : undefined}
+              onChange={(e) => { setTouched((was) => ({ ...was, name: true })); setName(e.target.value); }} />
+          </label>
+        )}
+        {!soul && copyOf && (
+          <p id="launch-copy-hint" className="text-xs text-muted-foreground">{t('launch.copyHint', { name: copyOf.name || copyOf.agentId })}</p>
+        )}
+        {!soul && packageDescription && <p className="text-xs text-muted-foreground">{packageDescription}</p>}
       </fieldset>
       <fieldset>
         <legend className={legend}>{t('launch.step.harness')}</legend>
@@ -236,7 +255,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
         {onCancel && (
           <button type="button" onClick={onCancel} className="h-9 rounded-md px-4 text-sm font-medium hover:bg-accent">{t('cancel')}</button>
         )}
-        <button type="submit" disabled={!ready || checkingPackage || Boolean(packageError)}
+        <button type="submit" disabled={!ready || checkingPackage || Boolean(packageError) || needsName}
           className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
           {t('launch.go')}
         </button>

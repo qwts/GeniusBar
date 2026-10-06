@@ -14,7 +14,10 @@ export interface LaunchRequest {
   account: string;
   target: LaunchTarget;
   harness: string;
-  /** Optional display name; blank means none. */
+  /**
+   * Optional display name for a package launch; blank means none. A launch
+   * of an existing soul never renames it (#79), so the name is not sent.
+   */
   name: string;
   /**
    * Agent comms for the launched soul (#71); agent-bot writes it to the
@@ -102,12 +105,25 @@ export function launchProblem(request: LaunchRequest): string | null {
   return null;
 }
 
-/** Bridge params for `launch`, with the name and the model omitted when blank. */
+/**
+ * The harness a launch form starts with (#120): an existing soul's own,
+ * else the first the package prefers that the app can offer, else the
+ * viewer's default. Blank when none is known.
+ */
+export function prefillHarness(soulHarness: string | null | undefined, packageHarness: string | null | undefined, defaultHarness: string | null | undefined): string {
+  return soulHarness || packageHarness || defaultHarness || '';
+}
+
+/**
+ * Bridge params for `launch`, with the name and the model omitted when blank.
+ * A `{soul}` launch never carries a name: relaunching a companion must not
+ * rename it (#79), so the form's name is dropped there as a second guard.
+ */
 export function launchParams(request: LaunchRequest): Record<string, string | boolean> {
   const params: Record<string, string | boolean> = { account: request.account, harness: request.harness.trim() };
   if ('package' in request.target) params.package = normalPackagePath(request.target.package);
   else params.soul = request.target.soul;
-  if (request.name.trim() !== '') params.name = request.name.trim();
+  if ('package' in request.target && request.name.trim() !== '') params.name = request.name.trim();
   if (typeof request.comms === 'boolean') params.comms = request.comms;
   const model = request.model?.trim();
   if (model) params.model = model;

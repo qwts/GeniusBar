@@ -63,7 +63,9 @@ interface AppProps {
   openedPackage?: {
     id: number; path: string; checking: boolean; error: string | null; agentId?: string;
     /** What the package's soul.json says, for prefilling the form (#120). */
-    name?: string; preferredHarnesses?: string[];
+    name?: string; preferredHarnesses?: string[]; description?: string;
+    /** A copy of this companion's folder (#110): launched under a new name, it forks. */
+    copyOf?: { name: string | null; agentId: string };
   };
   /** Removes GeniusBar's login services (#9); without it there is no action. */
   onRemoveServices?: () => Promise<void>;
@@ -323,6 +325,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
         initialPackagePath={activePackage?.path}
         packageName={activePackage?.name}
         preferredHarnesses={activePackage?.preferredHarnesses}
+        packageDescription={activePackage?.description}
+        copyOf={activePackage?.copyOf}
         checkingPackage={activePackage?.checking}
         packageError={activePackage?.error}
         onCancel={closeLaunch}

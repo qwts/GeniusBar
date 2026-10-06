@@ -687,6 +687,25 @@ mod tests {
                 "agent-bot gave no location"
             ))
         );
+        // A bad marker names no soul; its refusal reaches the form (#110).
+        let invalid = parse_soul_locate(
+            br#"{"path":"/p.soul","status":"invalid","message":"/p.soul has an invalid soul marker"}"#,
+            b"",
+        )
+        .unwrap();
+        assert_eq!(invalid["status"], json!("invalid"));
+        assert_eq!(
+            invalid["message"],
+            json!("/p.soul has an invalid soul marker")
+        );
+        assert_eq!(
+            parse_soul_locate(
+                br#"{"path":"/c.soul","status":"copy","agentId":"agent_1","name":"Bill"}"#,
+                b""
+            )
+            .unwrap()["name"],
+            json!("Bill")
+        );
         // An older bundle has no `soul locate`: its usage error comes back.
         assert_eq!(
             parse_soul_locate(b"", b"agent-bot: usage: agent-bot soul cold-wake\n"),
@@ -841,7 +860,7 @@ fn parse_soul_comms(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> 
 
 /// What a `.soul` opened from Finder is (#80), from agent-bot's
 /// `soul locate PATH`: `{path, status, agentId?, soulDir?, copies?, message?}`
-/// where status is package, installed, copy, duplicate or unregistered.
+/// where status is package, installed, copy, duplicate, unregistered or invalid.
 /// agent-bot owns the rules; an installed soul's own folder is that soul,
 /// never a new launch. An older bundle without the command is an error the
 /// UI ignores, keeping the package flow (the daemon applies the same rule).
@@ -888,7 +907,14 @@ fn last_line(bytes: &[u8]) -> String {
     .to_string()
 }
 
-const LOCATE_STATUSES: [&str; 5] = ["package", "installed", "copy", "duplicate", "unregistered"];
+const LOCATE_STATUSES: [&str; 6] = [
+    "package",
+    "installed",
+    "copy",
+    "duplicate",
+    "unregistered",
+    "invalid",
+];
 
 /// agent-bot's `soul locate` line, or its `soul locate: …` error.
 fn parse_soul_locate(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
@@ -896,7 +922,8 @@ fn parse_soul_locate(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError>
         let status = value.get("status").and_then(Value::as_str);
         let has_soul = value.get("agentId").and_then(Value::as_str).is_some();
         if status.is_some_and(|s| LOCATE_STATUSES.contains(&s))
-            && (status == Some("package") || has_soul)
+            // A package, or an invalid marker (which names no soul), stands alone.
+            && (matches!(status, Some("package" | "invalid")) || has_soul)
         {
             return Ok(value);
         }
