@@ -7,11 +7,20 @@ import { useI18n } from '../lib/i18n';
  * new companion" with a close ×. Escape or a click on the backdrop closes
  * it; the form inside carries Cancel and Launch. A drag that starts in a
  * field and ends on the backdrop (selecting text) is not a backdrop click.
+ * Escape works wherever focus is, even after it left the dialog (the Launch
+ * button disables while a launch runs), and is ignored while `busy` (#116).
  */
-export function LaunchModal({ onClose, children }: { onClose: () => void; children: ReactNode }) {
+export function LaunchModal({ onClose, busy = false, children }: { onClose: () => void; busy?: boolean; children: ReactNode }) {
   const { t } = useI18n();
   const box = useRef<HTMLElement>(null);
   const pressedBackdrop = useRef(false);
+  const escape = useRef(() => {});
+  escape.current = () => { if (!busy) onClose(); };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') escape.current(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
   useEffect(() => {
     box.current?.querySelector<HTMLElement>('input:not([readonly]), select')?.focus();
   }, []);
@@ -20,7 +29,7 @@ export function LaunchModal({ onClose, children }: { onClose: () => void; childr
       onPointerDown={(e) => { pressedBackdrop.current = e.target === e.currentTarget; }}
       onClick={(e) => { if (e.target === e.currentTarget && pressedBackdrop.current) onClose(); }}>
       <section ref={box} role="dialog" aria-modal="true" aria-label={t('launchDialogTitle')}
-        onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }}
+        onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); escape.current(); } }}
         className="relative grid max-h-full w-full max-w-lg gap-5 overflow-y-auto rounded-lg border border-border bg-popover p-6 shadow-2xl">
         <button type="button" onClick={onClose} aria-label={t('close')}
           className="absolute top-4 right-4 rounded p-1 text-muted-foreground hover:text-foreground">

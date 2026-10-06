@@ -18,6 +18,7 @@ import { SetupPanel } from './components/SetupPanel';
 import { UpdateNotice } from './components/UpdateNotice';
 import { I18nProvider, LANGS, useI18n, type Lang } from './lib/i18n';
 import { menuApprovals, workingCount } from './model/approvals';
+import { canLaunch } from './model/launch';
 import { conversationOf, emptyComposer, unreadOf } from './model/chat';
 import { allSouls, buildSoulForest, displayName, findSoul, soulKey, type CensusRow } from './model/census';
 import type { SoulBadges } from './model/refresh';
@@ -127,7 +128,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const [metricsRefresh, setMetricsRefresh] = useState(0);
   const selected = selectedKey === null ? null : findSoul(forest, selectedKey);
   useEffect(() => { if (select !== null) setSelectedKey(select); }, [select]);
-  const paused = usePageHidden() || isStatic;
+  const pageHidden = usePageHidden();
+  const paused = pageHidden || isStatic;
   // The open conversation is marked read, now and as messages arrive.
   const openKey = selected ? soulKey(selected) : null;
   const openChat = chat?.open;
@@ -301,16 +303,30 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     setLaunchingPackage(false);
     if (openedPackage) setDismissedPackage(openedPackage.id);
   };
+  // A launch from the dialog closes it and opens the new companion (#116);
+  // the session shows once the census lists it, and the next launch starts idle.
+  const launched = (agentId: string | null) => {
+    closeLaunch();
+    launcher?.reset();
+    if (agentId) { setSelectedKey(agentId); setMenuOpen(false); }
+    onRefresh?.();
+  };
+  // Hiding the popup never leaves a finished dialog for its next opening.
+  const launchPhase = launcher?.state.phase;
+  useEffect(() => {
+    if (pageHidden && launchingPackage && launchPhase === 'launched') closeLaunch();
+  }, [pageHidden, launchingPackage, launchPhase]);
   // The design's launch dialog, over whichever mode is showing (Lovable 20.03.51).
   const launchModal = launch && launchingPackage && !showSetup && (
-    <LaunchModal onClose={closeLaunch}>
+    <LaunchModal onClose={closeLaunch} busy={!canLaunch(launch.launcher.state)}>
       <LaunchForm key={activePackage?.id ?? 'manual'} {...launch}
         initialPackagePath={activePackage?.path}
         packageName={activePackage?.name}
         preferredHarnesses={activePackage?.preferredHarnesses}
         checkingPackage={activePackage?.checking}
         packageError={activePackage?.error}
-        onCancel={closeLaunch} />
+        onCancel={closeLaunch}
+        onLaunched={launched} />
     </LaunchModal>
   );
 
