@@ -179,6 +179,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     accounts: [...new Set(roster.map((s) => s.account))].sort(),
     harnesses: [...new Set(roster.flatMap((s) => (s.harness ? [s.harness] : [])))].sort(),
     defaultHarness,
+    // The census souls' harness model lists feed the Model field (#128).
+    roster,
   }, [launcher, roster, defaultHarness]);
   const layout = useLayout();
 
