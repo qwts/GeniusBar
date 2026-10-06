@@ -1674,6 +1674,173 @@ mod soul_mode_tests {
     }
 }
 
+/// Stops a soul's running turn (#122, Lovable computer-use Stop), with
+/// agent-bot's `soul stop <agentId> --json` (agent-bot-identity #474):
+/// `{agentId, stopped, reason?}`. The daemon cancels the turn cooperatively
+/// and drops the soul from `busy` / `computerUse` once it settles. Not
+/// owner-gated by Touch ID. An older bundle without the command answers with
+/// its `soul` usage line, which maps to `soul-stop-unsupported`.
+#[tauri::command]
+pub async fn soul_stop<R: Runtime>(app: AppHandle<R>, agent: String) -> Result<Value, BridgeError> {
+    let args = soul_stop_args(&agent)?;
+    let output = run_agent_bot(&app, args, "soul-stop-unavailable").await?;
+    parse_soul_stop(&output.stdout, &output.stderr)
+}
+
+/// Whether the bundled agent-bot has `soul stop`: `{supported}`. Runs the
+/// command with no soul, which stops nothing: a bundle that has it answers
+/// with its own `soul stop` usage, an older one with the `soul` usage line.
+#[tauri::command]
+pub async fn soul_stop_probe<R: Runtime>(app: AppHandle<R>) -> Result<Value, BridgeError> {
+    let args = vec!["soul".into(), "stop".into(), "--json".into()];
+    let output = run_agent_bot(&app, args, "soul-stop-unavailable").await?;
+    parse_soul_stop_probe(&output.stdout, &output.stderr)
+}
+
+fn soul_stop_args(agent: &str) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    if agent.is_empty() || agent.starts_with('-') {
+        return Err(BridgeError::new(
+            "soul-stop-invalid",
+            "agent must be an agent id",
+        ));
+    }
+    Ok(vec![
+        "soul".into(),
+        "stop".into(),
+        agent.into(),
+        "--json".into(),
+    ])
+}
+
+/// True when stderr is an older agent-bot's `soul` usage line, which does
+/// not list `soul stop`.
+fn soul_stop_missing(stdout: &[u8], stderr: &[u8]) -> bool {
+    let message = last_line(stderr);
+    serde_json::from_str::<Value>(&last_line(stdout)).is_err()
+        && message.contains("usage: agent-bot soul ")
+        && !message.contains("soul stop")
+}
+
+fn parse_soul_stop(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    if soul_stop_missing(stdout, stderr) {
+        return Err(BridgeError::new(
+            "soul-stop-unsupported",
+            "this agent-bot has no soul stop",
+        ));
+    }
+    parse_agent_bot_json(
+        stdout,
+        stderr,
+        "soul-stop-failed",
+        "agent-bot soul stop: ",
+        "agent-bot gave no stop result",
+        |value| {
+            value.get("agentId").and_then(Value::as_str).is_some()
+                && value.get("stopped").and_then(Value::as_bool).is_some()
+        },
+    )
+}
+
+fn parse_soul_stop_probe(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    if soul_stop_missing(stdout, stderr) {
+        return Ok(serde_json::json!({ "supported": false }));
+    }
+    match parse_soul_stop(stdout, stderr) {
+        Err(error) if error.message.starts_with("usage: agent-bot soul stop") => {
+            Ok(serde_json::json!({ "supported": true }))
+        }
+        Err(error) => Err(error),
+        Ok(_) => Err(BridgeError::new(
+            "soul-stop-failed",
+            "agent-bot stopped a soul it was not asked to",
+        )),
+    }
+}
+
+#[cfg(test)]
+mod soul_stop_tests {
+    use super::*;
+
+    const OLD_USAGE: &[u8] =
+        b"agent-bot: usage: agent-bot soul cold-wake <agentId> [on|off|show] | soul mode <agentId|name> [show|safe|autopilot] [--json]\n";
+
+    #[test]
+    fn builds_soul_stop_arguments() {
+        assert_eq!(
+            soul_stop_args("agent_1").unwrap(),
+            vec!["soul", "stop", "agent_1", "--json"]
+        );
+        for agent in ["", "--json", "-x"] {
+            assert_eq!(soul_stop_args(agent).unwrap_err().code, "soul-stop-invalid");
+        }
+    }
+
+    #[test]
+    fn parses_stop_results_or_their_error() {
+        let stopped =
+            parse_soul_stop(b"{\"agentId\":\"agent_1\",\"stopped\":true}\n", b"").unwrap();
+        assert_eq!(stopped["stopped"], true);
+        let idle = parse_soul_stop(
+            b"{\"agentId\":\"agent_1\",\"stopped\":false,\"reason\":\"idle\"}\n",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(idle["reason"], "idle");
+        assert_eq!(
+            parse_soul_stop(
+                b"{\"error\":{\"code\":\"daemon-unavailable\",\"message\":\"the daemon is not running\"}}\n",
+                b"agent-bot soul stop: the daemon is not running\n"
+            ),
+            Err(BridgeError::new(
+                "daemon-unavailable",
+                "the daemon is not running"
+            ))
+        );
+        assert_eq!(
+            parse_soul_stop(
+                b"",
+                b"agent-bot soul stop: no population record for agent_9\n"
+            ),
+            Err(BridgeError::new(
+                "soul-stop-failed",
+                "no population record for agent_9"
+            ))
+        );
+        assert_eq!(
+            parse_soul_stop(b"{\"agentId\":\"agent_1\"}\n", b"").unwrap_err(),
+            BridgeError::new("soul-stop-failed", "agent-bot gave no stop result")
+        );
+    }
+
+    #[test]
+    fn an_older_bundle_is_unsupported_not_failed() {
+        assert_eq!(
+            parse_soul_stop(b"", OLD_USAGE).unwrap_err().code,
+            "soul-stop-unsupported"
+        );
+        assert_eq!(
+            parse_soul_stop_probe(b"", OLD_USAGE).unwrap(),
+            serde_json::json!({ "supported": false })
+        );
+    }
+
+    #[test]
+    fn probes_a_bundle_with_soul_stop() {
+        assert_eq!(
+            parse_soul_stop_probe(
+                b"{\"error\":{\"code\":\"soul-stop-failed\",\"message\":\"usage: agent-bot soul stop <agentId|name> [--json]\"}}\n",
+                b"agent-bot soul stop: usage: agent-bot soul stop <agentId|name> [--json]\n"
+            )
+            .unwrap(),
+            serde_json::json!({ "supported": true })
+        );
+        assert_eq!(
+            parse_soul_stop_probe(b"", b"").unwrap_err().code,
+            "soul-stop-failed"
+        );
+    }
+}
+
 /// A soul's model (#128), from agent-bot's `soul model <agentId> show
 /// --json`: `{agentId, model, available, listedAt, harness}`. `model` is the
 /// owner's choice or null for the harness default; `available` is the

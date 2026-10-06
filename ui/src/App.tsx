@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { ApprovalCounts, ApprovalsList } from './components/ApprovalsList';
 import { ArchiveDialog, ArchivedNotice, liveArchiver, type Archiver } from './components/ArchiveDialog';
-import { inApp, type RemovedSoul } from './bridge';
+import { inApp, soulStopSupported, stopSoul, type RemovedSoul } from './bridge';
 import { FooterMenu } from './components/FooterMenu';
 import { CompanionSession, InfoButton, type SessionTab } from './components/CompanionSession';
 import { CompanionWindow, Desktop } from './components/Desktop';
-import { FloatingDudle } from './components/FloatingDudle';
+import { FloatingDudle, type Stopper } from './components/FloatingDudle';
 import { FirstLaunch, type DevTools, type HarnessAuth, type Starter } from './components/FirstLaunch';
 import { FleetList, type Hiding } from './components/FleetList';
 import { HealthHeader } from './components/HealthHeader';
@@ -85,7 +85,11 @@ interface AppProps {
   floatingButton?: boolean;
   /** Archiving souls (#94); the app uses agent-bot when absent. */
   archiver?: Archiver;
+  /** The computer-use Stop (agent-bot `soul stop`); the app uses agent-bot when absent. */
+  stopper?: Stopper;
 }
+
+const liveStopper: Stopper = { supported: () => soulStopSupported(), stop: (agentId) => stopSoul(agentId) };
 
 // Dudles stop blinking while the popup is hidden, as R1's did while the
 // menu was closed.
@@ -124,7 +128,7 @@ function LanguageSelect() {
 
 // The GeniusBar menu (the tray popup's content, and the toolbar popover in
 // window mode) and, from it, one companion's session.
-function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, floatingButton = false, archiver }: AppProps) {
+function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, floatingButton = false, archiver, stopper }: AppProps) {
   const { t } = useI18n();
   const forest = useMemo(() => buildSoulForest(census), [census]);
   const roster = useMemo(() => allSouls(forest), [forest]);
@@ -391,6 +395,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
       <FloatingDudle showButton={floatingButton} lead={floatingLead(forest, layout.hidden)} paused={paused}
         state={floatingState({ roster, approvals: waiting.length, busy: shownBadges.busy, computerUse: shownBadges.computerUse })}
         computerUser={computerUserName(roster, shownBadges.computerUse)}
+        computerUse={shownBadges.computerUse} stopper={stopper ?? (inApp() && !isStatic ? liveStopper : undefined)}
         onPrompt={prompt} onHistory={(soul) => openOn(soul, 'audit')} />
       {launchModal}
       {archiveUi}

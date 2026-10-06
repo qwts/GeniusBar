@@ -1,6 +1,6 @@
 // The desktop's floating Dudle (#122, Lovable FloatingDudle): which soul it
-// shows, what state it draws, and who the computer-use perimeter names.
-// Display only; nothing here acts on a soul.
+// shows, what state it draws, who the computer-use perimeter names, and
+// which souls its Stop halts. Pure; nothing here acts on a soul.
 import { workingCount } from './approvals';
 import { displayName, soulKey, type CensusRow, type SoulNode } from './census';
 
@@ -62,4 +62,35 @@ export function menuStep(key: string, index: number, count: number): number | nu
   if (key === 'Home') return 0;
   if (key === 'End') return count - 1;
   return null;
+}
+
+/** How long Escape must be held to halt computer use (the design's ~0.6 s). */
+export const HALT_HOLD_MS = 600;
+
+/**
+ * How long Stop shows "stopping…" waiting for the daemon to drop the souls
+ * from `computerUse`, before offering Stop again.
+ */
+export const STOP_SETTLE_MS = 15_000;
+
+/** The perimeter's Stop: ready, waiting for the souls to settle, or failed. */
+export type StopPhase =
+  | { phase: 'ready' }
+  | { phase: 'stopping'; agentIds: readonly string[] }
+  | { phase: 'failed'; message: string };
+
+/** The agent IDs Stop halts: every soul the daemon reports driving the screen. */
+export function stopTargets(computerUse: ReadonlySet<string> = new Set()): string[] {
+  return [...computerUse];
+}
+
+/**
+ * The next Stop phase as the daemon reports computer use: "stopping" ends
+ * once none of the stopped souls drives the screen; a failure clears when
+ * nobody does.
+ */
+export function settleStop(stop: StopPhase, computerUse: ReadonlySet<string> = new Set()): StopPhase {
+  if (stop.phase === 'stopping' && !stop.agentIds.some((id) => computerUse.has(id))) return { phase: 'ready' };
+  if (stop.phase === 'failed' && computerUse.size === 0) return { phase: 'ready' };
+  return stop;
 }

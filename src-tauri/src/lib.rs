@@ -302,6 +302,8 @@ pub fn run() {
             bridge::soul_population,
             bridge::soul_mode,
             bridge::soul_model,
+            bridge::soul_stop,
+            bridge::soul_stop_probe,
             bridge::soul_remove,
             bridge::daemon_status,
             bridge::services_installed,

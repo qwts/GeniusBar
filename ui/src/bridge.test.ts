@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BridgeError, call, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul } from './bridge';
+import { BridgeError, call, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul } from './bridge';
 
 describe('bridge', () => {
   it('invokes the shell command with the method and params', async () => {
@@ -386,5 +386,40 @@ describe('population list (#137 comms badges in one call)', () => {
     await expect(populationList((async () => null) as never)).resolves.toBeNull();
     await expect(populationList((async () => { throw new Error('unknown command population_list'); }) as never)).resolves.toBeNull();
     await expect(populationList()).resolves.toBeNull();
+  });
+});
+
+describe('soul stop (#122, agent-bot-identity #474)', () => {
+  it('stops the soul through agent-bot and reports whether a turn was running', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); return { agentId: 'agent_1', stopped: true }; }) as never;
+    await expect(stopSoul('agent_1', fake)).resolves.toEqual({ agentId: 'agent_1', stopped: true });
+    expect(calls).toEqual([['soul_stop', { agent: 'agent_1' }]]);
+    const idle = (async () => ({ agentId: 'agent_1', stopped: false, reason: 'idle' })) as never;
+    await expect(stopSoul('agent_1', idle)).resolves.toEqual({ agentId: 'agent_1', stopped: false, reason: 'idle' });
+  });
+
+  it('rejects with the shell error code, telling an older bundle apart', async () => {
+    const down = (async () => { throw { code: 'daemon-unavailable', message: 'the daemon is not running' }; }) as never;
+    await expect(stopSoul('agent_1', down)).rejects.toMatchObject({ code: 'daemon-unavailable', message: 'the daemon is not running' });
+    const older = (async () => { throw { code: 'soul-stop-unsupported', message: 'this agent-bot has no soul stop' }; }) as never;
+    await expect(stopSoul('agent_1', older)).rejects.toMatchObject({ code: 'soul-stop-unsupported' });
+    await expect(stopSoul('agent_1', (async () => ({ agentId: 'agent_1' })) as never)).rejects.toMatchObject({ code: 'soul-stop-failed' });
+  });
+
+  it('normalizes only a well-formed result', () => {
+    expect(normalizeSoulStop({ agentId: 'a', stopped: false, reason: 'idle', extra: 1 })).toEqual({ agentId: 'a', stopped: false, reason: 'idle' });
+    expect(normalizeSoulStop({ agentId: 'a', stopped: 'yes' })).toBeNull();
+    expect(normalizeSoulStop(null)).toBeNull();
+  });
+
+  it('probes once whether the bundle has the command; false when it cannot say', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); return { supported: true }; }) as never;
+    await expect(soulStopSupported(fake)).resolves.toBe(true);
+    expect(calls).toEqual([['soul_stop_probe', undefined]]);
+    await expect(soulStopSupported((async () => ({ supported: false })) as never)).resolves.toBe(false);
+    await expect(soulStopSupported((async () => { throw { code: 'soul-stop-unavailable', message: 'x' }; }) as never)).resolves.toBe(false);
+    await expect(soulStopSupported()).resolves.toBe(false);
   });
 });

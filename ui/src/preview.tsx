@@ -12,12 +12,14 @@
 // Archive / Remove… archive locally, refusing while luna "runs"; the
 // computer-use perimeter shows, and &dudle=idle|working|awaiting|computer
 // also shows the floating Dudle's button (off in the app) in one state from
-// sampleFloating):
+// sampleFloating; with &dudle=computer the perimeter's Stop "stops" agent_c
+// after a moment, and hold Esc does the same):
 // the app on the fixed fixtures, without Tauri. Not part of the build.
 import { StrictMode, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App, type AppMode } from './App';
 import type { Archiver } from './components/ArchiveDialog';
+import type { Stopper } from './components/FloatingDudle';
 import { AuditSourceContext, type AuditSource } from './components/AuditLog';
 import { SoulSourceContext, type SoulSource } from './components/SoulNotices';
 import type { CensusRow } from './model/census';
@@ -116,10 +118,20 @@ function Preview() {
       return { agentId, name: null, comms: 'left', archived: [{ from: `/souls/${agentId}`, to: `/souls/.archive/${agentId}` }] };
     },
   }), []);
+  // The perimeter's Stop (#122) on the fixtures: the daemon drops the soul from
+  // computer use a moment after agent-bot `soul stop` answers.
+  const [driving, setDriving] = useState<ReadonlySet<string> | null>(null);
+  const stopper = useMemo<Stopper>(() => ({
+    supported: async () => true,
+    stop: async (agentId) => {
+      setTimeout(() => setDriving(new Set()), 1500);
+      return { agentId, stopped: true };
+    },
+  }), []);
   const opened = params.get('open');
   const fixture = opened === 'copy' || opened === 'described' ? sampleOpenedPackages[opened] : null;
   const openedPackage = opened ? { id: 1, checking: false, error: null, path: opened, ...fixture } : undefined;
-  const app = <App mode={mode} select={params.get('select')} openedPackage={openedPackage} census={souls} badges={floating ? { ...sampleBadges, computerUse: floating.computerUse, busy: floating.busy } : sampleBadges} floatingButton={floating !== null} archiver={archiver} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}
+  const app = <App mode={mode} select={params.get('select')} openedPackage={openedPackage} census={souls} badges={floating ? { ...sampleBadges, computerUse: driving ?? floating.computerUse, busy: floating.busy } : sampleBadges} stopper={stopper} floatingButton={floating !== null} archiver={archiver} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}
     onRefresh={() => {}} onRemoveServices={async () => {}} updates={{ status: { state: 'idle', version: null }, act: () => {} }}
     launcher={{ state: { phase: 'idle' }, launch: async () => {}, reset: () => {} }} />;
   // The tray popup is a fixed 384×560 window (tauri.conf.json).

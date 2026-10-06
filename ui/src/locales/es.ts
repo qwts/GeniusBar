@@ -265,4 +265,9 @@ export const es: Catalog = {
   'quick.prompt': 'Escribir instrucción',
   'quick.history': 'Abrir historial',
   computerActive: '{name} está usando el equipo',
+  // El botón Detener del perímetro (#122): con `soul stop` de agent-bot.
+  computerActiveStop: '{name} controla la pantalla. Mantén Esc o pulsa Detener.',
+  stop: 'Detener',
+  stopping: 'Deteniendo…',
+  stopFailed: 'No se pudo detener: {message}',
 };
