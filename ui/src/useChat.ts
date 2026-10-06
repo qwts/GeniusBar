@@ -1,10 +1,20 @@
 // Chat with souls (#17): polls this principal's inbox every 5 seconds and
 // sends from the composer. History is saved to the web view's storage
 // before each ack, because an acknowledged message leaves the broker.
+// The open conversation also shows its soul's asides and pending approvals
+// from agent-bot (#122, #85, #86), read on the same cadence.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BridgeError, call, inApp } from './bridge';
+import { BridgeError, call, decideApproval, inApp, listApprovals, soulAsides } from './bridge';
+import type { CensusRow } from './model/census';
 import {
   addSent,
+  approvalEntries,
+  asideEntries,
+  withSideEntries,
+  type ApprovalDecision,
+  type ApprovalRecord,
+  type AsideRecord,
+  type LocalApproval,
   beginSend,
   canSend,
   emptyComposer,
@@ -87,6 +97,24 @@ function defaultStorage(): ChatStorage | null {
   try { return typeof localStorage === 'undefined' ? null : localStorage; } catch { return null; }
 }
 
+/** agent-bot reads for the open conversation; injectable for tests. */
+export interface AgentBotFeed {
+  asides: (agentId: string, after: string | null) => Promise<{ asides: AsideRecord[]; next: string | null } | null>;
+  approvals: () => Promise<ApprovalRecord[] | null>;
+  decide: (proposalId: string, decision: 'approve' | 'deny') => Promise<ApprovalRecord>;
+}
+
+const bridgeFeed: AgentBotFeed = {
+  asides: (agentId, after) => soulAsides(agentId, after),
+  approvals: () => listApprovals(),
+  decide: (proposalId, decision) => decideApproval(proposalId, decision),
+};
+
+/** Asides kept per soul; agent-bot keeps up to 2000, the view needs far fewer. */
+export const ASIDES_KEPT = 500;
+
+const agentIdOf = (key: string) => key.slice(key.lastIndexOf('/') + 1);
+
 export interface ChatOptions {
   storage?: ChatStorage | null;
   enabled?: boolean;
@@ -94,6 +122,9 @@ export interface ChatOptions {
   newKey?: () => string;
   now?: () => number;
   intervalMs?: number;
+  feed?: AgentBotFeed;
+  /** Names and teams for asides. */
+  roster?: readonly CensusRow[];
 }
 
 export interface ChatApi {
@@ -103,6 +134,12 @@ export interface ChatApi {
   open: (key: string | null) => void;
   setDraft: (key: string, draft: string) => void;
   send: (key: string) => Promise<void>;
+  /**
+   * Answers an approval request in that conversation. Approve and deny go
+   * to agent-bot (the daemon asks the owner to confirm); approving for the
+   * session has no daemon scope yet and does nothing.
+   */
+  resolve?: (key: string, entryId: string, decision: ApprovalDecision) => Promise<void>;
 }
 
 export function useChat({
@@ -112,6 +149,8 @@ export function useChat({
   now = Date.now,
   intervalMs = INBOX_INTERVAL_MS,
   storage = defaultStorage(),
+  feed = bridgeFeed,
+  roster = [],
 }: ChatOptions = {}): ChatApi {
   const saved = useRef<ChatStorage | null>(storage);
   const [initial] = useState(() => {
@@ -144,8 +183,48 @@ export function useChat({
   }, []);
 
   const openKey = useRef<string | null>(null);
-  const deps = useRef({ callImpl, newKey, now });
-  deps.current = { callImpl, newKey, now };
+  const deps = useRef({ callImpl, newKey, now, feed, roster });
+  deps.current = { callImpl, newKey, now, feed, roster };
+
+  // agent-bot's view of the open soul: its aside journal, the pending
+  // proposals, and decisions made here.
+  const asideLog = useRef(new Map<string, AsideRecord[]>());
+  const pending = useRef<ApprovalRecord[]>([]);
+  const local = useRef(new Map<string, LocalApproval>());
+  /** Rebuilds one conversation's asides and approvals; saves only on change. */
+  const showSide = useCallback((key: string) => {
+    const agentId = agentIdOf(key);
+    const asides = asideEntries(agentId, asideLog.current.get(agentId) ?? [], deps.current.roster);
+    const approvals = approvalEntries(agentId, pending.current, local.current);
+    const next = withSideEntries(withSideEntries(store.current, key, 'aside', asides), key, 'approval_request', approvals);
+    if (next !== store.current) update(() => next);
+  }, [update]);
+
+  const sideInFlight = useRef(false);
+  const pollSide = useCallback(async () => {
+    const key = openKey.current;
+    if (key === null || sideInFlight.current) return;
+    sideInFlight.current = true;
+    try {
+      const agentId = agentIdOf(key);
+      const log = asideLog.current.get(agentId) ?? [];
+      const held = new Set(log.map((a) => a.id));
+      let after = log.at(-1)?.id ?? null;
+      for (let page = 0; page < MAX_PAGES; page += 1) {
+        const result = await deps.current.feed.asides(agentId, after);
+        if (!result) break;
+        for (const aside of result.asides) if (!held.has(aside.id)) { held.add(aside.id); log.push(aside); }
+        if (!result.next || result.next === after) break;
+        after = result.next;
+      }
+      asideLog.current.set(agentId, log.slice(-ASIDES_KEPT));
+      const approvals = await deps.current.feed.approvals();
+      if (approvals) pending.current = approvals;
+      showSide(key);
+    } finally {
+      sideInFlight.current = false;
+    }
+  }, [showSide]);
 
   const inFlight = useRef(false);
   const poll = useCallback(async () => {
@@ -172,14 +251,35 @@ export function useChat({
   useEffect(() => {
     if (!enabled) return;
     void poll();
-    const timer = setInterval(() => { void poll(); }, intervalMs);
+    void pollSide();
+    const timer = setInterval(() => { void poll(); void pollSide(); }, intervalMs);
     return () => clearInterval(timer);
-  }, [enabled, intervalMs, poll]);
+  }, [enabled, intervalMs, poll, pollSide]);
 
   const open = useCallback((key: string | null) => {
     openKey.current = key;
     if (key !== null) update((s) => markRead(s, key));
-  }, [update]);
+    if (key !== null && enabled) void pollSide();
+  }, [update, enabled, pollSide]);
+
+  const resolve = useCallback(async (key: string, entryId: string, decision: ApprovalDecision) => {
+    if (decision === 'approved_session') return;
+    const agentId = agentIdOf(key);
+    const shown = store.current.conversations[key]?.entries.find((e) => e.id === entryId);
+    if (shown?.kind !== 'approval_request' || shown.status !== 'pending' || shown.deciding) return;
+    const mark = (entry: Partial<typeof shown>) => {
+      local.current.set(entryId, { agentId, entry: { ...shown, deciding: false, error: null, ...entry } });
+      showSide(key);
+    };
+    mark({ deciding: true });
+    try {
+      const decided = await deps.current.feed.decide(entryId, decision === 'approved' ? 'approve' : 'deny');
+      pending.current = pending.current.filter((p) => p.proposalId !== entryId);
+      mark({ status: decided.status === 'denied' || decision === 'denied' ? 'denied' : 'approved' });
+    } catch (error) {
+      mark({ error: asBridgeError(error).message });
+    }
+  }, [showSide]);
 
   const setDraft = useCallback((key: string, draft: string) => {
     updateComposer(key, (c) => ({ ...c, draft }));
@@ -203,5 +303,5 @@ export function useChat({
     }
   }, [update, updateComposer]);
 
-  return useMemo(() => ({ chat, composers, open, setDraft, send }), [chat, composers, open, setDraft, send]);
+  return useMemo(() => ({ chat, composers, open, setDraft, send, resolve }), [chat, composers, open, setDraft, send, resolve]);
 }

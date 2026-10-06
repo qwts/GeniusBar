@@ -1,6 +1,7 @@
 // The web view's only path to agent-comms: the shell relays each call to
 // the Node bridge (#7), which holds the principal credential.
 import { invoke } from '@tauri-apps/api/core';
+import { normalizeApproval, normalizeApprovals, normalizeAsides, type ApprovalRecord, type AsideRecord } from './model/chat';
 
 export type BridgeMethod = 'census' | 'send' | 'inbox' | 'ack' | 'launch' | 'launchStatus';
 
@@ -118,6 +119,50 @@ export async function setSoulComms(agentId: string, comms: boolean, invokeImpl: 
   const state = normalizeSoulComms(raw);
   if (!state) throw new BridgeError('soul-comms-failed', 'agent-bot gave no comms state');
   return state;
+}
+
+/**
+ * A page of a soul's asides from agent-bot (`soul asides --json`, #122),
+ * oldest first after `after`; null when agent-bot cannot say (outside the
+ * app, an older bundle, a refusal).
+ */
+export async function soulAsides(agentId: string, after: string | null, invokeImpl: typeof invoke = invoke):
+  Promise<{ asides: AsideRecord[]; next: string | null } | null> {
+  if (!inApp() && invokeImpl === invoke) return null;
+  try {
+    return normalizeAsides(await invokeImpl<unknown>('soul_asides', { soul: agentId, after }));
+  } catch {
+    return null;
+  }
+}
+
+/** Tool calls waiting on the owner (`approvals list --json`, #85); null when agent-bot cannot say. */
+export async function listApprovals(invokeImpl: typeof invoke = invoke): Promise<ApprovalRecord[] | null> {
+  if (!inApp() && invokeImpl === invoke) return null;
+  try {
+    return normalizeApprovals(await invokeImpl<unknown>('approvals', { action: 'list' }));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Approves or denies one proposal (#86). The daemon asks the owner to
+ * confirm (Touch ID) before the decision lands; GeniusBar never asks itself.
+ */
+export async function decideApproval(proposalId: string, decision: 'approve' | 'deny',
+  invokeImpl: typeof invoke = invoke): Promise<ApprovalRecord> {
+  let raw: unknown;
+  try {
+    raw = await invokeImpl<unknown>('approvals', { action: decision, proposal: proposalId });
+  } catch (error) {
+    const e = error as { code?: unknown; message?: unknown };
+    throw new BridgeError(typeof e?.code === 'string' ? e.code : 'approvals-failed',
+      typeof e?.message === 'string' ? e.message : String(error));
+  }
+  const decided = normalizeApproval(raw);
+  if (!decided) throw new BridgeError('approvals-failed', 'agent-bot gave no decision');
+  return decided;
 }
 
 export async function call<T>(method: BridgeMethod, params: Record<string, unknown> = {},

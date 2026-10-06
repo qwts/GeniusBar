@@ -6,8 +6,8 @@ import { StrictMode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App, type AppMode } from './App';
 import type { CensusRow } from './model/census';
-import { emptyChat, emptyComposer, mergeIncoming } from './model/chat';
-import { inboxMessage, sampleCensus, sampleConnection } from './model/fixtures';
+import { emptyChat, emptyComposer, mergeIncoming, type ChatState } from './model/chat';
+import { inboxMessage, sampleCensus, sampleConnection, sampleSessionEntries } from './model/fixtures';
 import type { ChatApi } from './useChat';
 import '@fontsource/ibm-plex-sans/latin-400.css';
 import '@fontsource/ibm-plex-sans/latin-500.css';
@@ -27,22 +27,38 @@ const census: CensusRow[] = [
   row('agent_e', 'ember', 'claude', 'agent_n', 'watching'),
 ];
 
-const { state } = mergeIncoming(emptyChat, [
+const { state: inbox } = mergeIncoming(emptyChat, [
   inboxMessage('msg_1', 1, 'Morning! I finished the census refactor.\nWant me to open a PR?', { account: 'user', agentId: 'agent_p' }),
   inboxMessage('msg_2', 2, 'scout found two flaky tests; quill is on them.', { account: 'user', agentId: 'agent_p' }),
   inboxMessage('msg_3', 3, 'hello from agent_c', { account: 'user', agentId: 'agent_c' }),
 ]);
 
+// luna's chat also shows every entry kind (#122) without a broker.
+const lunaKey = 'user/agent_p';
+const luna = inbox.conversations[lunaKey];
+const state: ChatState = {
+  conversations: { ...inbox.conversations, [lunaKey]: { ...luna, entries: [...luna.entries, ...sampleSessionEntries] } },
+  ids: new Set([...inbox.ids, ...sampleSessionEntries.map((e) => e.id)]),
+};
+
 function Preview() {
   const params = new URLSearchParams(location.search);
   const mode = (params.get('mode') === 'window' ? 'window' : 'tray') as AppMode;
   const [composers, setComposers] = useState<ChatApi['composers']>({});
+  const [chatState, setChatState] = useState(state);
   const chat: ChatApi = {
-    chat: state,
+    chat: chatState,
     composers,
     open: () => {},
     setDraft: (key, draft) => setComposers((c) => ({ ...c, [key]: { ...(c[key] ?? emptyComposer), draft } })),
     send: async () => {},
+    // Answers approvals locally, as agent-bot would once the owner confirms.
+    resolve: async (key, entryId, decision) => setChatState((s) => {
+      const c = s.conversations[key];
+      if (!c) return s;
+      const entries = c.entries.map((e) => (e.id === entryId && e.kind === 'approval_request' ? { ...e, status: decision } : e));
+      return { ...s, conversations: { ...s.conversations, [key]: { ...c, entries } } };
+    }),
   };
   const opened = params.get('open');
   const app = <App mode={mode} select={params.get('select')} openedPackage={opened ? { id: 1, path: opened, checking: false, error: null } : undefined} census={census} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}

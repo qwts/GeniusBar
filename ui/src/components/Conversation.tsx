@@ -1,9 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { ArrowUp } from 'lucide-react';
-import { canSend, type ChatEntry, type Composer } from '../model/chat';
+import { canSend, isTextEntry, type ApprovalDecision, type ChatEntry, type Composer } from '../model/chat';
 import type { DudleSpec } from '../model/dudle';
 import { useI18n } from '../lib/i18n';
 import { Dudle } from './Dudle';
+import { AgentAside, MessageBody, ToolApprovalCard, ToolCard } from './Entries';
 
 interface ConversationProps {
   /** The soul's display name. */
@@ -15,14 +16,21 @@ interface ConversationProps {
   /** The soul's Dudle beside its messages; omitted in plain renders. */
   dudle?: DudleSpec;
   paused?: boolean;
+  /**
+   * Answers an approval request. Without it (no backend yet) approval
+   * cards show their buttons disabled.
+   */
+  onResolve?: (entryId: string, decision: ApprovalDecision) => void;
 }
 
 /**
  * Messages between this principal and one soul, newest at the bottom,
- * with a composer. Bodies are untrusted text: rendered as React text
- * nodes only (no HTML, no markdown), with whitespace kept by CSS.
+ * with a composer, plus the soul's tool calls, approval requests and
+ * asides (#122). Bodies are untrusted text: rendered as a safe Markdown
+ * subset made of React elements only (no HTML, links not followed, #117),
+ * with whitespace kept by CSS.
  */
-export function Conversation({ name, entries, composer, onDraft, onSend, dudle, paused = false }: ConversationProps) {
+export function Conversation({ name, entries, composer, onDraft, onSend, dudle, paused = false, onResolve }: ConversationProps) {
   const { t } = useI18n();
   const list = useRef<HTMLOListElement>(null);
   const last = entries.at(-1)?.id;
@@ -31,10 +39,15 @@ export function Conversation({ name, entries, composer, onDraft, onSend, dudle, 
     if (el) el.scrollTop = el.scrollHeight;
   }, [last]);
 
+  const latest = entries.at(-1);
+  // Screen readers hear the soul's newest message as it arrives.
+  const announce = latest && isTextEntry(latest) && latest.direction === 'in' ? `${name}: ${latest.body}` : '';
+
   const ready = canSend(composer);
   const errorId = 'chat-error';
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <div className="sr-only" aria-live="polite" aria-atomic="true">{announce}</div>
       {entries.length === 0 ? (
         <div className="mx-auto flex max-w-sm flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
           {dudle && <Dudle spec={dudle} diameter={64} paused={paused} />}
@@ -47,6 +60,11 @@ export function Conversation({ name, entries, composer, onDraft, onSend, dudle, 
           aria-label={t('conversationWith', { name })}
         >
           {entries.map((entry) => {
+            if (entry.kind === 'tool_call') return <li key={entry.id} className="ml-10"><ToolCard e={entry} /></li>;
+            if (entry.kind === 'approval_request') {
+              return <li key={entry.id} className="ml-10"><ToolApprovalCard e={entry} name={name} onResolve={onResolve} /></li>;
+            }
+            if (entry.kind === 'aside') return <li key={entry.id}><AgentAside e={entry} /></li>;
             const mine = entry.direction === 'out';
             return (
               <li key={entry.id} className={`flex items-end gap-2 ${mine ? 'justify-end' : ''}`}>
@@ -58,7 +76,7 @@ export function Conversation({ name, entries, composer, onDraft, onSend, dudle, 
                   <span className={`mb-0.5 block text-xs font-semibold ${mine ? 'sr-only' : 'text-muted-foreground'}`}>
                     {mine ? t('you') : name}
                   </span>
-                  <p className="chat-body selectable m-0 whitespace-pre-wrap text-sm leading-relaxed [overflow-wrap:anywhere]">{entry.body}</p>
+                  <MessageBody body={entry.body} className="chat-body selectable text-sm leading-relaxed [overflow-wrap:anywhere]" />
                   <time className={`mt-0.5 block text-[10px] ${mine ? 'text-primary-foreground' : 'text-muted-foreground'}`} dateTime={new Date(entry.at).toISOString()}>
                     {new Date(entry.at).toLocaleTimeString()}
                   </time>
