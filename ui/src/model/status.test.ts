@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { translate } from '../lib/i18n';
 import {
   brokerErrorMessage,
   credentialNote,
@@ -73,6 +74,22 @@ describe('Health header', () => {
     expect(known.detail).toBe(`Last updated · ${formatTime(refreshed)}`);
     expect(known.label).toBe(`Can’t reach the background service. Last updated ${formatTime(refreshed)}.`);
     expect(emptyRosterText({ ...connected, brokerUnreachable: true })).toBe('Your companions will appear here once GeniusBar connects.');
+  });
+
+  it('says the services are starting instead of an outage (#118)', () => {
+    const starting = { ...connected, brokerUnreachable: true, starting: true };
+    expect(healthHeader(starting)).toEqual({
+      tone: 'unknown',
+      title: 'Background service is starting…',
+      detail: 'Reconnecting…',
+      label: 'Background service is starting… Reconnecting…',
+    });
+    expect(healthHeader(starting, (key, vars) => translate('es', key, vars)).title).toBe('El servicio en segundo plano se está iniciando…');
+    expect(footerStatus(starting)).toBeNull();
+    expect(emptyRosterText(starting)).toBe('Your companions will appear here once GeniusBar connects.');
+    // Starting means nothing once the broker answers or before the bridge does.
+    expect(healthHeader({ ...connected, starting: true, lastRefresh: refreshed }).title).toBe('Connected');
+    expect(healthHeader({ ...disconnected, brokerUnreachable: true, starting: true }).title).toBe('Connecting to GeniusBar’s background service…');
   });
 
   it('summarises a healthy broker', () => {

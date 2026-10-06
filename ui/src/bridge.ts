@@ -484,6 +484,28 @@ export async function daemonStatus(invokeImpl: typeof invoke = invoke): Promise<
   }
 }
 
+/** Which of GeniusBar's login services are registered (#118), from `services_installed`. */
+export interface ServicesInstalled {
+  broker: boolean;
+  daemon: boolean;
+}
+
+/**
+ * Whether GeniusBar's services are installed, so a silent broker after
+ * login reads as "starting" rather than "needs setup" (#118). Null when
+ * the shell cannot say (outside the app, a failed call).
+ */
+export async function servicesInstalled(invokeImpl: typeof invoke = invoke): Promise<ServicesInstalled | null> {
+  if (!inApp() && invokeImpl === invoke) return null;
+  try {
+    const raw = await invokeImpl<unknown>('services_installed');
+    if (!isRecord(raw)) return null;
+    return { broker: raw.broker === true, daemon: raw.daemon === true };
+  } catch {
+    return null;
+  }
+}
+
 export async function call<T>(method: BridgeMethod, params: Record<string, unknown> = {},
   invokeImpl: typeof invoke = invoke): Promise<T> {
   try {

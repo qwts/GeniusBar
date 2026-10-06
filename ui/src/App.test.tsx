@@ -118,6 +118,18 @@ describe('App setup', () => {
     expect(screen.queryByText('No souls on this machine.')).toBeNull();
   });
 
+  it('keeps the fleet, not setup, while installed services are starting (#118)', () => {
+    const starting = { ...disconnected, bridgeConnected: true, brokerUnreachable: true, starting: true };
+    render(<App connection={starting} setup={idleSetup} onSetup={() => {}} />);
+    expect(screen.queryByRole('region', { name: 'Setup' })).toBeNull();
+    expect(screen.getByRole('status', { name: 'Background service is starting… Reconnecting…' })).toBeTruthy();
+    expect(screen.getByText('Your companions will appear here once GeniusBar connects.')).toBeTruthy();
+    cleanup();
+    // Past the window the snapshot is no longer starting and setup returns.
+    render(<App connection={{ ...starting, starting: false }} setup={idleSetup} onSetup={() => {}} />);
+    expect(screen.getByRole('region', { name: 'Setup' })).toBeTruthy();
+  });
+
   it('launches a selected soul with its account and harness filled in', () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher} isStatic />);

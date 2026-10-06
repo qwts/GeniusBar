@@ -1,6 +1,7 @@
 // Health header and status text, ported from R1's ContentView/AppState.
 // The view state is a plain snapshot so the bridge (#7) can fill it and
 // tests can drive every branch without a broker.
+import { translate, type Translate } from '../lib/i18n';
 
 /** Broker health as the R1 health op reported it. */
 export interface BrokerHealth {
@@ -21,7 +22,19 @@ export interface ConnectionSnapshot {
   health: BrokerHealth | null;
   lastError: string | null;
   lastRefresh: Date | null;
+  /**
+   * Installed but not answering yet (#118): GeniusBar's services are
+   * registered and no census has succeeded in this run, so a busy Mac is
+   * still starting them. Setup stays hidden until STARTING_WINDOW_MS of
+   * continuous failures has passed.
+   */
+  starting?: boolean;
+  /** When the current run of unreachable-broker failures began. */
+  failingSince?: Date | null;
 }
+
+/** How long installed services may stay silent before setup is offered again (#118). */
+export const STARTING_WINDOW_MS = 5 * 60_000;
 
 export const disconnected: ConnectionSnapshot = {
   bridgeConnected: false,
@@ -31,6 +44,8 @@ export const disconnected: ConnectionSnapshot = {
   health: null,
   lastError: null,
   lastRefresh: null,
+  starting: false,
+  failingSince: null,
 };
 
 // The setup panel shows whenever the app is unpaired, so this points there
@@ -73,10 +88,16 @@ export interface HeaderState {
   label: string;
 }
 
-export function healthHeader(s: ConnectionSnapshot): HeaderState {
+export function healthHeader(s: ConnectionSnapshot, t: Translate = (key, vars) => translate('en', key, vars)): HeaderState {
   if (!s.bridgeConnected) {
     const title = 'Connecting to GeniusBar’s background service…';
     return { tone: 'unknown', title, detail: null, label: title };
+  }
+  // Installed services still starting after login (#118): not an outage yet.
+  if (s.starting && s.brokerUnreachable) {
+    const title = t('status.starting');
+    const detail = t('status.startingDetail');
+    return { tone: 'unknown', title, detail, label: `${title} ${detail}` };
   }
   if (s.brokerUnreachable) {
     const title = 'Can’t reach the background service';

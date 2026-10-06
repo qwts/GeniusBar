@@ -35,6 +35,8 @@ export const en = {
   "setup.settingUp": "Setting up…",
   "setup.retry": "Try again",
   "setup.go": "Set up",
+  "status.starting": "Background service is starting…",
+  "status.startingDetail": "Reconnecting…",
   appName: 'GeniusBar',
   fleet: 'Fleet',
   you: 'You',

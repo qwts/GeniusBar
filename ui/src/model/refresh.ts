@@ -2,7 +2,7 @@
 // refresh did, with errors told apart by their stable code.
 import type { DaemonStatus, SoulComms } from '../bridge';
 import type { CensusRow } from './census';
-import { brokerErrorMessage, type ConnectionSnapshot } from './status';
+import { brokerErrorMessage, STARTING_WINDOW_MS, type ConnectionSnapshot } from './status';
 
 export type CensusOutcome =
   | { ok: true; souls: readonly CensusRow[] }
@@ -11,10 +11,17 @@ export type CensusOutcome =
 const UNREACHABLE = new Set(['broker-unreachable', 'broker-timeout', 'broker-untrusted']);
 const UNPAIRED = new Set(['unauthenticated', 'not-approved', 'credential-invalid', 'keychain-read-failed']);
 
-export function applyCensus(prev: ConnectionSnapshot, outcome: CensusOutcome, now: Date): ConnectionSnapshot {
+/**
+ * `servicesInstalled` says GeniusBar's login services are registered (#118):
+ * an unreachable broker that has never answered in this run is then
+ * "starting" for up to STARTING_WINDOW_MS of continuous failures, not a
+ * machine that needs setup. False (or not known) keeps the old behaviour.
+ */
+export function applyCensus(prev: ConnectionSnapshot, outcome: CensusOutcome, now: Date,
+  servicesInstalled = false): ConnectionSnapshot {
   if (outcome.ok) {
     return { ...prev, bridgeConnected: true, loadingCredential: false, unpaired: false,
-      brokerUnreachable: false, lastError: null, lastRefresh: now };
+      brokerUnreachable: false, lastError: null, lastRefresh: now, starting: false, failingSince: null };
   }
   const lastError = brokerErrorMessage(outcome.code, outcome.message);
   // The shell reports bridge-* codes while Node starts or restarts.
@@ -23,11 +30,16 @@ export function applyCensus(prev: ConnectionSnapshot, outcome: CensusOutcome, no
       lastError: 'GeniusBar had trouble starting its background service. Try reopening GeniusBar.' };
   }
   if (UNPAIRED.has(outcome.code)) {
-    return { ...prev, bridgeConnected: true, loadingCredential: false, unpaired: true, lastError };
+    return { ...prev, bridgeConnected: true, loadingCredential: false, unpaired: true, lastError,
+      starting: false, failingSince: null };
   }
   // Keep the last census on screen and flag the outage (R1 behaviour).
+  const brokerUnreachable = UNREACHABLE.has(outcome.code) || prev.brokerUnreachable;
+  const failingSince = brokerUnreachable ? prev.failingSince ?? now : null;
+  const starting = servicesInstalled && failingSince !== null && prev.lastRefresh === null
+    && now.getTime() - failingSince.getTime() < STARTING_WINDOW_MS;
   return { ...prev, bridgeConnected: true, loadingCredential: false, unpaired: false,
-    brokerUnreachable: UNREACHABLE.has(outcome.code) || prev.brokerUnreachable, lastError };
+    brokerUnreachable, lastError, starting, failingSince };
 }
 
 /**

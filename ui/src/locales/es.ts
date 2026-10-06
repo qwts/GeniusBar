@@ -36,6 +36,8 @@ export const es: Catalog = {
   "setup.settingUp": "Configurando…",
   "setup.retry": "Reintentar",
   "setup.go": "Configurar",
+  "status.starting": "El servicio en segundo plano se está iniciando…",
+  "status.startingDetail": "Reconectando…",
   appName: 'GeniusBar',
   fleet: 'Flota',
   you: 'Tú',
