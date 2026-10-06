@@ -24,6 +24,12 @@ export interface ChimeSignals {
   waiting: number;
   /** Souls with a turn in flight (`badges.busy`); empty when the bundle cannot say. */
   busy: ReadonlySet<string>;
+  /**
+   * Answers true when another window is showing and plays this chime instead:
+   * the desktop window (#69) yields to the popup, so one change makes one
+   * sound. Absent, or failing, the chime plays here.
+   */
+  yieldTo?: () => Promise<boolean>;
 }
 
 /**
@@ -31,14 +37,16 @@ export interface ChimeSignals {
  * set. Never on the first render, while muted, or while the page is hidden;
  * at most one chime per change ("ask" wins when both happen at once).
  */
-export function useChimes({ sound, waiting, busy }: ChimeSignals, play: (kind: 'ask' | 'done') => void = chime): void {
+export function useChimes({ sound, waiting, busy, yieldTo }: ChimeSignals, play: (kind: 'ask' | 'done') => void = chime): void {
   const last = useRef<{ waiting: number; busy: ReadonlySet<string> } | null>(null);
   useEffect(() => {
     const prev = last.current;
     last.current = { waiting, busy };
     if (!prev || !sound) return;
     if (typeof document !== 'undefined' && document.hidden) return;
-    if (waiting > prev.waiting) play('ask');
-    else if ([...prev.busy].some((id) => !busy.has(id))) play('done');
-  }, [sound, waiting, busy, play]);
+    const kind = waiting > prev.waiting ? 'ask' : [...prev.busy].some((id) => !busy.has(id)) ? 'done' : null;
+    if (!kind) return;
+    if (!yieldTo) { play(kind); return; }
+    yieldTo().then((other) => { if (!other) play(kind); }, () => play(kind));
+  }, [sound, waiting, busy, play, yieldTo]);
 }

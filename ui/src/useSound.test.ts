@@ -81,6 +81,27 @@ describe('useChimes (#122)', () => {
     expect(play).not.toHaveBeenCalled();
   });
 
+  it('yields to the window that answers it is showing, and plays otherwise', async () => {
+    const showing = vi.fn(async () => true);
+    const { play, rerender } = setup({ sound: true, waiting: 0, busy: none, yieldTo: showing });
+    rerender({ sound: true, waiting: 1, busy: none, yieldTo: showing });
+    await act(async () => {});
+    expect(showing).toHaveBeenCalledOnce();
+    expect(play).not.toHaveBeenCalled();
+    const hidden = vi.fn(async () => false);
+    rerender({ sound: true, waiting: 2, busy: none, yieldTo: hidden });
+    await act(async () => {});
+    expect(play.mock.calls).toEqual([['ask']]);
+    const broken = vi.fn(async () => { throw new Error('no shell'); });
+    rerender({ sound: true, waiting: 3, busy: none, yieldTo: broken });
+    await act(async () => {});
+    expect(play.mock.calls).toEqual([['ask'], ['ask']]);
+    // Nothing to play asks nothing.
+    rerender({ sound: true, waiting: 1, busy: none, yieldTo: showing });
+    await act(async () => {});
+    expect(showing).toHaveBeenCalledOnce();
+  });
+
   it('never plays "done" without busy support', () => {
     const { play, rerender } = setup({ sound: true, waiting: 0, busy: none });
     rerender({ sound: true, waiting: 0, busy: new Set() });

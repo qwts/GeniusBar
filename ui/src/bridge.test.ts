@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BridgeError, call, openDesktop, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported, normalizeSoulComputerUse, soulComputerUse, soulComputerUseSupported, liveComputerUse, listSoulTemplates, normalizeSoulTemplates, normalizeSoulProfile, soulProfile, soulProfileFile } from './bridge';
+import { BridgeError, call, openDesktop, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported, normalizeSoulComputerUse, soulComputerUse, soulComputerUseSupported, liveComputerUse, listSoulTemplates, normalizeSoulTemplates, normalizeSoulProfile, soulProfile, soulProfileFile, popupVisible } from './bridge';
 
 describe('bridge', () => {
   it('invokes the shell command with the method and params', async () => {
@@ -644,5 +644,19 @@ describe('soul profile (#64)', () => {
   it('is unsupported outside the app', async () => {
     await expect(soulProfile('agent_p')).rejects.toMatchObject({ code: 'soul-profile-unsupported' });
     await expect(soulProfileFile('agent_p', 'soul.md')).rejects.toMatchObject({ code: 'soul-profile-unsupported' });
+  });
+});
+
+describe('popupVisible (#122)', () => {
+  it('asks the popup window whether it shows, and says no when it cannot', async () => {
+    const asked: string[] = [];
+    const showing = async (label: string) => { asked.push(label); return { isVisible: async () => true }; };
+    await expect(popupVisible(showing)).resolves.toBe(true);
+    expect(asked).toEqual(['main']);
+    await expect(popupVisible(async () => ({ isVisible: async () => false }))).resolves.toBe(false);
+    await expect(popupVisible(async () => null)).resolves.toBe(false);
+    await expect(popupVisible(async () => { throw new Error('no window'); })).resolves.toBe(false);
+    // Outside the app there is no popup.
+    await expect(popupVisible()).resolves.toBe(false);
   });
 });

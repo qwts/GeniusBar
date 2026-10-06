@@ -1,6 +1,7 @@
 // The web view's only path to agent-comms: the shell relays each call to
 // the Node bridge (#7), which holds the principal credential.
 import { invoke } from '@tauri-apps/api/core';
+import { Window } from '@tauri-apps/api/window';
 import { normalizeAudit, type AuditRecord } from './model/audit';
 import { normalizeApproval, normalizeApprovals, normalizeAsides, type ApprovalRecord, type AsideRecord } from './model/chat';
 
@@ -525,6 +526,26 @@ export async function servicesInstalled(invokeImpl: typeof invoke = invoke): Pro
 /** Opens the companion desktop window beside the tray popup, or focuses it (#69). */
 export async function openDesktop(invokeImpl: typeof invoke = invoke): Promise<void> {
   await invokeImpl('open_desktop');
+}
+
+/** A window the popup check needs: only whether it is showing. */
+export interface VisibleWindow { isVisible(): Promise<boolean> }
+
+/**
+ * True while the tray popup (window `main`) is showing. The desktop window
+ * (#69) yields its chimes to it (#122): the popup hides on blur, so when
+ * both show, the popup is the one in front. False outside the app, when the
+ * popup is hidden, or when the shell cannot say.
+ */
+export async function popupVisible(getWindow?: (label: string) => Promise<VisibleWindow | null>): Promise<boolean> {
+  const get = getWindow ?? (inApp() ? (label: string) => Window.getByLabel(label) : null);
+  if (!get) return false;
+  try {
+    const popup = await get('main');
+    return popup ? await popup.isVisible() : false;
+  } catch {
+    return false;
+  }
 }
 
 export async function call<T>(method: BridgeMethod, params: Record<string, unknown> = {},
