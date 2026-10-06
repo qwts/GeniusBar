@@ -2033,6 +2033,349 @@ mod soul_computer_use_tests {
     }
 }
 
+/// GeniusBar's Sandboxing switch (#66), from agent-bot's `sandbox status
+/// --json` (agent-bot-identity #376): `{enabled, provider, account, status,
+/// checks, steps, souls}`. `status` is `unsupported`, `missing`, `creating`
+/// or `ready`; `steps` are the owner's own steps to create and onboard the
+/// account (agent-bot never creates it); `souls` says what each soul runs
+/// as. Read-only. An older bundle without the command answers `unknown
+/// command: sandbox`, which maps to `sandbox-unsupported` and hides the
+/// feature.
+#[tauri::command]
+pub async fn sandbox_status<R: Runtime>(app: AppHandle<R>) -> Result<Value, BridgeError> {
+    let args = vec!["sandbox".into(), "status".into(), "--json".into()];
+    let output = run_agent_bot(&app, args, "sandbox-unavailable").await?;
+    parse_sandbox_status(&output.stdout, &output.stderr)
+}
+
+/// Turns the sandbox on or off (`action` `on` / `off`), or names its account
+/// (`action` `account` with `account`). Owner-gated by agent-bot exactly
+/// like `soul mode` (its consent dialog, Touch ID); GeniusBar never asks
+/// itself. agent-bot answers with `{enabled, provider, account}`.
+#[tauri::command]
+pub async fn sandbox_set<R: Runtime>(
+    app: AppHandle<R>,
+    action: String,
+    account: Option<String>,
+) -> Result<Value, BridgeError> {
+    let args = sandbox_set_args(&action, account.as_deref())?;
+    let output = run_agent_bot(&app, args, "sandbox-unavailable").await?;
+    parse_sandbox_set(&output.stdout, &output.stderr)
+}
+
+/// A soul's sandbox override (`show`, `inherit`, `sandboxed` or
+/// `unrestricted`), from `sandbox override <agentId> <action> --json`:
+/// `{agentId, name, override, sandboxed, runsAs, source}`. A change is
+/// owner-gated by agent-bot as `sandbox_set` is.
+#[tauri::command]
+pub async fn sandbox_override<R: Runtime>(
+    app: AppHandle<R>,
+    agent: String,
+    action: String,
+) -> Result<Value, BridgeError> {
+    let args = sandbox_override_args(&agent, &action)?;
+    let output = run_agent_bot(&app, args, "sandbox-unavailable").await?;
+    parse_sandbox_override(&output.stdout, &output.stderr)
+}
+
+/// agent-bot's own rule for a sandbox account name, `^[a-z_][a-z0-9_-]{0,30}$`:
+/// a short macOS account name that lands in argv, never a shell.
+fn valid_sandbox_account(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    match bytes.split_first() {
+        Some((first, rest)) => {
+            (first.is_ascii_lowercase() || *first == b'_')
+                && rest.len() <= 30
+                && rest.iter().all(|b| {
+                    b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'_' || *b == b'-'
+                })
+        }
+        None => false,
+    }
+}
+
+fn sandbox_set_args(
+    action: &str,
+    account: Option<&str>,
+) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    let invalid = |message: &str| BridgeError::new("sandbox-invalid", message);
+    let mut args: Vec<std::ffi::OsString> = vec!["sandbox".into()];
+    match (action, account) {
+        ("on" | "off", None) => args.push(action.into()),
+        ("account", Some(name)) if valid_sandbox_account(name) => {
+            args.push("account".into());
+            args.push(name.into());
+        }
+        ("account", _) => {
+            return Err(invalid(
+                "account must be a short macOS account name (lowercase letters, digits, _ and -)",
+            ))
+        }
+        _ => return Err(invalid("action must be on, off or account NAME")),
+    }
+    args.push("--json".into());
+    Ok(args)
+}
+
+fn sandbox_override_args(
+    agent: &str,
+    action: &str,
+) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    if agent.is_empty() || agent.starts_with('-') {
+        return Err(BridgeError::new(
+            "sandbox-invalid",
+            "agent must be an agent id",
+        ));
+    }
+    if !matches!(action, "show" | "inherit" | "sandboxed" | "unrestricted") {
+        return Err(BridgeError::new(
+            "sandbox-invalid",
+            "action must be show, inherit, sandboxed or unrestricted",
+        ));
+    }
+    Ok(vec![
+        "sandbox".into(),
+        "override".into(),
+        agent.into(),
+        action.into(),
+        "--json".into(),
+    ])
+}
+
+/// True when stderr is an older agent-bot's answer to a command it lacks.
+fn sandbox_missing(stdout: &[u8], stderr: &[u8]) -> bool {
+    serde_json::from_str::<Value>(&last_line(stdout)).is_err()
+        && last_line(stderr).contains("unknown command: sandbox")
+}
+
+fn parse_sandbox(
+    stdout: &[u8],
+    stderr: &[u8],
+    fallback: &str,
+    valid: fn(&Value) -> bool,
+) -> Result<Value, BridgeError> {
+    if sandbox_missing(stdout, stderr) {
+        return Err(BridgeError::new(
+            "sandbox-unsupported",
+            "this agent-bot has no sandbox",
+        ));
+    }
+    parse_agent_bot_json(
+        stdout,
+        stderr,
+        "sandbox-failed",
+        "agent-bot sandbox: ",
+        fallback,
+        valid,
+    )
+}
+
+fn parse_sandbox_status(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    parse_sandbox(
+        stdout,
+        stderr,
+        "agent-bot gave no sandbox status",
+        |value| {
+            value.get("enabled").and_then(Value::as_bool).is_some()
+                && value.get("account").and_then(Value::as_str).is_some()
+                && matches!(
+                    value.get("status").and_then(Value::as_str),
+                    Some("unsupported" | "missing" | "creating" | "ready")
+                )
+                && value.get("steps").and_then(Value::as_array).is_some()
+                && value.get("souls").and_then(Value::as_array).is_some()
+        },
+    )
+}
+
+fn parse_sandbox_set(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    parse_sandbox(
+        stdout,
+        stderr,
+        "agent-bot gave no sandbox setting",
+        |value| {
+            value.get("enabled").and_then(Value::as_bool).is_some()
+                && value.get("account").and_then(Value::as_str).is_some()
+        },
+    )
+}
+
+fn parse_sandbox_override(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    parse_sandbox(
+        stdout,
+        stderr,
+        "agent-bot gave no sandbox override",
+        |value| {
+            value.get("agentId").and_then(Value::as_str).is_some()
+                && matches!(
+                    value.get("override").and_then(Value::as_str),
+                    Some("inherit" | "sandboxed" | "unrestricted")
+                )
+                && value.get("sandboxed").and_then(Value::as_bool).is_some()
+                && value.get("runsAs").and_then(Value::as_str).is_some()
+        },
+    )
+}
+
+#[cfg(test)]
+mod sandbox_tests {
+    use super::*;
+
+    /// What agent-bot 0.10.23 says to `sandbox`, which it does not have.
+    const OLD: &[u8] = b"agent-bot: unknown command: sandbox\n";
+
+    #[test]
+    fn builds_sandbox_set_arguments() {
+        assert_eq!(
+            sandbox_set_args("on", None).unwrap(),
+            vec!["sandbox", "on", "--json"]
+        );
+        assert_eq!(
+            sandbox_set_args("off", None).unwrap(),
+            vec!["sandbox", "off", "--json"]
+        );
+        assert_eq!(
+            sandbox_set_args("account", Some("geniusbar-agent")).unwrap(),
+            vec!["sandbox", "account", "geniusbar-agent", "--json"]
+        );
+        assert_eq!(
+            sandbox_set_args("account", Some("_a")).unwrap(),
+            vec!["sandbox", "account", "_a", "--json"]
+        );
+        let longest = format!("a{}", "b".repeat(30));
+        assert!(sandbox_set_args("account", Some(&longest)).is_ok());
+        let too_long = format!("a{}", "b".repeat(31));
+        for (action, account) in [
+            ("account", None),
+            ("account", Some("")),
+            ("account", Some("Agent")),
+            ("account", Some("1agent")),
+            ("account", Some("-agent")),
+            ("account", Some("a b")),
+            ("account", Some("a;rm")),
+            ("account", Some("agent.x")),
+            ("account", Some(too_long.as_str())),
+            ("on", Some("agent")),
+            ("status", None),
+            ("", None),
+        ] {
+            assert_eq!(
+                sandbox_set_args(action, account).unwrap_err().code,
+                "sandbox-invalid",
+                "{action} {account:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn builds_sandbox_override_arguments() {
+        for action in ["show", "inherit", "sandboxed", "unrestricted"] {
+            assert_eq!(
+                sandbox_override_args("agent_1", action).unwrap(),
+                vec!["sandbox", "override", "agent_1", action, "--json"]
+            );
+        }
+        for (agent, action) in [
+            ("agent_1", "always"),
+            ("agent_1", ""),
+            ("agent_1", "on"),
+            ("--json", "show"),
+            ("-x", "inherit"),
+            ("", "sandboxed"),
+        ] {
+            assert_eq!(
+                sandbox_override_args(agent, action).unwrap_err().code,
+                "sandbox-invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_status_or_its_error() {
+        let status = parse_sandbox_status(
+            br#"{"enabled":true,"provider":"standard_macos_account","account":"geniusbar-agent","status":"missing","owner":"me","checks":{"exists":false},"steps":[{"id":"create-account","title":"Create","run":"owner-admin","commands":["x"],"done":false}],"souls":[]}
+"#,
+            b"",
+        )
+        .unwrap();
+        assert_eq!(status["status"], "missing");
+        assert_eq!(status["steps"][0]["id"], "create-account");
+        assert_eq!(
+            parse_sandbox_status(
+                b"{\"error\":{\"code\":\"sandbox-failed\",\"message\":\"unknown sandbox provider: x\"}}\n",
+                b""
+            ),
+            Err(BridgeError::new(
+                "sandbox-failed",
+                "unknown sandbox provider: x"
+            ))
+        );
+        assert_eq!(
+            parse_sandbox_status(
+                b"{\"enabled\":true,\"account\":\"a\",\"status\":\"done\",\"steps\":[],\"souls\":[]}\n",
+                b""
+            )
+            .unwrap_err(),
+            BridgeError::new("sandbox-failed", "agent-bot gave no sandbox status")
+        );
+        assert_eq!(
+            parse_sandbox_status(b"", b"agent-bot: config could not be read\n")
+                .unwrap_err()
+                .message,
+            "agent-bot: config could not be read"
+        );
+    }
+
+    #[test]
+    fn parses_settings_and_overrides_or_their_refusal() {
+        let set = parse_sandbox_set(
+            b"{\"enabled\":true,\"provider\":\"standard_macos_account\",\"account\":\"geniusbar-agent\"}\n",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(set["enabled"], true);
+        assert_eq!(
+            parse_sandbox_set(
+                b"{\"error\":{\"code\":\"owner-approval-denied\",\"message\":\"the owner did not approve\"}}\n",
+                b""
+            ),
+            Err(BridgeError::new(
+                "owner-approval-denied",
+                "the owner did not approve"
+            ))
+        );
+        let shown = parse_sandbox_override(
+            b"{\"agentId\":\"agent_1\",\"name\":\"luna\",\"override\":\"sandboxed\",\"sandboxed\":true,\"runsAs\":\"geniusbar-agent\",\"source\":\"override\"}\n",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(shown["runsAs"], "geniusbar-agent");
+        assert_eq!(
+            parse_sandbox_override(
+                b"{\"agentId\":\"agent_1\",\"override\":\"always\",\"sandboxed\":true,\"runsAs\":\"x\"}\n",
+                b""
+            )
+            .unwrap_err(),
+            BridgeError::new("sandbox-failed", "agent-bot gave no sandbox override")
+        );
+        assert_eq!(
+            parse_sandbox_override(b"", b"").unwrap_err().message,
+            "agent-bot gave no sandbox override"
+        );
+    }
+
+    #[test]
+    fn an_older_bundle_is_unsupported_not_failed() {
+        for parse in [
+            parse_sandbox_status,
+            parse_sandbox_set,
+            parse_sandbox_override,
+        ] {
+            assert_eq!(parse(b"", OLD).unwrap_err().code, "sandbox-unsupported");
+        }
+    }
+}
+
 /// Stops a soul's running turn (#122, Lovable computer-use Stop), with
 /// agent-bot's `soul stop <agentId> --json` (agent-bot-identity #474):
 /// `{agentId, stopped, reason?}`. The daemon cancels the turn cooperatively

@@ -23,6 +23,8 @@ import { CustomizeDialog } from './CustomizeDialog';
 import { SoulDudle } from './FleetList';
 import { LaunchForm } from './LaunchForm';
 import { ModelSelect } from './ModelField';
+import { useSandbox } from './Sandbox';
+import { runsAsText, SandboxChip } from './SandboxChip';
 import { SoulNotices, SoulSourceContext, useSoulMode, useSoulModel, useSoulPopulation } from './SoulNotices';
 
 /** The conversation with this soul, when chat is available (#17). */
@@ -104,6 +106,7 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
           </p>
         </div>
       {/* The design's segmented tabs, at the header's right. */}
+      {showBack && <SandboxChip soul={soul} />}
       {showBack && <InfoButton soul={soul} />}
       <div role="tablist" aria-label={name} className="ml-auto flex gap-0.5 rounded-lg bg-muted p-1"
         onKeyDown={(e) => {
@@ -357,6 +360,10 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
   const execution = useSoulMode(soul.agentId, metricsRefresh);
   const computer = useSoulComputerUse(soul.agentId, populationRead);
   const chosenModel = useSoulModel(soul.agentId, metricsRefresh);
+  const sandbox = useSandbox();
+  const { reload: reloadSandbox } = sandbox;
+  useEffect(() => { reloadSandbox(); }, [reloadSandbox, soul.agentId, metricsRefresh]);
+  const sandboxed = sandbox.soul(soul.agentId);
   const snapshot = 'unavailable' in metrics ? null : metrics;
   const observations = snapshot?.souls[soul.agentId]?.observations ?? [];
   const errors = snapshot?.errors.filter((error) => error.agentId === soul.agentId) ?? [];
@@ -395,6 +402,16 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
     [t('field.unacked'), String(soul.unacked)],
     [t('field.lastWake'), soul.lastWake ?? t('none')],
   ];
+  // The design's Sandbox row (#66): agent-bot's resolution for this soul and
+  // the account it runs as; the Account row above stays the census's.
+  if (sandboxed) {
+    rows.push([t('details.hardened'), (
+      <>
+        {sandboxed.sandboxed ? t('sandbox.on') : t('sandbox.off')}
+        <span className="block font-sans text-[11px] text-muted-foreground">{runsAsText(sandboxed, t)}</span>
+      </>
+    )]);
+  }
   // Principal-client fields that R1's census did not carry; shown only
   // when the bridge supplies them.
   if (soul.verification !== undefined) rows.push([t('field.verification'), soul.verification ?? t('none')]);
