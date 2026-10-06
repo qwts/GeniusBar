@@ -275,6 +275,15 @@ export const en = {
   paused: 'Companions paused',
   pauseFailed: 'Could not pause: {message}',
   resumeFailed: 'Could not resume: {message}',
+  // The owner's computer-use switch (#122): with agent-bot `soul computer-use`.
+  'quick.computer': 'Toggle computer use',
+  'computerUse.label': 'Computer use',
+  'computerUse.on': 'On',
+  'computerUse.off': 'Off',
+  'computerUse.hint': 'Off: its requests to control the screen are denied.',
+  'computerUse.toggle': 'Computer use for {name}',
+  'computerUse.stopped': 'Its screen session was stopped.',
+  'computerUse.failed': 'Computer use unchanged: {message}',
 } as const;
 
 export type MessageKey = keyof typeof en;

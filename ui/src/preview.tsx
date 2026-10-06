@@ -15,12 +15,16 @@
 // sampleFloating; with &dudle=computer the perimeter's Stop "stops" agent_c
 // after a moment, and hold Esc does the same); window mode's Pause all /
 // Resume (quick menu, and the "Companions paused" chip) act on an in-memory
-// samplePaused, and &paused=1 starts with luna paused so the chip shows:
+// samplePaused, and &paused=1 starts with luna paused so the chip shows;
+// Details (and ⓘ) show the Computer use row from samplePopulation (scout's
+// is off), and with &dudle=… the quick menu's "Toggle computer use" flips
+// the lead's (luna's), as agent-bot `soul computer-use` would:
 // the app on the fixed fixtures, without Tauri. Not part of the build.
 import { StrictMode, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App, type AppMode } from './App';
 import type { Archiver } from './components/ArchiveDialog';
+import type { ComputerUseSwitch } from './bridge';
 import type { Stopper } from './components/FloatingDudle';
 import { AuditSourceContext, type AuditSource } from './components/AuditLog';
 import { SoulSourceContext, type SoulSource } from './components/SoulNotices';
@@ -86,6 +90,17 @@ const soulSource: SoulSource = {
   setModel: async (agentId, model) => (models[agentId] = { ...(models[agentId] ?? { available: null, listedAt: null }), model }),
 };
 
+// The owner's computer-use switch (#122) on the same records.
+const computerUseSwitch: ComputerUseSwitch = {
+  supported: async () => true,
+  read: async (agentId) => population[agentId]?.computerUse ?? null,
+  set: async (agentId, on) => {
+    const record = population[agentId];
+    if (record) population[agentId] = { ...record, computerUse: on };
+    return { agentId, computerUse: on };
+  },
+};
+
 function Preview() {
   const params = new URLSearchParams(location.search);
   const mode = (params.get('mode') === 'window' ? 'window' : 'tray') as AppMode;
@@ -148,7 +163,7 @@ function Preview() {
   const opened = params.get('open');
   const fixture = opened === 'copy' || opened === 'described' ? sampleOpenedPackages[opened] : null;
   const openedPackage = opened ? { id: 1, checking: false, error: null, path: opened, ...fixture } : undefined;
-  const app = <App mode={mode} select={params.get('select')} openedPackage={openedPackage} census={souls} badges={floating ? { ...sampleBadges, computerUse: driving ?? floating.computerUse, busy: floating.busy } : sampleBadges} stopper={stopper} pauser={pauser} floatingButton={floating !== null} archiver={archiver} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}
+  const app = <App mode={mode} select={params.get('select')} openedPackage={openedPackage} census={souls} badges={floating ? { ...sampleBadges, computerUse: driving ?? floating.computerUse, busy: floating.busy } : sampleBadges} stopper={stopper} pauser={pauser} computerUseSwitch={computerUseSwitch} floatingButton={floating !== null} archiver={archiver} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}
     onRefresh={() => {}} onRemoveServices={async () => {}} updates={{ status: { state: 'idle', version: null }, act: () => {} }}
     launcher={{ state: { phase: 'idle' }, launch: async () => {}, reset: () => {} }} />;
   // The tray popup is a fixed 384×560 window (tauri.conf.json).

@@ -1,7 +1,7 @@
-import { useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { AlarmClock, ArrowLeft, Cpu, Github, Info, LogIn, Radio, ShieldCheck, X, Zap } from 'lucide-react';
-import { runtimeMetrics, setSoulComms, soulComms, type RuntimeMetrics, type RuntimeObservation, type SoulColdWake, type SoulComms, type SoulMode, type SoulModel, type SoulPopulation } from '../bridge';
+import { AlarmClock, ArrowLeft, Cpu, Github, Info, LogIn, MousePointer2, Radio, ShieldCheck, X, Zap } from 'lucide-react';
+import { computerUseSupported, runtimeMetrics, setSoulComms, soulComms, type ComputerUseSwitch, type RuntimeMetrics, type RuntimeObservation, type SoulColdWake, type SoulComms, type SoulMode, type SoulModel, type SoulPopulation } from '../bridge';
 import {
   availabilityNote,
   displayHarness,
@@ -267,6 +267,76 @@ export function useHarnessSignIn(soul: CensusRow, record: SoulPopulation | null,
 const SIGN_IN_TEXT = { ok: 'login.ok', 'signed-out': 'login.signedOut', expired: 'login.expired' } as const;
 
 /** The read-only fields, with Launch… when launching is available. */
+/**
+ * The owner's per-soul computer-use switch (agent-bot `soul computer-use`,
+ * agent-bot-identity #482) for the Details rows. App provides agent-bot's in
+ * the app; the preview and tests provide their own; none hides the rows.
+ */
+export const ComputerUseContext = createContext<ComputerUseSwitch | null>(null);
+
+/**
+ * Whether the soul may use the computer (#122): read from its census record
+ * (`computerUse`) while the bundled agent-bot has `soul computer-use`
+ * (probed once); a change asks the owner through agent-bot, then the record
+ * is re-read. A refusal leaves the switch where it was. Null `on` hides the
+ * row (an older bundle, or a record without the field).
+ */
+export function useSoulComputerUse(agentId: string, population: { record: SoulPopulation | null; reload: () => void }) {
+  const source = useContext(ComputerUseContext);
+  const [supported, setSupported] = useState(false);
+  const [answer, setAnswer] = useState<{ basis: SoulPopulation | null; agentId: string; on: boolean } | null>(null);
+  const [stopped, setStopped] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ticket = useRef(0);
+  useEffect(() => {
+    setSupported(false);
+    if (!source) return;
+    let current = true;
+    computerUseSupported(source).then((ok) => { if (current) setSupported(ok); }, () => {});
+    return () => { current = false; };
+  }, [source]);
+  useEffect(() => {
+    ticket.current += 1;
+    setAnswer(null);
+    setStopped(false);
+    setSaving(false);
+    setError(null);
+  }, [agentId]);
+  const { record, reload } = population;
+  // agent-bot's answer to a change holds until the record is read again.
+  const held = answer && answer.agentId === agentId && answer.basis === record ? answer.on : undefined;
+  const read = record?.agentId === agentId ? record.computerUse : undefined;
+  const on = held ?? read;
+  const change = (next: boolean) => {
+    if (!source) return;
+    const mine = ++ticket.current;
+    const latest = () => ticket.current === mine;
+    const basis = record;
+    setSaving(true);
+    setStopped(false);
+    setError(null);
+    source.set(agentId, next)
+      .then((result) => {
+        if (!latest()) return;
+        setAnswer({ basis, agentId, on: result.computerUse });
+        setStopped(result.stopped === true);
+      })
+      .catch((e: unknown) => {
+        if (!latest()) return;
+        const failure = e as { code?: unknown; message?: unknown };
+        if (failure?.code === 'soul-computer-use-unsupported') setSupported(false);
+        else setError(typeof failure?.message === 'string' ? failure.message : String(e));
+      })
+      .finally(() => {
+        if (!latest()) return;
+        setSaving(false);
+        reload();
+      });
+  };
+  return { on: supported && typeof on === 'boolean' ? on : null, stopped, saving, error, change };
+}
+
 export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0 }: { soul: CensusRow; roster?: readonly CensusRow[]; launch?: LaunchProps; metricsRefresh?: number }) {
   const { t, lang } = useI18n();
   const [launching, setLaunching] = useState(false);
@@ -279,9 +349,11 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
   }, [soul.agentId, metricsRefresh]);
   const { comms, saving: commsSaving, error: commsError, toggle: toggleComms } = useSoulComms(soul.agentId, metricsRefresh);
   const { wake, saving: wakeSaving, error: wakeError, toggle: toggleWake } = useSoulColdWake(soul.agentId, metricsRefresh);
-  const { record: population, loaded: populationLoaded } = useSoulPopulation(soul.agentId, metricsRefresh);
+  const populationRead = useSoulPopulation(soul.agentId, metricsRefresh);
+  const { record: population, loaded: populationLoaded } = populationRead;
   const signIn = useHarnessSignIn(soul, population, populationLoaded);
   const execution = useSoulMode(soul.agentId, metricsRefresh);
+  const computer = useSoulComputerUse(soul.agentId, populationRead);
   const chosenModel = useSoulModel(soul.agentId, metricsRefresh);
   const snapshot = 'unavailable' in metrics ? null : metrics;
   const observations = snapshot?.souls[soul.agentId]?.observations ?? [];
@@ -380,6 +452,19 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
         {execution.mode === 'safe' && <span className="block text-[11px] text-muted-foreground">{t('mode.safeHint')}</span>}
         {execution.saving && <span className="block text-[11px] text-muted-foreground" role="status">{t('comms.saving')}</span>}
         {execution.error && <span className="error block text-[11px]" role="alert">{t('mode.failed', { message: execution.error })}</span>}
+      </>
+    )]);
+  }
+  // Computer use (#122, no Lovable screen): beside Execution mode, in its
+  // style; agent-bot denies the soul's computer-use proposals while off.
+  if (computer.on !== null) {
+    rows.push([t('computerUse.label'), (
+      <>
+        <ComputerUseToggle soul={soul} on={computer.on} saving={computer.saving} onChange={computer.change} />
+        {!computer.on && <span className="block text-[11px] text-muted-foreground">{t('computerUse.hint')}</span>}
+        {computer.stopped && <span className="block text-[11px] text-muted-foreground" role="status">{t('computerUse.stopped')}</span>}
+        {computer.saving && <span className="block text-[11px] text-muted-foreground" role="status">{t('comms.saving')}</span>}
+        {computer.error && <span className="error block text-[11px]" role="alert">{t('computerUse.failed', { message: computer.error })}</span>}
       </>
     )]);
   }
@@ -516,6 +601,45 @@ export function ModeRow({ soul, refresh = 0 }: { soul: CensusRow; refresh?: numb
   );
 }
 
+/** The computer-use switch, as the execution mode pill: icon, state and switch. */
+function ComputerUseToggle({ soul, on, saving, onChange }:
+  { soul: CensusRow; on: boolean; saving: boolean; onChange: (on: boolean) => void }) {
+  const { t } = useI18n();
+  return (
+    <label className="inline-flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 font-sans text-xs">
+      <MousePointer2 className={`size-3 ${on ? 'text-foreground' : 'text-muted-foreground'}`} aria-hidden />
+      <span>{on ? t('computerUse.on') : t('computerUse.off')}</span>
+      <input type="checkbox" role="switch" checked={on} disabled={saving}
+        aria-label={t('computerUse.toggle', { name: displayName(soul) })}
+        onChange={(e) => onChange(e.target.checked)} />
+    </label>
+  );
+}
+
+/**
+ * The computer-use row in the ⓘ sheet, laid out as the Execution mode row.
+ * Absent while agent-bot cannot say.
+ */
+export function ComputerUseRow({ soul, refresh = 0 }: { soul: CensusRow; refresh?: number }) {
+  const { t } = useI18n();
+  const population = useSoulPopulation(soul.agentId, refresh);
+  const { on, stopped, saving, error, change } = useSoulComputerUse(soul.agentId, population);
+  if (on === null) return null;
+  return (
+    <div className="flex items-start gap-3 p-3">
+      <MousePointer2 className="mt-0.5 size-4 text-muted-foreground" aria-hidden />
+      <span className="flex-1">
+        <span className="block text-sm font-medium">{t('computerUse.label')}</span>
+        {!on && <span className="block text-xs text-muted-foreground">{t('computerUse.hint')}</span>}
+        {stopped && <span className="block text-[11px] text-muted-foreground" role="status">{t('computerUse.stopped')}</span>}
+        {saving && <span className="block text-[11px] text-muted-foreground" role="status">{t('comms.saving')}</span>}
+        {error && <span className="error block text-[11px]" role="alert">{t('computerUse.failed', { message: error })}</span>}
+      </span>
+      <ComputerUseToggle soul={soul} on={on} saving={saving} onChange={change} />
+    </div>
+  );
+}
+
 const modelField = 'h-8 w-full rounded-md border border-input bg-transparent px-2 font-sans text-xs text-foreground';
 
 /**
@@ -592,8 +716,9 @@ export function SoulFactRows({ soul, refresh = 0 }: { soul: CensusRow; refresh?:
 
 /**
  * ⓘ and the Details sheet (Lovable 19.29.22): the soul's actionable rows.
- * Wake on new messages, Agent comms, execution mode, model (#128), harness
- * sign-in and the GitHub App (read-only), each once agent-bot reports it.
+ * Wake on new messages, Agent comms, execution mode, computer use, model
+ * (#128), harness sign-in and the GitHub App (read-only), each once
+ * agent-bot reports it.
  */
 export function InfoButton({ soul }: { soul: CensusRow }) {
   const { t } = useI18n();
@@ -629,6 +754,7 @@ export function InfoButton({ soul }: { soul: CensusRow }) {
               <WakeRow soul={soul} />
               <CommsRow soul={soul} />
               <ModeRow soul={soul} />
+              <ComputerUseRow soul={soul} />
               <ModelRow soul={soul} />
               <SoulFactRows soul={soul} />
             </div>

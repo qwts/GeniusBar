@@ -276,4 +276,13 @@ export const es: Catalog = {
   paused: 'Compañeros en pausa',
   pauseFailed: 'No se pudo pausar: {message}',
   resumeFailed: 'No se pudo reanudar: {message}',
+  // El interruptor de uso del equipo (#122): con `soul computer-use` de agent-bot.
+  'quick.computer': 'Alternar control del equipo',
+  'computerUse.label': 'Uso del equipo',
+  'computerUse.on': 'Activado',
+  'computerUse.off': 'Desactivado',
+  'computerUse.hint': 'Desactivado: se rechazan sus solicitudes de controlar la pantalla.',
+  'computerUse.toggle': 'Uso del equipo para {name}',
+  'computerUse.stopped': 'Se detuvo su sesión en pantalla.',
+  'computerUse.failed': 'Uso del equipo sin cambios: {message}',
 };

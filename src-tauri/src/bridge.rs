@@ -1430,6 +1430,7 @@ fn parse_soul_population(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeEr
                 "managed": field("managed"),
                 "comms": field("comms"),
                 "roleLine": field("roleLine"),
+                "computerUse": field("computerUse"),
             }));
         }
     }
@@ -1527,7 +1528,8 @@ mod details_rows_tests {
   "managed": true,
   "comms": true,
   "harnessAuth": {"status": "expired", "harness": "claude", "since": "2026-10-05T10:00:00.000Z"},
-  "roleLine": "Lead, 2 subagents"
+  "roleLine": "Lead, 2 subagents",
+  "computerUse": false
 }
 "#,
             b"",
@@ -1540,6 +1542,9 @@ mod details_rows_tests {
         assert!(record.get("transcriptLocator").is_none());
         let bare = parse_soul_population(b"{\"id\":\"agent_2\",\"appSlug\":null}", b"").unwrap();
         assert_eq!(bare["harnessAuth"], Value::Null);
+        // `computerUse` (agent-bot-identity #482); an older record has none.
+        assert_eq!(record["computerUse"], false);
+        assert_eq!(bare["computerUse"], Value::Null);
         assert_eq!(
             parse_soul_population(b"", b"agent-population: no population record for agent_3\n"),
             Err(BridgeError::new(
@@ -1670,6 +1675,224 @@ mod soul_mode_tests {
         assert_eq!(
             parse_soul_mode(b"", b"").unwrap_err().message,
             "agent-bot gave no execution mode"
+        );
+    }
+}
+
+/// A soul's computer-use switch (#122, Lovable "Toggle computer use"), from
+/// agent-bot's `soul computer-use <agentId> show --json`
+/// (agent-bot-identity #482): `{agentId, computerUse}`. Off, agent-bot
+/// denies the soul's computer-use proposals; switching off while the soul
+/// drives the screen also stops that session and adds `stopped: true`. `on`
+/// and `off` are owner-gated by agent-bot exactly like `soul mode` (its
+/// consent dialog, Touch ID); GeniusBar never asks itself. An older bundle
+/// without the command answers with its `soul` usage line, which maps to
+/// `soul-computer-use-unsupported`.
+#[tauri::command]
+pub async fn soul_computer_use<R: Runtime>(
+    app: AppHandle<R>,
+    agent: String,
+    action: String,
+) -> Result<Value, BridgeError> {
+    let args = soul_computer_use_args(&agent, &action)?;
+    let output = run_agent_bot(&app, args, "soul-computer-use-unavailable").await?;
+    parse_soul_computer_use(&output.stdout, &output.stderr)
+}
+
+/// Whether the bundled agent-bot has `soul computer-use`: `{supported}`.
+/// Runs the command with no soul, which changes nothing: a bundle that has
+/// it answers with its own usage, an older one with the `soul` usage line.
+#[tauri::command]
+pub async fn soul_computer_use_probe<R: Runtime>(app: AppHandle<R>) -> Result<Value, BridgeError> {
+    let args = vec!["soul".into(), "computer-use".into(), "--json".into()];
+    let output = run_agent_bot(&app, args, "soul-computer-use-unavailable").await?;
+    parse_soul_computer_use_probe(&output.stdout, &output.stderr)
+}
+
+fn soul_computer_use_args(
+    agent: &str,
+    action: &str,
+) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    if agent.is_empty() || agent.starts_with('-') {
+        return Err(BridgeError::new(
+            "soul-computer-use-invalid",
+            "agent must be an agent id",
+        ));
+    }
+    if !matches!(action, "show" | "on" | "off") {
+        return Err(BridgeError::new(
+            "soul-computer-use-invalid",
+            "action must be show, on or off",
+        ));
+    }
+    Ok(vec![
+        "soul".into(),
+        "computer-use".into(),
+        agent.into(),
+        action.into(),
+        "--json".into(),
+    ])
+}
+
+/// True when stderr is an older agent-bot's `soul` usage line, which does
+/// not list `soul computer-use`.
+fn soul_computer_use_missing(stdout: &[u8], stderr: &[u8]) -> bool {
+    let message = last_line(stderr);
+    serde_json::from_str::<Value>(&last_line(stdout)).is_err()
+        && message.contains("usage: agent-bot soul ")
+        && !message.contains("soul computer-use")
+}
+
+fn parse_soul_computer_use(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    if soul_computer_use_missing(stdout, stderr) {
+        return Err(BridgeError::new(
+            "soul-computer-use-unsupported",
+            "this agent-bot has no soul computer-use",
+        ));
+    }
+    parse_agent_bot_json(
+        stdout,
+        stderr,
+        "soul-computer-use-failed",
+        "agent-bot soul computer-use: ",
+        "agent-bot gave no computer-use setting",
+        |value| {
+            value.get("agentId").and_then(Value::as_str).is_some()
+                && value.get("computerUse").and_then(Value::as_bool).is_some()
+        },
+    )
+}
+
+fn parse_soul_computer_use_probe(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    if soul_computer_use_missing(stdout, stderr) {
+        return Ok(json!({ "supported": false }));
+    }
+    match parse_soul_computer_use(stdout, stderr) {
+        Err(error)
+            if error
+                .message
+                .starts_with("usage: agent-bot soul computer-use") =>
+        {
+            Ok(json!({ "supported": true }))
+        }
+        Err(error) => Err(error),
+        Ok(_) => Err(BridgeError::new(
+            "soul-computer-use-failed",
+            "agent-bot answered for a soul it was not asked about",
+        )),
+    }
+}
+
+#[cfg(test)]
+mod soul_computer_use_tests {
+    use super::*;
+
+    /// agent-bot 0.10.19's `soul` usage line: it has `soul mode` and `soul
+    /// pause`, but no `soul computer-use`.
+    const OLD_USAGE: &[u8] =
+        b"agent-bot: usage: agent-bot soul cold-wake <agentId> [on|off|show] | soul mode <agentId|name> [show|safe|autopilot] [--json] [--principal-stdin] | soul stop <agentId|name> [--json] | soul pause|resume <agentId|name> [--json]\n";
+
+    #[test]
+    fn builds_soul_computer_use_arguments() {
+        for action in ["show", "on", "off"] {
+            assert_eq!(
+                soul_computer_use_args("agent_1", action).unwrap(),
+                vec!["soul", "computer-use", "agent_1", action, "--json"]
+            );
+        }
+        for (agent, action) in [
+            ("agent_1", "safe"),
+            ("agent_1", ""),
+            ("agent_1", "true"),
+            ("--json", "show"),
+            ("-x", "on"),
+            ("", "off"),
+        ] {
+            assert_eq!(
+                soul_computer_use_args(agent, action).unwrap_err().code,
+                "soul-computer-use-invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_settings_or_their_error() {
+        let shown =
+            parse_soul_computer_use(b"{\"agentId\":\"agent_1\",\"computerUse\":true}\n", b"")
+                .unwrap();
+        assert_eq!(shown["computerUse"], true);
+        let off = parse_soul_computer_use(
+            b"{\"agentId\":\"agent_1\",\"computerUse\":false,\"stopped\":true}\n",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(off["computerUse"], false);
+        assert_eq!(off["stopped"], true);
+        assert_eq!(
+            parse_soul_computer_use(
+                b"{\"error\":{\"code\":\"soul-computer-use-failed\",\"message\":\"the owner did not approve\"}}\n",
+                b""
+            ),
+            Err(BridgeError::new(
+                "soul-computer-use-failed",
+                "the owner did not approve"
+            ))
+        );
+        assert_eq!(
+            parse_soul_computer_use(
+                b"",
+                b"agent-bot soul computer-use: no population record for agent_9\n"
+            ),
+            Err(BridgeError::new(
+                "soul-computer-use-failed",
+                "no population record for agent_9"
+            ))
+        );
+        assert_eq!(
+            parse_soul_computer_use(b"{\"agentId\":\"agent_1\",\"computerUse\":\"on\"}\n", b"")
+                .unwrap_err(),
+            BridgeError::new(
+                "soul-computer-use-failed",
+                "agent-bot gave no computer-use setting"
+            )
+        );
+        assert_eq!(
+            parse_soul_computer_use(b"", b"").unwrap_err().message,
+            "agent-bot gave no computer-use setting"
+        );
+    }
+
+    #[test]
+    fn an_older_bundle_is_unsupported_not_failed() {
+        assert_eq!(
+            parse_soul_computer_use(b"", OLD_USAGE).unwrap_err().code,
+            "soul-computer-use-unsupported"
+        );
+        assert_eq!(
+            parse_soul_computer_use_probe(b"", OLD_USAGE).unwrap(),
+            json!({ "supported": false })
+        );
+    }
+
+    #[test]
+    fn probes_a_bundle_with_soul_computer_use() {
+        assert_eq!(
+            parse_soul_computer_use_probe(
+                b"{\"error\":{\"code\":\"soul-computer-use-failed\",\"message\":\"usage: agent-bot soul computer-use <agentId|name> [show|on|off] [--json] [--principal-stdin]\"}}\n",
+                b""
+            )
+            .unwrap(),
+            json!({ "supported": true })
+        );
+        assert_eq!(
+            parse_soul_computer_use_probe(b"", b"").unwrap_err().code,
+            "soul-computer-use-failed"
+        );
+        assert_eq!(
+            parse_soul_computer_use_probe(b"{\"agentId\":\"agent_1\",\"computerUse\":true}\n", b"")
+                .unwrap_err()
+                .code,
+            "soul-computer-use-failed"
         );
     }
 }
@@ -2458,6 +2681,7 @@ fn parse_population_list(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeEr
                     "managed": field("managed"),
                     "comms": field("comms"),
                     "paused": field("paused"),
+                    "computerUse": field("computerUse"),
                 }))
             })
             .collect();
@@ -2500,6 +2724,7 @@ mod population_list_tests {
     "managed": true,
     "comms": true,
     "paused": true,
+    "computerUse": false,
     "mode": "safe",
     "model": null,
     "parentId": null
@@ -2523,6 +2748,9 @@ mod population_list_tests {
         // `paused` (agent-bot-identity #478) is carried; an older record has none.
         assert_eq!(souls[0]["paused"], true);
         assert_eq!(souls[1]["paused"], Value::Null);
+        // `computerUse` (agent-bot-identity #482) likewise.
+        assert_eq!(souls[0]["computerUse"], false);
+        assert_eq!(souls[1]["computerUse"], Value::Null);
         assert_eq!(parse_population_list(b"[]\n", b"").unwrap(), json!([]));
     }
 

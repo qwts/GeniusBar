@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildSoulForest, type CensusRow } from './census';
-import { computerUserName, floatingLead, floatingState, HALT_HOLD_MS, menuStep, pauseQuickAction, settleStop, stopTargets, type StopPhase } from './floating';
+import { computerUserName, computerUseToggle, floatingLead, floatingState, HALT_HOLD_MS, menuStep, pauseQuickAction, settleStop, stopTargets, type StopPhase } from './floating';
 
 const row = (agentId: string, name: string | null, parent: string | null = null, presence: CensusRow['presence'] = 'joined'): CensusRow =>
   ({ account: 'user', agentId, name, harness: 'claude', parent, presence, unacked: 0, lastWake: null });
@@ -95,5 +95,13 @@ describe('pauseQuickAction', () => {
   it('offers Pause all while running and Resume while paused, as the design', () => {
     expect(pauseQuickAction(false)).toEqual({ icon: 'pause', label: 'quick.pause' });
     expect(pauseQuickAction(true)).toEqual({ icon: 'play', label: 'quick.resume' });
+  });
+});
+
+describe('computerUseToggle', () => {
+  it('turns computer use off while on and on while off; nothing when agent-bot cannot say', () => {
+    expect(computerUseToggle(true)).toBe('off');
+    expect(computerUseToggle(false)).toBe('on');
+    expect(computerUseToggle(null)).toBeNull();
   });
 });

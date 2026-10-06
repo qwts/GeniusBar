@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { ApprovalCounts, ApprovalsList } from './components/ApprovalsList';
 import { ArchiveDialog, ArchivedNotice, liveArchiver, type Archiver } from './components/ArchiveDialog';
-import { inApp, soulStopSupported, stopSoul, type RemovedSoul } from './bridge';
+import { inApp, liveComputerUse, soulStopSupported, stopSoul, type ComputerUseSwitch, type RemovedSoul } from './bridge';
 import { FooterMenu } from './components/FooterMenu';
-import { CompanionSession, InfoButton, type SessionTab } from './components/CompanionSession';
+import { CompanionSession, ComputerUseContext, InfoButton, type SessionTab } from './components/CompanionSession';
 import { CompanionWindow, Desktop } from './components/Desktop';
 import { FloatingDudle, type Stopper } from './components/FloatingDudle';
 import { FirstLaunch, type DevTools, type HarnessAuth, type Starter } from './components/FirstLaunch';
@@ -90,6 +90,8 @@ interface AppProps {
   stopper?: Stopper;
   /** Pause all / Resume (agent-bot `soul pause`); the app uses agent-bot when absent. */
   pauser?: Pauser;
+  /** The quick menu's "Toggle computer use" (agent-bot `soul computer-use`); the app uses agent-bot when absent. */
+  computerUseSwitch?: ComputerUseSwitch;
 }
 
 const liveStopper: Stopper = { supported: () => soulStopSupported(), stop: (agentId) => stopSoul(agentId) };
@@ -110,9 +112,13 @@ function usePageHidden(): boolean {
 const NO_CENSUS: readonly CensusRow[] = [];
 
 export function App(props: AppProps) {
+  // The Details rows' computer-use switch (#122); the quick menu's comes as a prop in Shell.
+  const computerUse = props.computerUseSwitch ?? (inApp() && !props.isStatic ? liveComputerUse : null);
   return (
     <I18nProvider>
-      <Shell {...props} />
+      <ComputerUseContext.Provider value={computerUse}>
+        <Shell {...props} />
+      </ComputerUseContext.Provider>
     </I18nProvider>
   );
 }
@@ -131,7 +137,7 @@ function LanguageSelect() {
 
 // The GeniusBar menu (the tray popup's content, and the toolbar popover in
 // window mode) and, from it, one companion's session.
-function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, floatingButton = false, archiver, stopper, pauser }: AppProps) {
+function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, floatingButton = false, archiver, stopper, pauser, computerUseSwitch }: AppProps) {
   const { t } = useI18n();
   const forest = useMemo(() => buildSoulForest(census), [census]);
   const roster = useMemo(() => allSouls(forest), [forest]);
@@ -407,6 +413,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
         computerUser={computerUserName(roster, shownBadges.computerUse)}
         computerUse={shownBadges.computerUse} stopper={stopper ?? (inApp() && !isStatic ? liveStopper : undefined)}
         fleetPaused={fleet.paused} onTogglePause={toggleFleet}
+        computerUseSwitch={computerUseSwitch ?? (inApp() && !isStatic ? liveComputerUse : undefined)}
         onPrompt={prompt} onHistory={(soul) => openOn(soul, 'audit')} />
       {launchModal}
       {archiveUi}

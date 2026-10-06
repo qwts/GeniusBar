@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BridgeError, call, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported } from './bridge';
+import { BridgeError, call, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported, normalizeSoulComputerUse, soulComputerUse, soulComputerUseSupported, liveComputerUse } from './bridge';
 
 describe('bridge', () => {
   it('invokes the shell command with the method and params', async () => {
@@ -185,6 +185,9 @@ describe('soul population record (#122)', () => {
     expect(normalizeSoulPopulation({ agentId: 'a', harnessAuth: { status: 'signed-out', harness: 'codex' } }))
       .toEqual({ agentId: 'a', appSlug: null, harnessAuth: { status: 'signed-out', harness: 'codex', since: null } });
     expect(normalizeSoulPopulation({ appSlug: 'x' })).toBeNull();
+    // The computer-use switch (agent-bot-identity #482) only when agent-bot says.
+    expect(normalizeSoulPopulation({ agentId: 'a', computerUse: false })?.computerUse).toBe(false);
+    expect(normalizeSoulPopulation({ agentId: 'a', computerUse: 'off' })).not.toHaveProperty('computerUse');
   });
 });
 
@@ -381,6 +384,9 @@ describe('population list (#137 comms badges in one call)', () => {
       { agentId: '', comms: true }, { agentId: 'agent_1' }, { comms: true }, null, 'agent_2',
       { agentId: 'agent_3', comms: 'yes', managed: true }, { agentId: 'agent_4', comms: false, managed: 'yes' },
     ])).toEqual([{ agentId: 'agent_4', comms: false, managed: false, paused: false, status: null }]);
+    expect(normalizePopulationList([{ agentId: 'agent_5', comms: true, computerUse: false }, { agentId: 'agent_6', comms: true, computerUse: 'no' }]))
+      .toEqual([{ agentId: 'agent_5', comms: true, managed: false, paused: false, computerUse: false, status: null },
+        { agentId: 'agent_6', comms: true, managed: false, paused: false, status: null }]);
     expect(normalizePopulationList([])).toEqual([]);
     expect(normalizePopulationList({ souls: [] })).toBeNull();
     await expect(populationList((async () => null) as never)).resolves.toBeNull();
@@ -459,5 +465,54 @@ describe('soul pause / resume (#122, agent-bot-identity #478)', () => {
     await expect(soulPauseSupported((async () => ({ supported: false })) as never)).resolves.toBe(false);
     await expect(soulPauseSupported((async () => { throw { code: 'soul-pause-unavailable', message: 'x' }; }) as never)).resolves.toBe(false);
     await expect(soulPauseSupported()).resolves.toBe(false);
+  });
+});
+
+describe('soul computer-use (#122, agent-bot-identity #482)', () => {
+  it('reads and switches the soul through agent-bot', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: { action: string }) => {
+      calls.push([cmd, args]);
+      return args.action === 'off' ? { agentId: 'agent_1', computerUse: false, stopped: true } : { agentId: 'agent_1', computerUse: true };
+    }) as never;
+    await expect(soulComputerUse('agent_1', 'show', fake)).resolves.toEqual({ agentId: 'agent_1', computerUse: true });
+    await expect(soulComputerUse('agent_1', 'off', fake)).resolves.toEqual({ agentId: 'agent_1', computerUse: false, stopped: true });
+    await expect(soulComputerUse('agent_1', 'on', fake)).resolves.toEqual({ agentId: 'agent_1', computerUse: true });
+    expect(calls).toEqual([
+      ['soul_computer_use', { agent: 'agent_1', action: 'show' }],
+      ['soul_computer_use', { agent: 'agent_1', action: 'off' }],
+      ['soul_computer_use', { agent: 'agent_1', action: 'on' }],
+    ]);
+  });
+
+  it('rejects with the shell error code, telling an older bundle apart', async () => {
+    const refused = (async () => { throw { code: 'soul-computer-use-failed', message: 'the owner did not approve' }; }) as never;
+    await expect(soulComputerUse('agent_1', 'off', refused)).rejects.toMatchObject({ code: 'soul-computer-use-failed', message: 'the owner did not approve' });
+    const older = (async () => { throw { code: 'soul-computer-use-unsupported', message: 'this agent-bot has no soul computer-use' }; }) as never;
+    await expect(soulComputerUse('agent_1', 'on', older)).rejects.toMatchObject({ code: 'soul-computer-use-unsupported' });
+    await expect(soulComputerUse('agent_1', 'show', (async () => ({ agentId: 'agent_1' })) as never)).rejects.toMatchObject({ code: 'soul-computer-use-failed' });
+    await expect(soulComputerUse('agent_1', 'on', (async () => { throw 'boom'; }) as never)).rejects.toMatchObject({ code: 'soul-computer-use-failed', message: 'boom' });
+  });
+
+  it('normalizes only a well-formed result', () => {
+    expect(normalizeSoulComputerUse({ agentId: 'a', computerUse: false, stopped: true, extra: 1 })).toEqual({ agentId: 'a', computerUse: false, stopped: true });
+    expect(normalizeSoulComputerUse({ agentId: 'a', computerUse: true, stopped: false })).toEqual({ agentId: 'a', computerUse: true });
+    expect(normalizeSoulComputerUse({ agentId: 'a', computerUse: 'on' })).toBeNull();
+    expect(normalizeSoulComputerUse(null)).toBeNull();
+  });
+
+  it('probes whether the bundle has the command; false when it cannot say', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); return { supported: true }; }) as never;
+    await expect(soulComputerUseSupported(fake)).resolves.toBe(true);
+    expect(calls).toEqual([['soul_computer_use_probe', undefined]]);
+    await expect(soulComputerUseSupported((async () => ({ supported: false })) as never)).resolves.toBe(false);
+    await expect(soulComputerUseSupported((async () => { throw { code: 'soul-computer-use-unavailable', message: 'x' }; }) as never)).resolves.toBe(false);
+    await expect(soulComputerUseSupported()).resolves.toBe(false);
+  });
+
+  it('offers nothing outside the app', async () => {
+    await expect(liveComputerUse.supported()).resolves.toBe(false);
+    await expect(liveComputerUse.read('agent_1')).resolves.toBeNull();
   });
 });

@@ -295,6 +295,11 @@ export interface SoulPopulation {
   agentId: string;
   appSlug: string | null;
   harnessAuth: HarnessAuthFailure | null;
+  /**
+   * The owner's computer-use switch (agent-bot-identity #482); absent from a
+   * bundle without the field. Optional so older fixtures still type.
+   */
+  computerUse?: boolean;
 }
 
 export function normalizeSoulPopulation(raw: unknown): SoulPopulation | null {
@@ -308,6 +313,7 @@ export function normalizeSoulPopulation(raw: unknown): SoulPopulation | null {
     agentId: raw.agentId,
     appSlug: typeof raw.appSlug === 'string' && raw.appSlug !== '' ? raw.appSlug : null,
     harnessAuth,
+    ...(typeof raw.computerUse === 'boolean' ? { computerUse: raw.computerUse } : {}),
   };
 }
 
@@ -530,6 +536,11 @@ export interface PopulationEntry {
    * without the field. Optional so older fixtures still type.
    */
   paused?: boolean;
+  /**
+   * The owner's computer-use switch (agent-bot-identity #482); absent from a
+   * bundle without the field.
+   */
+  computerUse?: boolean;
   /** The census status (`retired` once archived); null when not reported. */
   status?: string | null;
 }
@@ -545,6 +556,7 @@ export function normalizePopulationList(raw: unknown): PopulationEntry[] | null 
   return raw.flatMap((r): PopulationEntry[] => (isRecord(r) && typeof r.agentId === 'string' && r.agentId !== ''
     && typeof r.comms === 'boolean'
     ? [{ agentId: r.agentId, comms: r.comms, managed: r.managed === true, paused: r.paused === true,
+      ...(typeof r.computerUse === 'boolean' ? { computerUse: r.computerUse } : {}),
       status: typeof r.status === 'string' ? r.status : null }]
     : []));
 }
@@ -675,4 +687,93 @@ export async function soulPauseSupported(invokeImpl: typeof invoke = invoke): Pr
   } catch {
     return false;
   }
+}
+
+/**
+ * agent-bot's answer to `soul computer-use <agentId> [show|on|off] --json`
+ * (#122, agent-bot-identity #482): the owner's switch as it now is. Off,
+ * agent-bot denies the soul's computer-use proposals; switching off while
+ * it drives the screen also stops that session (`stopped`).
+ */
+export interface SoulComputerUse {
+  agentId: string;
+  computerUse: boolean;
+  stopped?: boolean;
+}
+
+export function normalizeSoulComputerUse(raw: unknown): SoulComputerUse | null {
+  if (!isRecord(raw) || typeof raw.agentId !== 'string' || typeof raw.computerUse !== 'boolean') return null;
+  return raw.stopped === true
+    ? { agentId: raw.agentId, computerUse: raw.computerUse, stopped: true }
+    : { agentId: raw.agentId, computerUse: raw.computerUse };
+}
+
+/**
+ * Reads (`show`) or switches (`on` / `off`) the soul's computer use. A
+ * switch is owner-gated by agent-bot (its consent dialog, Touch ID), as
+ * `soul mode` is; a refusal rejects with its reason and the switch stays.
+ * Rejects with a BridgeError; `soul-computer-use-unsupported` means the
+ * bundled agent-bot has no `soul computer-use`.
+ */
+export async function soulComputerUse(agentId: string, action: 'show' | 'on' | 'off',
+  invokeImpl: typeof invoke = invoke): Promise<SoulComputerUse> {
+  let raw: unknown;
+  try {
+    raw = await invokeImpl<unknown>('soul_computer_use', { agent: agentId, action });
+  } catch (error) {
+    const e = error as { code?: unknown; message?: unknown };
+    throw new BridgeError(typeof e?.code === 'string' ? e.code : 'soul-computer-use-failed',
+      typeof e?.message === 'string' ? e.message : String(error));
+  }
+  const result = normalizeSoulComputerUse(raw);
+  if (!result) throw new BridgeError('soul-computer-use-failed', 'agent-bot gave no computer-use setting');
+  return result;
+}
+
+/**
+ * Whether the bundled agent-bot has `soul computer-use`; false outside the
+ * app, on an older bundle, or when agent-bot cannot say. Changes nothing.
+ */
+export async function soulComputerUseSupported(invokeImpl: typeof invoke = invoke): Promise<boolean> {
+  if (!inApp() && invokeImpl === invoke) return false;
+  try {
+    const raw = await invokeImpl<unknown>('soul_computer_use_probe');
+    return isRecord(raw) && raw.supported === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The owner's per-soul computer-use switch, for the Details row and the
+ * floating Dudle's "Toggle computer use": `supported` is asked once per
+ * switch; `read` is null when agent-bot cannot say.
+ */
+export interface ComputerUseSwitch {
+  supported: () => Promise<boolean>;
+  read: (agentId: string) => Promise<boolean | null>;
+  set: (agentId: string, on: boolean) => Promise<SoulComputerUse>;
+}
+
+export const liveComputerUse: ComputerUseSwitch = {
+  supported: () => soulComputerUseSupported(),
+  read: (agentId) => (inApp() ? soulComputerUse(agentId, 'show').then((r) => r.computerUse, () => null) : Promise.resolve(null)),
+  set: (agentId, on) => soulComputerUse(agentId, on ? 'on' : 'off'),
+};
+
+const computerUseProbes = new WeakMap<ComputerUseSwitch, Promise<boolean>>();
+
+/**
+ * `supported()` asked once per switch while it answers true; a false or a
+ * failure is asked again next time, so a transient failure hides nothing
+ * for good.
+ */
+export function computerUseSupported(sw: ComputerUseSwitch): Promise<boolean> {
+  let probe = computerUseProbes.get(sw);
+  if (!probe) {
+    probe = sw.supported().catch(() => false);
+    computerUseProbes.set(sw, probe);
+    void probe.then((ok) => { if (!ok) computerUseProbes.delete(sw); });
+  }
+  return probe;
 }

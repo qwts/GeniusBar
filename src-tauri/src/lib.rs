@@ -307,6 +307,8 @@ pub fn run() {
             bridge::soul_pause,
             bridge::soul_resume,
             bridge::soul_pause_probe,
+            bridge::soul_computer_use,
+            bridge::soul_computer_use_probe,
             bridge::soul_remove,
             bridge::daemon_status,
             bridge::services_installed,

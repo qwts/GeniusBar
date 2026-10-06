@@ -112,12 +112,13 @@ export const sampleAudit: readonly AuditRecord[] = [
 /**
  * agent-bot's census records for the preview's souls (#122): luna has a
  * GitHub App, scout's claude sign-in expired (the banner), the rest joined
- * without an App.
+ * without an App. The owner turned scout's computer use off
+ * (agent-bot-identity #482); luna and agent_c may use the computer.
  */
 export const samplePopulation: Readonly<Record<string, SoulPopulation>> = {
-  agent_p: { agentId: 'agent_p', appSlug: 'luna-geniusbar', harnessAuth: null },
-  agent_s: { agentId: 'agent_s', appSlug: null, harnessAuth: { status: 'expired', harness: 'claude', since: '2026-10-05T09:40:00Z' } },
-  agent_c: { agentId: 'agent_c', appSlug: null, harnessAuth: null },
+  agent_p: { agentId: 'agent_p', appSlug: 'luna-geniusbar', harnessAuth: null, computerUse: true },
+  agent_s: { agentId: 'agent_s', appSlug: null, harnessAuth: { status: 'expired', harness: 'claude', since: '2026-10-05T09:40:00Z' }, computerUse: false },
+  agent_c: { agentId: 'agent_c', appSlug: null, harnessAuth: null, computerUse: true },
 };
 
 /** Wake on new messages per soul (`soul cold-wake show --json`, #122): luna wakes, others do not. */

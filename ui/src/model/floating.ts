@@ -102,3 +102,16 @@ export function settleStop(stop: StopPhase, computerUse: ReadonlySet<string> = n
 export function pauseQuickAction(fleetPaused: boolean): { icon: 'play' | 'pause'; label: 'quick.resume' | 'quick.pause' } {
   return fleetPaused ? { icon: 'play', label: 'quick.resume' } : { icon: 'pause', label: 'quick.pause' };
 }
+
+/** How long a failed "Toggle computer use" stays by the floating Dudle. */
+export const COMPUTER_USE_ERROR_MS = 15_000;
+
+/**
+ * The quick menu's "Toggle computer use" (Lovable `setComputerUse`) as the
+ * owner's per-soul switch: off while the lead's computer use is on, on
+ * while it is off; null when agent-bot cannot say, so nothing is changed.
+ */
+export function computerUseToggle(current: boolean | null): 'on' | 'off' | null {
+  if (current === null) return null;
+  return current ? 'off' : 'on';
+}
