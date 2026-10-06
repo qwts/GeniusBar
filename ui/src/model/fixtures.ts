@@ -1,7 +1,7 @@
 // The fixed fake census and health from R1's snapshot test, for tests and
 // for previewing the popup before the bridge (#7) supplies real rows.
 import type { CensusRow } from './census';
-import type { ChatEntry, InboxMessage } from './chat';
+import type { ApprovalRecord, ChatEntry, InboxMessage } from './chat';
 import { disconnected, type ConnectionSnapshot } from './status';
 
 export const sampleCensus: readonly CensusRow[] = [
@@ -81,4 +81,16 @@ export const sampleSessionEntries: readonly ChatEntry[] = [
   { id: 'kind_6', kind: 'tool_call', tool: 'terminal', args: 'npm test', status: 'running', at: 2_500, seq: null },
   { id: 'kind_7', kind: 'approval_request', tool: 'browser', args: 'open https://github.com/qwts/GeniusBar/actions', risk: 'external', status: 'approved_session', at: 2_600, seq: null },
   { id: 'kind_8', kind: 'approval_request', tool: 'terminal', args: 'git push origin fix/census', risk: 'external', status: 'pending', at: 2_700, seq: null },
+];
+
+/** Two proposals waiting on the owner, as `approvals list --json` gives them (#85). */
+export const sampleApprovals: readonly ApprovalRecord[] = [
+  {
+    proposalId: 'prop_2', agentId: 'agent_c', soul: null, tool: 'terminal', summary: "psql -c 'VACUUM FULL ledger'",
+    createdAt: '2026-10-05T10:04:00Z', expiresAt: '2026-10-05T10:19:00Z', status: 'pending',
+  },
+  {
+    proposalId: 'prop_1', agentId: 'agent_p', soul: 'luna', tool: 'Bash', summary: 'git push origin main',
+    createdAt: '2026-10-05T10:01:00Z', expiresAt: '2026-10-05T10:16:00Z', status: 'pending',
+  },
 ];

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Plus } from 'lucide-react';
+import { ApprovalCounts, ApprovalsList } from './components/ApprovalsList';
 import { FooterMenu } from './components/FooterMenu';
 import { CompanionSession, InfoButton } from './components/CompanionSession';
 import { CompanionWindow, Desktop } from './components/Desktop';
@@ -14,6 +15,7 @@ import { RemoveServices } from './components/RemoveServices';
 import { SetupPanel } from './components/SetupPanel';
 import { UpdateNotice } from './components/UpdateNotice';
 import { I18nProvider, LANGS, useI18n, type Lang } from './lib/i18n';
+import { menuApprovals, workingCount } from './model/approvals';
 import { conversationOf, emptyComposer, unreadOf } from './model/chat';
 import { allSouls, buildSoulForest, findSoul, soulKey, type CensusRow } from './model/census';
 import { needsSetup, type ExistingServices, type SetupState } from './model/setup';
@@ -127,6 +129,12 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     return () => openChat(null);
   }, [openChat, openKey]);
   const unread = chat ? (soul: CensusRow) => unreadOf(chat.chat, soulKey(soul)) : undefined;
+  // Every companion's pending proposals, from useChat's poll (#85).
+  const chatApprovals = chat?.approvals;
+  const waiting = useMemo(() => chatApprovals ? menuApprovals(chatApprovals.records, chatApprovals.local, roster) : [],
+    [chatApprovals, roster]);
+  const working = useMemo(() => workingCount(roster), [roster]);
+  const decide = chat?.decide;
   const empty = emptyRosterText(connection);
   const footer = footerStatus(connection);
   const showSetup = Boolean(setup && onSetup && (setup.running || needsSetup(connection)));
@@ -202,7 +210,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
 
   const menu = (hiding?: Hiding) => (
     <>
-      <HealthHeader connection={connection} />
+      <HealthHeader connection={connection}><ApprovalCounts waiting={waiting.length} working={working} /></HealthHeader>
       {updates && <UpdateNotice status={updates.status} onAction={updates.act} />}
       {showStarter && starter && launcher && (
         <section className="panel" aria-label={t('firstCompanion')}>
@@ -214,6 +222,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
           )}
         </section>
       )}
+      <ApprovalsList items={waiting} paused={paused} onOpen={open}
+        onDecide={decide && ((proposalId, decision) => { void decide(proposalId, decision); })} />
       {/* The setup panel replaces the fleet, which has nothing true to say yet. */}
       {showSetup && setup && onSetup ? (
         <SetupPanel setup={setup} onSetup={onSetup} existing={existingServices} />
@@ -296,7 +306,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   return (
     <div className="gb flex h-full flex-col">
       <MenuBar open={menuOpen} onOpenChange={setMenuOpen} tone={header.tone} title={header.title}
-        attention={attention} onReset={layoutActions.reset} unread={unreadTotal} forest={forest} paused={paused} onJump={open}>
+        attention={attention} onReset={layoutActions.reset} unread={unreadTotal} approvals={waiting.length} forest={forest} paused={paused} onJump={open}>
         {menu({ hidden: layout.hidden, onToggle: layoutActions.setHidden, onToggleTeam: layoutActions.setTeamHidden, onShowAll: layoutActions.showAll })}
       </MenuBar>
       <Desktop forest={forest} layout={layout} paused={paused} unreadOf={unread} selectedKey={openKey} onOpen={open}

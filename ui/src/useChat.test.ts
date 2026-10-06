@@ -278,6 +278,32 @@ describe('useChat asides and approvals (#122, #85, #86)', () => {
     expect(conversationOf(result.current.chat, 'user/agent_p').entries[1]).toMatchObject({ id: 'p1', status: 'approved', deciding: false });
   });
 
+  it('reads the pending list with no conversation open and decides from the menu', async () => {
+    const decisions: [string, string][] = [];
+    let opened = 0;
+    let pending = [{ proposalId: 'p1', agentId: 'agent_p', soul: null, tool: 'Bash', summary: 'git push',
+      createdAt: '2026-10-05T10:00:00Z', expiresAt: null, status: 'pending' }];
+    const feed: AgentBotFeed = {
+      asides: async () => { opened += 1; return null; },
+      approvals: async () => pending,
+      decide: async (proposalId, decision) => {
+        decisions.push([proposalId, decision]);
+        pending = [];
+        return { proposalId, agentId: 'agent_p', soul: null, tool: 'Bash', summary: 'git push', createdAt: '',
+          expiresAt: null, status: 'denied' };
+      },
+    };
+    const { result } = renderHook(() => useChat({ enabled: true, callImpl: quietBridge, intervalMs: 60_000, storage: memoryStorage(), feed }));
+    await waitFor(() => expect(result.current.approvals?.records).toHaveLength(1));
+    expect(opened).toBe(0);
+    await act(() => result.current.decide!('p1', 'deny'));
+    expect(decisions).toEqual([['p1', 'deny']]);
+    expect(result.current.approvals?.records).toEqual([]);
+    expect(result.current.approvals?.local.get('p1')?.entry).toMatchObject({ status: 'denied', deciding: false });
+    await act(() => result.current.decide!('p1', 'approve'));
+    expect(decisions).toHaveLength(1);
+  });
+
   it('keeps a failed decision pending with its reason', async () => {
     const feed: AgentBotFeed = {
       asides: async () => null,

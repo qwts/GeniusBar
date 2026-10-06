@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { LayoutGrid, Search } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
+import { badgeText } from '../model/approvals';
 import { allSouls, displayHarness, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
 import { SoulDudle } from './FleetList';
 
@@ -20,11 +21,13 @@ function useClickAway(ref: RefObject<HTMLElement | null>, open: boolean, close: 
  * the jump palette and the clock on the right. Escape or a click outside
  * closes a menu. ⌘K opens the palette.
  */
-export function MenuBar({ open, onOpenChange, tone, title, attention = null, onReset, unread, forest, paused, onJump, children }: {
+export function MenuBar({ open, onOpenChange, tone, title, attention = null, onReset, unread, approvals = 0, forest, paused, onJump, children }: {
   open: boolean; onOpenChange: (open: boolean) => void; tone: string; title: string;
   attention?: { text: string; isError: boolean } | null; onReset: () => void;
   /** Unread messages across the fleet, badged on the GeniusBar item. */
   unread: number;
+  /** Proposals waiting on the owner, badged on the G as the design does. */
+  approvals?: number;
   forest: readonly SoulNode[]; paused: boolean; onJump: (soul: CensusRow) => void; children: ReactNode;
 }) {
   const { t, lang } = useI18n();
@@ -37,6 +40,9 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
   useClickAway(item, open, closeMenu);
   useClickAway(view, viewOpen, closeView);
   const badge = useId();
+  const waiting = badgeText(approvals);
+  const described = [waiting && t('bar.approvals', { count: approvals }), unread > 0 && t('newCount', { count: unread })]
+    .filter(Boolean).join(', ');
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -99,12 +105,17 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
             aria-expanded={open}
             aria-haspopup="dialog"
             aria-label={t('bar.menu')}
-            aria-describedby={unread > 0 ? badge : undefined}
+            aria-describedby={described ? badge : undefined}
             title={title}
             onClick={() => onOpenChange(!open)}
             className={`flex h-6 items-center gap-1 rounded px-1 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${open ? 'bg-accent' : ''}`}
           >
             <span className="grid size-4 place-items-center rounded-[4px] bg-foreground text-[10px] font-bold text-background" aria-hidden>G</span>
+            {waiting && (
+              <span title={t('bar.approvals', { count: approvals })} aria-hidden className="grid min-w-4 place-items-center rounded-full bg-warning px-1 font-mono text-[10px] font-bold leading-4 text-warning-foreground">
+                {waiting}
+              </span>
+            )}
             <span className={`dot dot-${tone}`} aria-hidden />
             {unread > 0 && (
               <span title={t('newCount', { count: unread })} aria-hidden className="grid min-w-4 place-items-center rounded-full bg-warning px-1 font-mono text-[10px] font-bold leading-4 text-warning-foreground">
@@ -112,7 +123,7 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
               </span>
             )}
           </button>
-          {unread > 0 && <span id={badge} hidden>{t('newCount', { count: unread })}</span>}
+          {described && <span id={badge} hidden>{described}</span>}
           {open && (
             <div role="dialog" aria-label={t('bar.menu')}
               className="absolute top-full right-0 mt-1.5 flex max-h-[calc(100vh-3rem)] w-[22rem] flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-2xl">

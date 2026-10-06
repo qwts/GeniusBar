@@ -1,11 +1,12 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { StrictMode, useCallback, useEffect, useRef, useState } from 'react';
+import { StrictMode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App, type AppMode } from './App';
 import type { CliToolsApi } from './components/CliTools';
 import type { DevTools, HarnessAuth, Starter } from './components/FirstLaunch';
 import { inApp } from './bridge';
+import { menuApprovals } from './model/approvals';
 import { useCensus } from './useCensus';
 import { useChat } from './useChat';
 import { useLaunch } from './useLaunch';
@@ -26,6 +27,12 @@ function Live({ snapshot }: { snapshot: SnapshotOptions | null }) {
   const select = useSnapshot(snapshot, census, connection, refresh);
   const { setup, existing, runSetup } = useSetup(() => { void refresh?.(); });
   const chat = useChat({ enabled: inApp() && !snapshot, roster: census });
+  // The tray's G shows how many proposals wait on the owner (#85).
+  const waiting = useMemo(() => menuApprovals(chat.approvals?.records ?? [], chat.approvals?.local).length, [chat.approvals]);
+  useEffect(() => {
+    if (snapshot || !inApp()) return;
+    invoke('set_tray_badge', { count: waiting }).catch(() => {});
+  }, [waiting, snapshot]);
   const launcher = useLaunch();
   const updates = useUpdates();
   const [openedPackage, setOpenedPackage] = useState<{ id: number; path: string; checking: boolean; error: string | null; agentId?: string; name?: string; preferredHarnesses?: string[] }>();

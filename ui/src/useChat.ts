@@ -2,7 +2,8 @@
 // sends from the composer. History is saved to the web view's storage
 // before each ack, because an acknowledged message leaves the broker.
 // The open conversation also shows its soul's asides and pending approvals
-// from agent-bot (#122, #85, #86), read on the same cadence.
+// from agent-bot (#122, #85, #86), read on the same cadence; the pending
+// list is read even with no conversation open, for the menu and tray badge.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BridgeError, call, decideApproval, inApp, listApprovals, soulAsides } from './bridge';
 import type { CensusRow } from './model/census';
@@ -12,6 +13,7 @@ import {
   asideEntries,
   withSideEntries,
   type ApprovalDecision,
+  type ApprovalEntry,
   type ApprovalRecord,
   type AsideRecord,
   type LocalApproval,
@@ -140,6 +142,18 @@ export interface ChatApi {
    * session has no daemon scope yet and does nothing.
    */
   resolve?: (key: string, entryId: string, decision: ApprovalDecision) => Promise<void>;
+  /**
+   * Every companion's pending proposals, from the same poll, with this
+   * app's decisions on them: the menu's approval list and the tray badge.
+   */
+  approvals?: PendingApprovals;
+  /** Approves or denies one proposal from the menu, as `resolve` does in a conversation. */
+  decide?: (proposalId: string, decision: 'approve' | 'deny') => Promise<void>;
+}
+
+export interface PendingApprovals {
+  records: readonly ApprovalRecord[];
+  local: ReadonlyMap<string, LocalApproval>;
 }
 
 export function useChat({
@@ -191,6 +205,10 @@ export function useChat({
   const asideLog = useRef(new Map<string, AsideRecord[]>());
   const pending = useRef<ApprovalRecord[]>([]);
   const local = useRef(new Map<string, LocalApproval>());
+  const [approvals, setApprovals] = useState<PendingApprovals>(() => ({ records: [], local: new Map() }));
+  const publishApprovals = useCallback(() => {
+    setApprovals({ records: pending.current, local: new Map(local.current) });
+  }, []);
   /** Rebuilds one conversation's asides and approvals; saves only on change. */
   const showSide = useCallback((key: string) => {
     const agentId = agentIdOf(key);
@@ -201,30 +219,39 @@ export function useChat({
   }, [update]);
 
   const sideInFlight = useRef(false);
+  // A conversation opened mid-poll is read again right after.
+  const sideAgain = useRef(false);
   const pollSide = useCallback(async () => {
-    const key = openKey.current;
-    if (key === null || sideInFlight.current) return;
+    if (sideInFlight.current) { sideAgain.current = true; return; }
     sideInFlight.current = true;
+    sideAgain.current = false;
+    const key = openKey.current;
     try {
-      const agentId = agentIdOf(key);
-      const log = asideLog.current.get(agentId) ?? [];
-      const held = new Set(log.map((a) => a.id));
-      let after = log.at(-1)?.id ?? null;
-      for (let page = 0; page < MAX_PAGES; page += 1) {
-        const result = await deps.current.feed.asides(agentId, after);
-        if (!result) break;
-        for (const aside of result.asides) if (!held.has(aside.id)) { held.add(aside.id); log.push(aside); }
-        if (!result.next || result.next === after) break;
-        after = result.next;
+      if (key !== null) {
+        const agentId = agentIdOf(key);
+        const log = asideLog.current.get(agentId) ?? [];
+        const held = new Set(log.map((a) => a.id));
+        let after = log.at(-1)?.id ?? null;
+        for (let page = 0; page < MAX_PAGES; page += 1) {
+          const result = await deps.current.feed.asides(agentId, after);
+          if (!result) break;
+          for (const aside of result.asides) if (!held.has(aside.id)) { held.add(aside.id); log.push(aside); }
+          if (!result.next || result.next === after) break;
+          after = result.next;
+        }
+        asideLog.current.set(agentId, log.slice(-ASIDES_KEPT));
       }
-      asideLog.current.set(agentId, log.slice(-ASIDES_KEPT));
       const approvals = await deps.current.feed.approvals();
-      if (approvals) pending.current = approvals;
-      showSide(key);
+      if (approvals && JSON.stringify(approvals) !== JSON.stringify(pending.current)) {
+        pending.current = approvals;
+        publishApprovals();
+      }
+      if (key !== null) showSide(key);
     } finally {
       sideInFlight.current = false;
     }
-  }, [showSide]);
+    if (sideAgain.current && openKey.current !== key) void pollSide();
+  }, [showSide, publishApprovals]);
 
   const inFlight = useRef(false);
   const poll = useCallback(async () => {
@@ -262,24 +289,41 @@ export function useChat({
     if (key !== null && enabled) void pollSide();
   }, [update, enabled, pollSide]);
 
-  const resolve = useCallback(async (key: string, entryId: string, decision: ApprovalDecision) => {
-    if (decision === 'approved_session') return;
-    const agentId = agentIdOf(key);
-    const shown = store.current.conversations[key]?.entries.find((e) => e.id === entryId);
-    if (shown?.kind !== 'approval_request' || shown.status !== 'pending' || shown.deciding) return;
-    const mark = (entry: Partial<typeof shown>) => {
+  /** One decision, from a conversation's card or the menu; both show its progress. */
+  const decideShown = useCallback(async (key: string | null, agentId: string, shown: ApprovalEntry,
+    decision: 'approve' | 'deny') => {
+    const entryId = shown.id;
+    const mark = (entry: Partial<ApprovalEntry>) => {
       local.current.set(entryId, { agentId, entry: { ...shown, deciding: false, error: null, ...entry } });
-      showSide(key);
+      // The asking conversation and the one on screen; another soul's is unchanged.
+      for (const k of new Set([key, openKey.current])) if (k !== null) showSide(k);
+      publishApprovals();
     };
     mark({ deciding: true });
     try {
-      const decided = await deps.current.feed.decide(entryId, decision === 'approved' ? 'approve' : 'deny');
+      const decided = await deps.current.feed.decide(entryId, decision);
       pending.current = pending.current.filter((p) => p.proposalId !== entryId);
-      mark({ status: decided.status === 'denied' || decision === 'denied' ? 'denied' : 'approved' });
+      mark({ status: decided.status === 'denied' || decision === 'deny' ? 'denied' : 'approved' });
     } catch (error) {
       mark({ error: asBridgeError(error).message });
     }
-  }, [showSide]);
+  }, [showSide, publishApprovals]);
+
+  const resolve = useCallback(async (key: string, entryId: string, decision: ApprovalDecision) => {
+    if (decision === 'approved_session') return;
+    const shown = store.current.conversations[key]?.entries.find((e) => e.id === entryId);
+    if (shown?.kind !== 'approval_request' || shown.status !== 'pending' || shown.deciding) return;
+    await decideShown(key, agentIdOf(key), shown, decision === 'approved' ? 'approve' : 'deny');
+  }, [decideShown]);
+
+  const decide = useCallback(async (proposalId: string, decision: 'approve' | 'deny') => {
+    const record = pending.current.find((p) => p.proposalId === proposalId && p.status === 'pending');
+    if (!record) return;
+    const mine = local.current.get(proposalId)?.entry;
+    if (mine && (mine.deciding || mine.status !== 'pending')) return;
+    const [shown] = approvalEntries(record.agentId, [record]);
+    if (shown) await decideShown(null, record.agentId, shown, decision);
+  }, [decideShown]);
 
   const setDraft = useCallback((key: string, draft: string) => {
     updateComposer(key, (c) => ({ ...c, draft }));
@@ -303,5 +347,6 @@ export function useChat({
     }
   }, [update, updateComposer]);
 
-  return useMemo(() => ({ chat, composers, open, setDraft, send, resolve }), [chat, composers, open, setDraft, send, resolve]);
+  return useMemo(() => ({ chat, composers, open, setDraft, send, resolve, approvals, decide }),
+    [chat, composers, open, setDraft, send, resolve, approvals, decide]);
 }

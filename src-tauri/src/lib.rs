@@ -6,6 +6,7 @@ mod bridge;
 mod snapshot;
 mod soul_package;
 mod starter;
+mod tray;
 mod updates;
 
 use std::{
@@ -156,7 +157,7 @@ fn install_tray(app: &mut App, window: &WebviewWindow) -> tauri::Result<()> {
     let check = updates::menu_item(app.handle())?;
     let quit = MenuItem::with_id(app, "quit", "Quit GeniusBar", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&check, &quit])?;
-    TrayIconBuilder::with_id("geniusbar")
+    TrayIconBuilder::with_id(tray::TRAY_ID)
         .icon(tauri::include_image!("icons/tray.png"))
         .icon_as_template(true)
         .tooltip("GeniusBar")
@@ -243,6 +244,7 @@ pub fn run() {
             bridge::locate_soul_package,
             bridge::soul_asides,
             bridge::approvals,
+            tray::set_tray_badge,
             updates::update_status,
             updates::update_action,
             snapshot::snapshot_options,
