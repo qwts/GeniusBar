@@ -270,4 +270,10 @@ export const es: Catalog = {
   stop: 'Detener',
   stopping: 'Deteniendo…',
   stopFailed: 'No se pudo detener: {message}',
+  // Pausar todo / Reanudar (#122): con `soul pause` / `soul resume` de agent-bot.
+  'quick.pause': 'Pausar todo',
+  'quick.resume': 'Reanudar',
+  paused: 'Compañeros en pausa',
+  pauseFailed: 'No se pudo pausar: {message}',
+  resumeFailed: 'No se pudo reanudar: {message}',
 };

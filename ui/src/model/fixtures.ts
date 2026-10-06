@@ -3,6 +3,7 @@
 import type { SoulColdWake, SoulMode, SoulModel, SoulPopulation } from '../bridge';
 import type { AuditRecord } from './audit';
 import type { CensusRow } from './census';
+import type { PauseEntry } from './pause';
 import type { ApprovalRecord, ChatEntry, InboxMessage } from './chat';
 import type { SoulBadges } from './refresh';
 import { disconnected, type ConnectionSnapshot } from './status';
@@ -193,3 +194,14 @@ export const sampleOpenedPackages: Readonly<Record<'copy' | 'described', {
     preferredHarnesses: ['opencode', 'claude'],
   },
 };
+
+/**
+ * `population list` pause flags for preview (`&paused=1`) and tests (#122):
+ * luna is paused (agent-bot `soul pause`), so the menu bar shows the
+ * "Companions paused" chip; agent_c runs; an archived soul stays paused.
+ */
+export const samplePaused: readonly PauseEntry[] = [
+  { agentId: 'agent_p', managed: true, paused: true, status: 'active' },
+  { agentId: 'agent_c', managed: true, paused: false, status: 'active' },
+  { agentId: 'agent_gone', managed: true, paused: true, status: 'retired' },
+];

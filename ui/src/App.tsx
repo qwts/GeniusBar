@@ -34,6 +34,7 @@ import { DefaultHarness } from './components/DefaultHarness';
 import type { ChatApi } from './useChat';
 import type { LaunchApi } from './useLaunch';
 import type { UpdateApi } from './useUpdates';
+import { livePauser, usePause, type Pauser } from './usePause';
 
 /** The tray's popup, or `--window`'s desktop; the shell picks (app_mode). */
 export type AppMode = 'tray' | 'window';
@@ -87,6 +88,8 @@ interface AppProps {
   archiver?: Archiver;
   /** The computer-use Stop (agent-bot `soul stop`); the app uses agent-bot when absent. */
   stopper?: Stopper;
+  /** Pause all / Resume (agent-bot `soul pause`); the app uses agent-bot when absent. */
+  pauser?: Pauser;
 }
 
 const liveStopper: Stopper = { supported: () => soulStopSupported(), stop: (agentId) => stopSoul(agentId) };
@@ -128,7 +131,7 @@ function LanguageSelect() {
 
 // The GeniusBar menu (the tray popup's content, and the toolbar popover in
 // window mode) and, from it, one companion's session.
-function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, floatingButton = false, archiver, stopper }: AppProps) {
+function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, floatingButton = false, archiver, stopper, pauser }: AppProps) {
   const { t } = useI18n();
   const forest = useMemo(() => buildSoulForest(census), [census]);
   const roster = useMemo(() => allSouls(forest), [forest]);
@@ -203,6 +206,10 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     roster,
   }, [launcher, roster, defaultHarness]);
   const layout = useLayout();
+  // Pause all / Resume (#122): the desktop's menu bar chip and quick action.
+  // `fleet` is the companions' pause, not `paused` (the hidden page's).
+  const fleet = usePause(mode === 'window' ? pauser ?? (inApp() && !isStatic ? livePauser : undefined) : undefined, !pageHidden);
+  const toggleFleet = fleet.offered ? () => { void fleet.toggle(); } : undefined;
   // Archive (#94) and the desktop's comms / computer-use badges (#122).
   const archiveWith = archiver ?? (inApp() && !isStatic ? liveArchiver : undefined);
   const [archiving, setArchiving] = useState<CensusRow | null>(null);
@@ -371,7 +378,9 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   // The menu is a popover, so its update line and an error footer also show
   // beside the GeniusBar button while it is closed.
   const update = updates ? updateNotice(updates.status) : null;
-  const attention = update ? { text: update.text, isError: update.isError }
+  const attention = fleet.failure
+    ? { text: t(fleet.failure.action === 'pause' ? 'pauseFailed' : 'resumeFailed', { message: fleet.failure.message }), isError: true }
+    : update ? { text: update.text, isError: update.isError }
     : footer?.isError ? { text: footer.text, isError: true }
     : null;
   const shownBadges = badges ?? liveBadges;
@@ -382,7 +391,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   return (
     <div className="gb flex h-full flex-col">
       <MenuBar open={menuOpen} onOpenChange={setMenuOpen} tone={header.tone} title={header.title}
-        attention={attention} onReset={layoutActions.reset} unread={unreadTotal} approvals={waiting.length} forest={forest} paused={paused} onJump={open}>
+        attention={attention} onReset={layoutActions.reset} unread={unreadTotal} approvals={waiting.length} forest={forest} paused={paused} onJump={open}
+        fleetPaused={fleet.paused} onResume={toggleFleet}>
         {menu({ hidden: layout.hidden, onToggle: layoutActions.setHidden, onToggleTeam: layoutActions.setTeamHidden, onShowAll: layoutActions.showAll })}
       </MenuBar>
       <Desktop forest={forest} layout={layout} paused={paused} unreadOf={unread} selectedKey={openKey} onOpen={open}
@@ -396,6 +406,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
         state={floatingState({ roster, approvals: waiting.length, busy: shownBadges.busy, computerUse: shownBadges.computerUse })}
         computerUser={computerUserName(roster, shownBadges.computerUse)}
         computerUse={shownBadges.computerUse} stopper={stopper ?? (inApp() && !isStatic ? liveStopper : undefined)}
+        fleetPaused={fleet.paused} onTogglePause={toggleFleet}
         onPrompt={prompt} onHistory={(soul) => openOn(soul, 'audit')} />
       {launchModal}
       {archiveUi}

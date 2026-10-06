@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildSoulForest, type CensusRow } from './census';
-import { computerUserName, floatingLead, floatingState, HALT_HOLD_MS, menuStep, settleStop, stopTargets, type StopPhase } from './floating';
+import { computerUserName, floatingLead, floatingState, HALT_HOLD_MS, menuStep, pauseQuickAction, settleStop, stopTargets, type StopPhase } from './floating';
 
 const row = (agentId: string, name: string | null, parent: string | null = null, presence: CensusRow['presence'] = 'joined'): CensusRow =>
   ({ account: 'user', agentId, name, harness: 'claude', parent, presence, unacked: 0, lastWake: null });
@@ -88,5 +88,12 @@ describe('computer-use Stop', () => {
 
   it('holds Escape for the design\'s ~0.6 s', () => {
     expect(HALT_HOLD_MS).toBe(600);
+  });
+});
+
+describe('pauseQuickAction', () => {
+  it('offers Pause all while running and Resume while paused, as the design', () => {
+    expect(pauseQuickAction(false)).toEqual({ icon: 'pause', label: 'quick.pause' });
+    expect(pauseQuickAction(true)).toEqual({ icon: 'play', label: 'quick.resume' });
   });
 });
