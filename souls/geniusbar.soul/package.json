@@ -1,0 +1,9 @@
+{
+  "name": "geniusbar-soul",
+  "private": true,
+  "description": "The harnesses the GeniusBar soul runs on (ADR-0276): the Claude and Codex ACP adapters, pinned like Starter's.",
+  "dependencies": {
+    "@agentclientprotocol/codex-acp": "2.1.1",
+    "@zed-industries/claude-code-acp": "0.16.2"
+  }
+}
