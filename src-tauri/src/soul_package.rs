@@ -1,7 +1,10 @@
 //! File-open routing for `.soul` packages. macOS delivers documents through
 //! `RunEvent::Opened`; paths are queued until the web view has mounted.
 
-use std::{path::PathBuf, sync::Mutex};
+use std::{
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
 
 use tauri::{State, Url};
 
@@ -14,6 +17,15 @@ pub fn soul_path_from_url(url: &Url) -> Option<PathBuf> {
     let path = url.to_file_path().ok()?;
     let extension = path.extension()?.to_str()?;
     extension.eq_ignore_ascii_case("soul").then_some(path)
+}
+
+/// File URLs for the non-flag arguments of a second launch (#61), resolved
+/// against that launch's working directory, for `enqueue_urls` to filter.
+pub fn argv_urls<I: IntoIterator<Item = S>, S: AsRef<str>>(args: I, cwd: &Path) -> Vec<Url> {
+    args.into_iter()
+        .filter(|arg| !arg.as_ref().is_empty() && !arg.as_ref().starts_with('-'))
+        .filter_map(|arg| Url::from_file_path(cwd.join(arg.as_ref())).ok())
+        .collect()
 }
 
 impl PendingSoulPackages {
@@ -85,6 +97,28 @@ mod tests {
         assert_eq!(paths.len(), 2);
         assert_eq!(pending.take(), paths);
         assert!(pending.take().is_empty());
+    }
+
+    #[test]
+    fn takes_soul_packages_from_a_second_launchs_arguments() {
+        let pending = PendingSoulPackages::default();
+        let urls = argv_urls(
+            [
+                "--window",
+                "one.soul",
+                "/Users/friend/two.soul/",
+                "notes.txt",
+            ],
+            Path::new("/Users/friend/Downloads"),
+        );
+        assert_eq!(
+            pending.enqueue_urls(&urls),
+            vec![
+                PathBuf::from("/Users/friend/Downloads/one.soul"),
+                PathBuf::from("/Users/friend/two.soul/"),
+            ]
+        );
+        assert!(argv_urls(Vec::<String>::new(), Path::new("/")).is_empty());
     }
 
     #[test]
