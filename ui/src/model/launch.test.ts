@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   harnessOptions,
   preferredHarness,
+  prefillHarness,
   suggestedName,
   applyStatus,
   applyStatusError,
@@ -28,6 +29,11 @@ describe('launch requests', () => {
     expect(launchParams(pkg)).toEqual({ account: 'user', package: '/souls/p', harness: 'codex', name: 'Helper' });
     expect(launchParams({ ...pkg, comms: false })).toMatchObject({ comms: false });
     expect(launchParams({ ...soul, comms: true })).toMatchObject({ comms: true });
+  });
+
+  it('never sends a name for an existing soul, so a relaunch cannot rename it (#79)', () => {
+    expect(launchParams({ ...soul, name: 'Scott' })).toEqual({ account: 'user', soul: 'agent_1', harness: 'codex' });
+    expect(launchParams({ ...pkg, name: 'Scott' }).name).toBe('Scott');
   });
 
   it('sends a chosen model trimmed, and no model key for the harness default (#128)', () => {
@@ -95,6 +101,12 @@ describe('opened package prefill (#120)', () => {
     expect(suggestedName('  Luna ')).toBe('Luna');
     expect(suggestedName(undefined)).toBe('');
     expect(suggestedName('x'.repeat(200))).toHaveLength(128);
+  });
+  it('prefills the soul\'s harness, then the package\'s, then the default (#120)', () => {
+    expect(prefillHarness('codex', 'opencode', 'claude')).toBe('codex');
+    expect(prefillHarness(null, 'opencode', 'claude')).toBe('opencode');
+    expect(prefillHarness(undefined, null, 'claude')).toBe('claude');
+    expect(prefillHarness(null, null, null)).toBe('');
   });
   it('prefers the first harness the app can offer', () => {
     expect(preferredHarness(['codex', 'opencode'], [])).toBe('opencode');

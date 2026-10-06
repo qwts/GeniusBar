@@ -161,3 +161,21 @@ export const sampleModels: Readonly<Record<string, SoulModel>> = {
 
 /** Desktop badges for preview (#122): luna has agent comms on, agent_c drives the screen. */
 export const sampleBadges: SoulBadges = { comms: new Set(['agent_p']), computerUse: new Set(['agent_c']) };
+
+/**
+ * Finder-opened packages as `soul locate` describes them, for the launch
+ * form (preview `&open=copy` or `&open=described`): a copy of luna's folder,
+ * which must be named to fork (#110), and a package whose soul.json gives a
+ * name, description and preferred harness (#120).
+ */
+export const sampleOpenedPackages: Readonly<Record<'copy' | 'described', {
+  path: string; name?: string; description?: string; preferredHarnesses?: string[]; copyOf?: { name: string | null; agentId: string };
+}>> = {
+  copy: { path: '/Users/user/Desktop/luna copy.soul', copyOf: { name: 'luna', agentId: 'agent_p' } },
+  described: {
+    path: '/Users/user/Desktop/Helper.soul',
+    name: 'Helper - Starter',
+    description: 'A starter companion that answers questions about this Mac.',
+    preferredHarnesses: ['opencode', 'claude'],
+  },
+};

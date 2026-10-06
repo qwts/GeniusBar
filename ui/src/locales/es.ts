@@ -117,6 +117,8 @@ export const es: Catalog = {
   'launch.packagePlaceholder': 'Ruta al soul, terminada en .soul',
   'launch.name': 'Nombre',
   'launch.nameOptional': 'Opcional',
+  'launch.nameRequired': 'Obligatorio',
+  'launch.copyHint': 'Se convierte en un nuevo compañero copiado de {name}, así que dale un nombre propio.',
   'launch.harnessPick': 'Elige un harness',
   'launch.harnessHint': 'GeniusBar no ejecuta modelos por sí mismo: lo hace el harness.',
   'launch.runsAs': 'Se ejecuta como {account}',

@@ -4,7 +4,10 @@
 // &select=agent_s shows the expired sign-in banner; &select=agent_p shows
 // luna on Auto-Pilot from sampleModes, its banner and the mode switch, and
 // luna's Model row from sampleModels; its Launch… form has the Model field), or
-// &open=<path> to open a package as Finder would; window mode shows luna's
+// &open=<path> to open a package as Finder would (&open=copy for a copied
+// folder that must be named, &open=described for a package whose soul.json
+// prefills the form; &select=agent_p then Launch… relaunches luna with no
+// Name field); window mode shows luna's
 // comms badge and agent_c's computer-use badge from sampleBadges, and
 // Archive / Remove… archive locally, refusing while luna "runs"):
 // the app on the fixed fixtures, without Tauri. Not part of the build.
@@ -16,7 +19,7 @@ import { AuditSourceContext, type AuditSource } from './components/AuditLog';
 import { SoulSourceContext, type SoulSource } from './components/SoulNotices';
 import type { CensusRow } from './model/census';
 import { emptyChat, emptyComposer, mergeIncoming, type ChatState } from './model/chat';
-import { inboxMessage, sampleApprovals, sampleAudit, sampleBadges, sampleCensus, sampleColdWake, sampleConnection, sampleModels, sampleModes, samplePopulation, sampleSessionEntries } from './model/fixtures';
+import { inboxMessage, sampleApprovals, sampleAudit, sampleBadges, sampleCensus, sampleColdWake, sampleConnection, sampleModels, sampleModes, sampleOpenedPackages, samplePopulation, sampleSessionEntries } from './model/fixtures';
 import type { ChatApi } from './useChat';
 import '@fontsource/ibm-plex-sans/latin-400.css';
 import '@fontsource/ibm-plex-sans/latin-500.css';
@@ -109,7 +112,9 @@ function Preview() {
     },
   }), []);
   const opened = params.get('open');
-  const app = <App mode={mode} select={params.get('select')} openedPackage={opened ? { id: 1, path: opened, checking: false, error: null } : undefined} census={souls} badges={sampleBadges} archiver={archiver} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}
+  const fixture = opened === 'copy' || opened === 'described' ? sampleOpenedPackages[opened] : null;
+  const openedPackage = opened ? { id: 1, checking: false, error: null, path: opened, ...fixture } : undefined;
+  const app = <App mode={mode} select={params.get('select')} openedPackage={openedPackage} census={souls} badges={sampleBadges} archiver={archiver} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}
     onRefresh={() => {}} onRemoveServices={async () => {}} updates={{ status: { state: 'idle', version: null }, act: () => {} }}
     launcher={{ state: { phase: 'idle' }, launch: async () => {}, reset: () => {} }} />;
   // The tray popup is a fixed 384×560 window (tauri.conf.json).
