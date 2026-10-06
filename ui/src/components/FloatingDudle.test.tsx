@@ -16,7 +16,7 @@ const luna = sampleCensus[0];
 function floating(props: Partial<Parameters<typeof FloatingDudle>[0]> = {}) {
   const onPrompt = vi.fn();
   const onHistory = vi.fn();
-  render(<I18nProvider><FloatingDudle lead={luna} state="idle" computerUser={null} paused onPrompt={onPrompt} onHistory={onHistory} {...props} /></I18nProvider>);
+  render(<I18nProvider><FloatingDudle lead={luna} state="idle" computerUser={null} paused showButton onPrompt={onPrompt} onHistory={onHistory} {...props} /></I18nProvider>);
   return { onPrompt, onHistory, button: screen.queryByRole('button', { name: 'Companion quick actions' }) };
 }
 
@@ -31,6 +31,13 @@ describe('FloatingDudle', () => {
     cleanup();
     floating({ state: 'idle' });
     expect(document.querySelector('.dudle')?.getAttribute('data-state')).toBe('idle');
+  });
+
+  it('is off by default, as in the Lovable export: only the perimeter shows', () => {
+    floating({ showButton: undefined, computerUser: 'coder' });
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(document.querySelector('.perimeter')).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toBe('coder is using the computer');
   });
 
   it('shows nothing without a lead or computer use', () => {
@@ -98,25 +105,33 @@ describe('FloatingDudle', () => {
 describe('FloatingDudle in the desktop', () => {
   const chat: ChatApi = { chat: emptyChat, composers: {}, open: vi.fn(), setDraft: vi.fn(), send: vi.fn() };
   const desk = (extra: Partial<Parameters<typeof App>[0]> = {}) =>
-    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic chat={chat} {...extra} />);
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic chat={chat} floatingButton {...extra} />);
 
   it('is not in the tray popup', () => {
     render(<App census={sampleCensus} connection={sampleConnection} isStatic chat={chat} />);
     expect(screen.queryByRole('button', { name: 'Companion quick actions' })).toBeNull();
   });
 
-  it('shows the first team lead, idle, and working while a soul is busy', () => {
+  it('the live app shows no floating button, only the perimeter while a soul uses the computer', () => {
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic chat={chat}
+      badges={{ comms: new Set(), computerUse: new Set(['agent_p']), busy: new Set(['agent_p']) }} />);
+    expect(screen.queryByRole('button', { name: 'Companion quick actions' })).toBeNull();
+    expect(document.querySelector('.perimeter')).toBeTruthy();
+    expect(screen.getByText('luna is using the computer')).toBeTruthy();
+  });
+
+  it('shows the first team lead, idle, and working while the daemon reports a soul busy', () => {
     desk();
     const button = screen.getByRole('button', { name: 'Companion quick actions' });
     expect(button.getAttribute('title')).toBe('luna');
     expect(button.querySelector('svg')?.getAttribute('data-state')).toBe('idle');
     cleanup();
-    desk({ busy: new Set(['agent_c']) });
+    desk({ badges: { comms: new Set(), computerUse: new Set(), busy: new Set(['agent_c']) } });
     expect(screen.getByRole('button', { name: 'Companion quick actions' }).querySelector('svg')?.getAttribute('data-state')).toBe('working');
   });
 
   it('draws the perimeter while the daemon reports computer use', () => {
-    desk({ badges: { comms: new Set(), computerUse: new Set(['agent_p']) } });
+    desk({ badges: { comms: new Set(), computerUse: new Set(['agent_p']), busy: new Set() } });
     expect(document.querySelector('.perimeter')).toBeTruthy();
     expect(screen.getByText('luna is using the computer')).toBeTruthy();
   });

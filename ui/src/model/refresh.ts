@@ -50,13 +50,20 @@ export function applyCensus(prev: ConnectionSnapshot, outcome: CensusOutcome, no
 export interface SoulBadges {
   comms: ReadonlySet<string>;
   computerUse: ReadonlySet<string>;
+  /** Souls with a turn in flight (daemon status `busy`), for the floating Dudle. */
+  busy: ReadonlySet<string>;
 }
 
-export const noBadges: SoulBadges = { comms: new Set(), computerUse: new Set() };
+export const noBadges: SoulBadges = { comms: new Set(), computerUse: new Set(), busy: new Set() };
 
 /** Souls driving the screen; none when the daemon cannot say or is down. */
 export function computerUseOf(status: DaemonStatus | null): ReadonlySet<string> {
   return new Set(status?.running ? status.computerUse.map((c) => c.agentId) : []);
+}
+
+/** Souls mid-turn; none when the daemon cannot say, is down, or is too old to report it. */
+export function busyOf(status: DaemonStatus | null): ReadonlySet<string> {
+  return new Set(status?.running ? status.busy ?? [] : []);
 }
 
 /** Souls whose agent comms agent-bot reports on; a soul it cannot answer for has no badge. */

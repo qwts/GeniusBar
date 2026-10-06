@@ -10,8 +10,9 @@
 // Name field); window mode shows luna's
 // comms badge and agent_c's computer-use badge from sampleBadges, and
 // Archive / Remove… archive locally, refusing while luna "runs"; the
-// floating Dudle shows awaiting with the computer-use perimeter, or
-// &dudle=idle|working|awaiting|computer shows one state from sampleFloating):
+// computer-use perimeter shows, and &dudle=idle|working|awaiting|computer
+// also shows the floating Dudle's button (off in the app) in one state from
+// sampleFloating):
 // the app on the fixed fixtures, without Tauri. Not part of the build.
 import { StrictMode, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -118,7 +119,7 @@ function Preview() {
   const opened = params.get('open');
   const fixture = opened === 'copy' || opened === 'described' ? sampleOpenedPackages[opened] : null;
   const openedPackage = opened ? { id: 1, checking: false, error: null, path: opened, ...fixture } : undefined;
-  const app = <App mode={mode} select={params.get('select')} openedPackage={openedPackage} census={souls} badges={floating ? { ...sampleBadges, computerUse: floating.computerUse } : sampleBadges} busy={floating?.busy} archiver={archiver} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}
+  const app = <App mode={mode} select={params.get('select')} openedPackage={openedPackage} census={souls} badges={floating ? { ...sampleBadges, computerUse: floating.computerUse, busy: floating.busy } : sampleBadges} floatingButton={floating !== null} archiver={archiver} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}
     onRefresh={() => {}} onRemoveServices={async () => {}} updates={{ status: { state: 'idle', version: null }, act: () => {} }}
     launcher={{ state: { phase: 'idle' }, launch: async () => {}, reset: () => {} }} />;
   // The tray popup is a fixed 384×560 window (tauri.conf.json).

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyCensus, commsAmong, commsOf, computerUseOf, sameSet } from './refresh';
+import { applyCensus, busyOf, commsAmong, commsOf, computerUseOf, sameSet } from './refresh';
 import { disconnected, STARTING_WINDOW_MS, unpairedMessage } from './status';
 import { needsSetup } from './setup';
 
@@ -90,6 +90,14 @@ describe('desktop badges (#122)', () => {
     expect([...computerUseOf(using)]).toEqual(['agent_1']);
     expect(computerUseOf({ ...using, running: false }).size).toBe(0);
     expect(computerUseOf(null).size).toBe(0);
+  });
+
+  it('lists the souls mid-turn while the daemon runs', () => {
+    const busy = { running: true, computerUse: [], busy: ['agent_1', 'agent_2'] };
+    expect([...busyOf(busy)]).toEqual(['agent_1', 'agent_2']);
+    expect(busyOf({ ...busy, running: false }).size).toBe(0);
+    expect(busyOf({ running: true, computerUse: [] }).size).toBe(0);
+    expect(busyOf(null).size).toBe(0);
   });
 
   it('lists souls with comms on, skipping ones agent-bot could not answer for', () => {

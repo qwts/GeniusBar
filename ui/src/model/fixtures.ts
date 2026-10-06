@@ -160,7 +160,7 @@ export const sampleModels: Readonly<Record<string, SoulModel>> = {
 };
 
 /** Desktop badges for preview (#122): luna has agent comms on, agent_c drives the screen. */
-export const sampleBadges: SoulBadges = { comms: new Set(['agent_p']), computerUse: new Set(['agent_c']) };
+export const sampleBadges: SoulBadges = { comms: new Set(['agent_p']), computerUse: new Set(['agent_c']), busy: new Set() };
 
 /**
  * The floating Dudle's states for preview (`&dudle=`, #122): idle (nothing

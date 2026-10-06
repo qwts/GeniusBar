@@ -81,11 +81,8 @@ interface AppProps {
   updates?: UpdateApi;
   /** Desktop avatar badges (#122); the app reads agent-bot when absent. */
   badges?: SoulBadges;
-  /**
-   * Agent IDs mid-turn (daemon status `busy`), for the floating Dudle's
-   * working state; the bridge does not read it yet, so only fixtures pass it.
-   */
-  busy?: ReadonlySet<string>;
+  /** Shows the floating Dudle's button (off, as in the Lovable export); preview only for now. */
+  floatingButton?: boolean;
   /** Archiving souls (#94); the app uses agent-bot when absent. */
   archiver?: Archiver;
 }
@@ -127,7 +124,7 @@ function LanguageSelect() {
 
 // The GeniusBar menu (the tray popup's content, and the toolbar popover in
 // window mode) and, from it, one companion's session.
-function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, busy, archiver }: AppProps) {
+function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, floatingButton = false, archiver }: AppProps) {
   const { t } = useI18n();
   const forest = useMemo(() => buildSoulForest(census), [census]);
   const roster = useMemo(() => allSouls(forest), [forest]);
@@ -391,8 +388,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
           <CompanionWindow soul={selected} paused={paused} onClose={() => setSelectedKey(null)} actions={<InfoButton soul={selected} />}>{session}</CompanionWindow>
         )}
       </Desktop>
-      <FloatingDudle lead={floatingLead(forest, layout.hidden)} paused={paused}
-        state={floatingState({ roster, approvals: waiting.length, busy, computerUse: shownBadges.computerUse })}
+      <FloatingDudle showButton={floatingButton} lead={floatingLead(forest, layout.hidden)} paused={paused}
+        state={floatingState({ roster, approvals: waiting.length, busy: shownBadges.busy, computerUse: shownBadges.computerUse })}
         computerUser={computerUserName(roster, shownBadges.computerUse)}
         onPrompt={prompt} onHistory={(soul) => openOn(soul, 'audit')} />
       {launchModal}

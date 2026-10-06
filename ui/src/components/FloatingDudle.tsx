@@ -18,6 +18,11 @@ interface FloatingDudleProps {
   onPrompt: (lead: CensusRow) => void;
   /** Opens the lead's Audit log. */
   onHistory: (lead: CensusRow) => void;
+  /**
+   * Shows the floating button and its quick menu. Off by default, matching
+   * the Lovable export where it is disabled; the perimeter shows either way.
+   */
+  showButton?: boolean;
 }
 
 /**
@@ -28,7 +33,7 @@ interface FloatingDudleProps {
  * Pause/resume, toggle computer use and Stop are not offered: agent-bot has
  * no command for them yet.
  */
-export function FloatingDudle({ lead, state, paused = false, computerUser, onPrompt, onHistory }: FloatingDudleProps) {
+export function FloatingDudle({ lead, state, paused = false, computerUser, onPrompt, onHistory, showButton = false }: FloatingDudleProps) {
   const { t } = useI18n();
   const [pos, setPos] = useState({ x: 24, y: 104 }); // from bottom-right
   const [open, setOpen] = useState(false);
@@ -52,7 +57,7 @@ export function FloatingDudle({ lead, state, paused = false, computerUser, onPro
           </div>
         </>
       )}
-      {lead && (
+      {showButton && lead && (
         <div className="fixed z-50" style={{ right: pos.x, bottom: pos.y }} data-floating-state={state}>
           {open && (
             <ul aria-label={t('dudleMenu')} className="absolute bottom-1/2 right-1/2 m-0 list-none p-0"

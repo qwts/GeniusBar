@@ -1,11 +1,12 @@
 // The desktop's avatar badges (#122): which souls have agent comms on and
 // which drive the screen. Read from agent-bot: comms for every soul in one
 // `population list` run each minute (#137), falling back to one run per soul
-// on an older bundle; the computer-use list every 15 s, or on the census
-// cadence while a soul drives the screen so the badge clears promptly.
+// on an older bundle; the computer-use and busy lists every 15 s, or on the
+// census cadence while a soul drives the screen or is mid-turn so the badge
+// and the floating Dudle's working state clear promptly.
 import { useEffect, useRef, useState } from 'react';
 import { daemonStatus, populationList, soulComms, type DaemonStatus, type PopulationEntry, type SoulComms } from './bridge';
-import { commsAmong, commsOf, computerUseOf, noBadges, sameSet, type SoulBadges } from './model/refresh';
+import { busyOf, commsAmong, commsOf, computerUseOf, noBadges, sameSet, type SoulBadges } from './model/refresh';
 import { CENSUS_INTERVAL_MS } from './useCensus';
 
 export const COMMS_INTERVAL_MS = 60_000;
@@ -42,10 +43,13 @@ export function useBadges(agentIds: readonly string[], enabled: boolean, sources
     // Each read schedules the next, so reads never overlap and the delay
     // follows what the last one saw.
     const read = async () => {
-      const next = computerUseOf(await source.current.status().catch(() => null));
+      const status = await source.current.status().catch(() => null);
+      const next = computerUseOf(status);
+      const busy = busyOf(status);
       if (!active) return;
-      setBadges((b) => (sameSet(b.computerUse, next) ? b : { ...b, computerUse: next }));
-      timer = setTimeout(() => { void read(); }, next.size > 0 ? CENSUS_INTERVAL_MS : STATUS_INTERVAL_MS);
+      setBadges((b) => (sameSet(b.computerUse, next) && sameSet(b.busy, busy) ? b : { ...b, computerUse: next, busy }));
+      // A soul mid-turn also keeps the census cadence, so working clears promptly.
+      timer = setTimeout(() => { void read(); }, next.size > 0 || busy.size > 0 ? CENSUS_INTERVAL_MS : STATUS_INTERVAL_MS);
     };
     void read();
     return () => { active = false; clearTimeout(timer); };
