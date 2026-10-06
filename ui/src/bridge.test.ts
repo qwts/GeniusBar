@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BridgeError, call, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulPopulation, setSoulColdWake, setSoulComms, soulAsides, soulColdWake, soulComms, soulPopulation } from './bridge';
+import { BridgeError, call, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulPopulation, setSoulColdWake, setSoulComms, setSoulMode, soulAsides, soulColdWake, soulComms, soulMode, soulPopulation } from './bridge';
 
 describe('bridge', () => {
   it('invokes the shell command with the method and params', async () => {
@@ -205,5 +205,42 @@ describe('harness sign-in for a soul (#122)', () => {
     expect(calls).toEqual([['harness_auth', { action: 'login', harness: 'claude', soul: 'agent_1' }]]);
     const failed = (async () => { throw { code: 'harness-auth-failed', message: 'claude sign-in did not finish' }; }) as never;
     await expect(harnessSignIn('claude', 'agent_1', failed)).rejects.toMatchObject({ code: 'harness-auth-failed', message: 'claude sign-in did not finish' });
+  });
+});
+
+describe('soul execution mode (#122)', () => {
+  it('reads soul mode show, and is null when agent-bot cannot say', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => {
+      calls.push([cmd, args]);
+      return { agentId: 'agent_1', mode: 'autopilot' };
+    }) as never;
+    await expect(soulMode('agent_1', fake)).resolves.toBe('autopilot');
+    expect(calls).toEqual([['soul_mode', { agent: 'agent_1', action: 'show' }]]);
+    // agent-bot 0.10.14 has no `soul mode`: the shell reports a failure.
+    const older = (async () => { throw { code: 'soul-mode-failed', message: 'unknown command' }; }) as never;
+    await expect(soulMode('agent_1', older)).resolves.toBeNull();
+    await expect(soulMode('agent_1', (async () => ({ agentId: 'agent_1', mode: 'yolo' })) as never)).resolves.toBeNull();
+    await expect(soulMode('agent_1')).resolves.toBeNull();
+  });
+
+  it('normalizes only the two modes', () => {
+    expect(normalizeSoulMode({ agentId: 'a', mode: 'safe' })).toBe('safe');
+    expect(normalizeSoulMode({ mode: 'autopilot' })).toBe('autopilot');
+    expect(normalizeSoulMode({})).toBeNull();
+    expect(normalizeSoulMode('safe')).toBeNull();
+  });
+
+  it('switches it through agent-bot, which asks the owner; a refusal rejects with the reason', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => {
+      calls.push([cmd, args]);
+      return { agentId: 'agent_1', mode: 'safe' };
+    }) as never;
+    await expect(setSoulMode('agent_1', 'safe', fake)).resolves.toBe('safe');
+    expect(calls).toEqual([['soul_mode', { agent: 'agent_1', action: 'safe' }]]);
+    const refused = (async () => { throw { code: 'soul-mode-failed', message: 'the owner did not approve' }; }) as never;
+    await expect(setSoulMode('agent_1', 'autopilot', refused)).rejects.toMatchObject({ code: 'soul-mode-failed', message: 'the owner did not approve' });
+    await expect(setSoulMode('agent_1', 'autopilot', (async () => ({})) as never)).rejects.toBeInstanceOf(BridgeError);
   });
 });

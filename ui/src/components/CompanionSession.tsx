@@ -1,7 +1,7 @@
 import { useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { AlarmClock, ArrowLeft, Github, Info, LogIn, Radio, X } from 'lucide-react';
-import { runtimeMetrics, setSoulComms, soulComms, type RuntimeMetrics, type RuntimeObservation, type SoulColdWake, type SoulComms, type SoulPopulation } from '../bridge';
+import { AlarmClock, ArrowLeft, Github, Info, LogIn, Radio, ShieldCheck, X, Zap } from 'lucide-react';
+import { runtimeMetrics, setSoulComms, soulComms, type RuntimeMetrics, type RuntimeObservation, type SoulColdWake, type SoulComms, type SoulMode, type SoulPopulation } from '../bridge';
 import {
   availabilityNote,
   displayHarness,
@@ -20,7 +20,7 @@ import { AuditLog } from './AuditLog';
 import { Conversation } from './Conversation';
 import { SoulDudle } from './FleetList';
 import { LaunchForm } from './LaunchForm';
-import { SoulNotices, SoulSourceContext, useSoulPopulation } from './SoulNotices';
+import { SoulNotices, SoulSourceContext, useSoulMode, useSoulPopulation } from './SoulNotices';
 
 /** The conversation with this soul, when chat is available (#17). */
 export interface SoulChat {
@@ -277,6 +277,7 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
   const { wake, saving: wakeSaving, error: wakeError, toggle: toggleWake } = useSoulColdWake(soul.agentId, metricsRefresh);
   const { record: population, loaded: populationLoaded } = useSoulPopulation(soul.agentId, metricsRefresh);
   const signIn = useHarnessSignIn(soul, population, populationLoaded);
+  const execution = useSoulMode(soul.agentId, metricsRefresh);
   const snapshot = 'unavailable' in metrics ? null : metrics;
   const observations = snapshot?.souls[soul.agentId]?.observations ?? [];
   const errors = snapshot?.errors.filter((error) => error.agentId === soul.agentId) ?? [];
@@ -355,6 +356,18 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
         {locked && <span className="block text-[11px] text-muted-foreground">{t('comms.stopFirst')}</span>}
         {wakeSaving && <span className="block text-[11px] text-muted-foreground" role="status">{t('comms.saving')}</span>}
         {wakeError && <span className="error block text-[11px]" role="alert">{t('details.wakeFailed', { message: wakeError })}</span>}
+      </>
+    )]);
+  }
+  // Execution mode (#122): not locked while the soul runs; agent-bot applies
+  // it on the next permission request.
+  if (execution.mode) {
+    rows.push([t('mode.label'), (
+      <>
+        <ModeSwitch soul={soul} mode={execution.mode} saving={execution.saving} onChange={execution.change} />
+        {execution.mode === 'safe' && <span className="block text-[11px] text-muted-foreground">{t('mode.safeHint')}</span>}
+        {execution.saving && <span className="block text-[11px] text-muted-foreground" role="status">{t('comms.saving')}</span>}
+        {execution.error && <span className="error block text-[11px]" role="alert">{t('mode.failed', { message: execution.error })}</span>}
       </>
     )]);
   }
@@ -447,6 +460,51 @@ export function WakeRow({ soul, refresh = 0 }: { soul: CensusRow; refresh?: numb
 }
 
 /**
+ * The design's execution mode pill (Lovable `GeniusBarItem`): Safe Mode with
+ * a shield, Auto-Pilot with a bolt in the warning colour, and the switch,
+ * warning-coloured when on.
+ */
+function ModeSwitch({ soul, mode, saving, onChange }:
+  { soul: CensusRow; mode: SoulMode; saving: boolean; onChange: (mode: SoulMode) => void }) {
+  const { t } = useI18n();
+  const auto = mode === 'autopilot';
+  return (
+    <label className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-sans text-xs ${auto ? 'border-warning text-warning' : 'border-border'}`}>
+      {auto ? <Zap className="size-3" aria-hidden /> : <ShieldCheck className="size-3 text-success" aria-hidden />}
+      <span>{auto ? t('mode.autopilot') : t('mode.safe')}</span>
+      <input type="checkbox" role="switch" checked={auto} disabled={saving}
+        aria-label={t('mode.toggle', { name: displayName(soul) })}
+        style={auto ? { background: 'var(--warning)' } : undefined}
+        onChange={(e) => onChange(e.target.checked ? 'autopilot' : 'safe')} />
+    </label>
+  );
+}
+
+/**
+ * The design's Execution mode row in the ⓘ sheet. Absent while agent-bot
+ * cannot say.
+ */
+export function ModeRow({ soul, refresh = 0 }: { soul: CensusRow; refresh?: number }) {
+  const { t } = useI18n();
+  const { mode, saving, error, change } = useSoulMode(soul.agentId, refresh);
+  if (!mode) return null;
+  return (
+    <div className="flex items-start gap-3 p-3">
+      {mode === 'autopilot'
+        ? <Zap className="mt-0.5 size-4 text-warning" aria-hidden />
+        : <ShieldCheck className="mt-0.5 size-4 text-muted-foreground" aria-hidden />}
+      <span className="flex-1">
+        <span className="block text-sm font-medium">{t('mode.label')}</span>
+        {mode === 'safe' && <span className="block text-xs text-muted-foreground">{t('mode.safeHint')}</span>}
+        {saving && <span className="block text-[11px] text-muted-foreground" role="status">{t('comms.saving')}</span>}
+        {error && <span className="error block text-[11px]" role="alert">{t('mode.failed', { message: error })}</span>}
+      </span>
+      <ModeSwitch soul={soul} mode={mode} saving={saving} onChange={change} />
+    </div>
+  );
+}
+
+/**
  * The design's harness sign-in and GitHub App rows. The App row is
  * read-only: agent-bot has no per-soul connect or rotate yet.
  */
@@ -480,8 +538,8 @@ export function SoulFactRows({ soul, refresh = 0 }: { soul: CensusRow; refresh?:
 
 /**
  * ⓘ and the Details sheet (Lovable 19.29.22): the soul's actionable rows.
- * Wake on new messages, Agent comms, harness sign-in and the GitHub App
- * (read-only), each once agent-bot reports it.
+ * Wake on new messages, Agent comms, execution mode, harness sign-in and
+ * the GitHub App (read-only), each once agent-bot reports it.
  */
 export function InfoButton({ soul }: { soul: CensusRow }) {
   const { t } = useI18n();
@@ -516,6 +574,7 @@ export function InfoButton({ soul }: { soul: CensusRow }) {
             <div className="divide-y divide-border rounded-md border border-border empty:hidden">
               <WakeRow soul={soul} />
               <CommsRow soul={soul} />
+              <ModeRow soul={soul} />
               <SoulFactRows soul={soul} />
             </div>
           </section>
