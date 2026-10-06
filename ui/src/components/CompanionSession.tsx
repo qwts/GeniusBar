@@ -1,7 +1,7 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, Info, Radio, X } from 'lucide-react';
-import { runtimeMetrics, setSoulComms, soulComms, type RuntimeMetrics, type RuntimeObservation, type SoulComms } from '../bridge';
+import { AlarmClock, ArrowLeft, Github, Info, LogIn, Radio, X } from 'lucide-react';
+import { runtimeMetrics, setSoulComms, soulComms, type RuntimeMetrics, type RuntimeObservation, type SoulColdWake, type SoulComms, type SoulPopulation } from '../bridge';
 import {
   availabilityNote,
   displayHarness,
@@ -20,6 +20,7 @@ import { AuditLog } from './AuditLog';
 import { Conversation } from './Conversation';
 import { SoulDudle } from './FleetList';
 import { LaunchForm } from './LaunchForm';
+import { SoulNotices, SoulSourceContext, useSoulPopulation } from './SoulNotices';
 
 /** The conversation with this soul, when chat is available (#17). */
 export interface SoulChat {
@@ -127,8 +128,11 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
       <div id={`${ids}-panel`} role="tabpanel" aria-labelledby={`${ids}-tab-${active}`}
         className={`flex min-h-0 flex-1 flex-col ${active === 'chat' ? '' : 'overflow-y-auto'}`}>
         {active === 'chat' && chat && (
-          <Conversation name={name} entries={chat.entries} composer={chat.composer} onDraft={chat.onDraft} onSend={chat.onSend}
-            dudle={deriveDudle(soul.agentId)} paused={paused} onResolve={chat.onResolve} />
+          <>
+            <SoulNotices key={soulKey(soul)} soul={soul} refresh={metricsRefresh} />
+            <Conversation name={name} entries={chat.entries} composer={chat.composer} onDraft={chat.onDraft} onSend={chat.onSend}
+              dudle={deriveDudle(soul.agentId)} paused={paused} onResolve={chat.onResolve} />
+          </>
         )}
         {active === 'tree' && <DelegationTree forest={forest} focus={soulKey(soul)} paused={paused} onOpen={onOpen} />}
         {active === 'details' && <CompanionDetails soul={soul} roster={roster} launch={launch} metricsRefresh={metricsRefresh} />}
@@ -187,6 +191,77 @@ export function useSoulComms(agentId: string, refresh = 0) {
   return { comms, saving: commsSaving, error: commsError, toggle: toggleComms };
 }
 
+/**
+ * Whether the soul wakes on new messages (#122, agent-bot `soul
+ * cold-wake`). Read when shown and on refresh; a change asks the owner
+ * through agent-bot, and a refusal leaves the switch where it was. Tickets
+ * work as in useSoulComms.
+ */
+export function useSoulColdWake(agentId: string, refresh = 0) {
+  const source = useContext(SoulSourceContext);
+  const [wake, setWake] = useState<SoulColdWake | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ticket = useRef(0);
+  const changing = useRef(false);
+  useEffect(() => {
+    ticket.current += 1;
+    changing.current = false;
+    setWake(null);
+    setError(null);
+    setSaving(false);
+  }, [agentId]);
+  useEffect(() => {
+    if (changing.current) return;
+    const mine = ++ticket.current;
+    void source.coldWake(agentId).then((result) => { if (ticket.current === mine) setWake(result); }, () => {});
+  }, [agentId, refresh, source]);
+  const toggle = (on: boolean) => {
+    const mine = ++ticket.current;
+    const latest = () => ticket.current === mine;
+    changing.current = true;
+    setSaving(true);
+    setError(null);
+    source.setColdWake(agentId, on)
+      .then((result) => { if (latest()) setWake(result); })
+      .catch((e: unknown) => { if (latest()) setError(e instanceof Error ? e.message : String(e)); })
+      .finally(() => {
+        if (!latest()) return;
+        changing.current = false;
+        setSaving(false);
+      });
+  };
+  return { wake, saving, error, toggle };
+}
+
+export type SignInState = 'ok' | 'signed-out' | 'expired';
+
+/**
+ * The soul's harness sign-in: the failure agent-bot's census recorded when
+ * there is one, else `harness auth status H --soul ID`, read once per soul
+ * (not polled). Null while unknown.
+ */
+export function useHarnessSignIn(soul: CensusRow, record: SoulPopulation | null, loaded: boolean): SignInState | null {
+  const source = useContext(SoulSourceContext);
+  const [read, setRead] = useState<{ agentId: string; loggedIn: boolean | null } | null>(null);
+  const harness = soul.harness;
+  const ask = loaded && !record?.harnessAuth && Boolean(harness);
+  useEffect(() => {
+    if (!ask || !harness) return;
+    let active = true;
+    void source.signedIn(harness, soul.agentId).then(
+      (loggedIn) => { if (active) setRead({ agentId: soul.agentId, loggedIn }); },
+      () => { if (active) setRead({ agentId: soul.agentId, loggedIn: null }); },
+    );
+    return () => { active = false; };
+  }, [ask, harness, soul.agentId, source]);
+  if (record?.harnessAuth) return record.harnessAuth.status;
+  if (read?.agentId !== soul.agentId || read.loggedIn === null) return null;
+  return read.loggedIn ? 'ok' : 'signed-out';
+}
+
+const SIGN_IN_TEXT = { ok: 'login.ok', 'signed-out': 'login.signedOut', expired: 'login.expired' } as const;
+
 /** The read-only fields, with Launch… when launching is available. */
 export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0 }: { soul: CensusRow; roster?: readonly CensusRow[]; launch?: LaunchProps; metricsRefresh?: number }) {
   const { t, lang } = useI18n();
@@ -199,6 +274,9 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
     return () => { active = false; };
   }, [soul.agentId, metricsRefresh]);
   const { comms, saving: commsSaving, error: commsError, toggle: toggleComms } = useSoulComms(soul.agentId, metricsRefresh);
+  const { wake, saving: wakeSaving, error: wakeError, toggle: toggleWake } = useSoulColdWake(soul.agentId, metricsRefresh);
+  const { record: population, loaded: populationLoaded } = useSoulPopulation(soul.agentId, metricsRefresh);
+  const signIn = useHarnessSignIn(soul, population, populationLoaded);
   const snapshot = 'unavailable' in metrics ? null : metrics;
   const observations = snapshot?.souls[soul.agentId]?.observations ?? [];
   const errors = snapshot?.errors.filter((error) => error.agentId === soul.agentId) ?? [];
@@ -262,6 +340,32 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
       </>
     )]);
   }
+  // Details rows from the Lovable design (#122), each shown once agent-bot
+  // can say. Wake is locked while the soul runs, as comms is.
+  if (wake) {
+    const locked = comms?.running === true;
+    rows.push([t('details.wake'), (
+      <>
+        <label className="inline-flex items-center gap-2">
+          <input type="checkbox" role="switch" checked={wake.on} disabled={locked || wakeSaving}
+            aria-label={t('details.wakeToggle', { name: displayName(soul) })}
+            onChange={(e) => toggleWake(e.target.checked)} />
+          <span>{wake.on ? t('comms.on') : t('comms.off')}</span>
+        </label>
+        {locked && <span className="block text-[11px] text-muted-foreground">{t('comms.stopFirst')}</span>}
+        {wakeSaving && <span className="block text-[11px] text-muted-foreground" role="status">{t('comms.saving')}</span>}
+        {wakeError && <span className="error block text-[11px]" role="alert">{t('details.wakeFailed', { message: wakeError })}</span>}
+      </>
+    )]);
+  }
+  if (signIn) {
+    rows.push([t('login.status'), (
+      <span className={signIn === 'ok' ? 'text-success' : 'text-destructive'}>{t(SIGN_IN_TEXT[signIn])}</span>
+    )]);
+  }
+  if (population) {
+    rows.push([t('keyd.title'), population.appSlug ? t('keyd.connected', { app: population.appSlug }) : t('keyd.none')]);
+  }
 
   // As the design's Details tab: a bordered list, sans labels and mono values.
   return (
@@ -317,9 +421,67 @@ export function CommsRow({ soul, refresh = 0 }: { soul: CensusRow; refresh?: num
 }
 
 /**
+ * The design's wake switch (Lovable `DetailsButton`): title, hint (or why
+ * it is locked) and the switch. Absent while agent-bot cannot say.
+ */
+export function WakeRow({ soul, refresh = 0 }: { soul: CensusRow; refresh?: number }) {
+  const { t } = useI18n();
+  const { wake, saving, error, toggle } = useSoulColdWake(soul.agentId, refresh);
+  const { comms } = useSoulComms(soul.agentId, refresh);
+  if (!wake) return null;
+  const locked = comms?.running === true;
+  const name = displayName(soul);
+  return (
+    <label className="flex items-start gap-3 p-3">
+      <AlarmClock className="mt-0.5 size-4 text-muted-foreground" aria-hidden />
+      <span className="flex-1">
+        <span className="block text-sm font-medium">{t('details.wake')}</span>
+        <span className="block text-xs text-muted-foreground">{locked ? t('comms.stopFirst') : t('details.wakeHint', { name })}</span>
+        {saving && <span className="block text-[11px] text-muted-foreground" role="status">{t('comms.saving')}</span>}
+        {error && <span className="error block text-[11px]" role="alert">{t('details.wakeFailed', { message: error })}</span>}
+      </span>
+      <input type="checkbox" role="switch" checked={wake.on} disabled={locked || saving}
+        aria-label={t('details.wakeToggle', { name })} onChange={(e) => toggle(e.target.checked)} />
+    </label>
+  );
+}
+
+/**
+ * The design's harness sign-in and GitHub App rows. The App row is
+ * read-only: agent-bot has no per-soul connect or rotate yet.
+ */
+export function SoulFactRows({ soul, refresh = 0 }: { soul: CensusRow; refresh?: number }) {
+  const { t } = useI18n();
+  const { record, loaded } = useSoulPopulation(soul.agentId, refresh);
+  const signIn = useHarnessSignIn(soul, record, loaded);
+  return (
+    <>
+      {signIn && (
+        <div className="flex items-center gap-3 p-3">
+          <LogIn className="size-4 text-muted-foreground" aria-hidden />
+          <p className="m-0 flex-1 text-sm">{t('login.status')} · {displayHarness(soul)}</p>
+          <span className={`text-xs ${signIn === 'ok' ? 'text-success' : 'text-destructive'}`}>{t(SIGN_IN_TEXT[signIn])}</span>
+        </div>
+      )}
+      {record && (
+        <div className="flex items-center gap-3 p-3">
+          <Github className="size-4 text-muted-foreground" aria-hidden />
+          <div className="min-w-0 flex-1">
+            <p className="m-0 text-sm">{t('keyd.title')}</p>
+            <p className="m-0 truncate font-mono text-[11px] text-muted-foreground">
+              {record.appSlug ? t('keyd.connected', { app: record.appSlug }) : t('keyd.none')}
+            </p>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+/**
  * ⓘ and the Details sheet (Lovable 19.29.22): the soul's actionable rows.
- * Only Agent comms is backed today; Wake (#90), harness sign-in and the
- * GitHub App via keyd join when agent-bot reports them.
+ * Wake on new messages, Agent comms, harness sign-in and the GitHub App
+ * (read-only), each once agent-bot reports it.
  */
 export function InfoButton({ soul }: { soul: CensusRow }) {
   const { t } = useI18n();
@@ -352,7 +514,9 @@ export function InfoButton({ soul }: { soul: CensusRow }) {
               <p className="m-0 text-sm text-muted-foreground">{displayHarness(soul)}</p>
             </div>
             <div className="divide-y divide-border rounded-md border border-border empty:hidden">
+              <WakeRow soul={soul} />
               <CommsRow soul={soul} />
+              <SoulFactRows soul={soul} />
             </div>
           </section>
         </div>,

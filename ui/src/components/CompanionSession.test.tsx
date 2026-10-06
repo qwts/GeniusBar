@@ -1,10 +1,11 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BridgeError, runtimeMetrics, setSoulComms, soulComms, type RuntimeMetrics } from '../bridge';
+import { BridgeError, runtimeMetrics, setSoulComms, soulComms, type RuntimeMetrics, type SoulPopulation } from '../bridge';
 import { buildSoulForest } from '../model/census';
 import { emptyComposer } from '../model/chat';
 import { sampleCensus } from '../model/fixtures';
 import { CompanionDetails, CompanionSession } from './CompanionSession';
+import { SoulSourceContext, type SoulSource } from './SoulNotices';
 
 afterEach(cleanup);
 vi.mock('../bridge', async (original) => ({ BridgeError: (await original<typeof import('../bridge')>()).BridgeError,
@@ -260,5 +261,108 @@ describe('CompanionSession', () => {
     fireEvent.click(back);
     fireEvent.keyDown(back, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('Details rows from the Lovable design (#122)', () => {
+  const stopped = { agentId: luna.agentId, managed: true, comms: true, running: false };
+  const record: SoulPopulation = { agentId: luna.agentId, appSlug: 'luna-bot', harnessAuth: null };
+  function source(overrides: Partial<SoulSource> = {}): SoulSource {
+    return {
+      population: vi.fn(async () => record),
+      coldWake: vi.fn(async () => ({ on: true, lane: 'acp' })),
+      setColdWake: vi.fn(async (_id: string, on: boolean) => ({ on, lane: on ? 'acp' : null })),
+      signedIn: vi.fn(async () => true),
+      signIn: vi.fn(async () => true),
+      ...overrides,
+    };
+  }
+  const withSource = (s: SoulSource, ui: React.ReactElement) => <SoulSourceContext.Provider value={s}>{ui}</SoulSourceContext.Provider>;
+
+  it('adds Wake, Harness sign-in and GitHub App rows, keeping every other row', async () => {
+    const s = source();
+    render(withSource(s, <CompanionDetails soul={luna} />));
+    await screen.findByText('GitHub App', { selector: 'dt' });
+    expect(await screen.findByText('Signed in')).toBeTruthy();
+    expect(field('Wake on new messages')).toBe('On');
+    expect(field('Harness sign-in')).toBe('Signed in');
+    expect(field('GitHub App')).toBe('Connected · luna-bot');
+    for (const term of ['Agent id', 'Account', 'Harness', 'Presence', 'Parent', 'Unacked', 'Last wake', 'Verification', 'Hardened', 'Daemon watching']) {
+      expect(screen.getByText(term, { selector: 'dt' })).toBeTruthy();
+    }
+    expect(s.coldWake).toHaveBeenCalledWith(luna.agentId);
+    expect(s.signedIn).toHaveBeenCalledWith('codex', luna.agentId);
+  });
+
+  it('shows the census sign-in failure without asking the harness, and an App-less soul', async () => {
+    const s = source({ population: vi.fn(async () => ({ ...record, appSlug: null, harnessAuth: { status: 'expired' as const, harness: 'codex', since: null } })) });
+    render(withSource(s, <CompanionDetails soul={luna} />));
+    expect(await screen.findByText('Expired')).toBeTruthy();
+    expect(field('GitHub App')).toBe('Not connected · joins without an App');
+    expect(s.signedIn).not.toHaveBeenCalled();
+  });
+
+  it('reads harness sign-in once per soul, not on every refresh', async () => {
+    const s = source();
+    const { rerender } = render(withSource(s, <CompanionDetails soul={luna} metricsRefresh={0} />));
+    await screen.findByText('Signed in');
+    rerender(withSource(s, <CompanionDetails soul={luna} metricsRefresh={1} />));
+    await waitFor(() => expect(s.population).toHaveBeenCalledTimes(2));
+    expect(s.signedIn).toHaveBeenCalledOnce();
+  });
+
+  it('turns wake off through agent-bot; a refusal leaves the switch and says why', async () => {
+    const s = source();
+    vi.mocked(soulComms).mockResolvedValue(stopped);
+    render(withSource(s, <CompanionDetails soul={luna} />));
+    const toggle = await screen.findByRole('switch', { name: 'Wake luna on new messages' }) as HTMLInputElement;
+    fireEvent.click(toggle);
+    expect(s.setColdWake).toHaveBeenCalledWith(luna.agentId, false);
+    await waitFor(() => expect(field('Wake on new messages')).toContain('Off'));
+    vi.mocked(s.setColdWake).mockRejectedValueOnce(new BridgeError('cold-wake-failed', 'the owner did not approve'));
+    fireEvent.click(toggle);
+    expect((await screen.findByRole('alert')).textContent).toBe('Wake setting unchanged: the owner did not approve');
+    expect(toggle.checked).toBe(false);
+  });
+
+  it('locks the wake switch while the companion runs', async () => {
+    vi.mocked(soulComms).mockResolvedValue({ ...stopped, running: true });
+    render(withSource(source(), <CompanionDetails soul={luna} />));
+    await screen.findByRole('switch', { name: 'Agent comms for luna' });
+    const toggle = screen.getByRole('switch', { name: 'Wake luna on new messages' }) as HTMLInputElement;
+    expect(toggle.disabled).toBe(true);
+  });
+
+  it('adds none of them when agent-bot cannot say', async () => {
+    const s = source({ population: vi.fn(async () => null), coldWake: vi.fn(async () => null), signedIn: vi.fn(async () => null) });
+    render(withSource(s, <CompanionDetails soul={luna} />));
+    await waitFor(() => expect(s.signedIn).toHaveBeenCalled());
+    for (const term of ['Wake on new messages', 'Harness sign-in', 'GitHub App']) {
+      expect(screen.queryByText(term, { selector: 'dt' })).toBeNull();
+    }
+  });
+
+  it('puts the wake switch, sign-in and GitHub App in the ⓘ Details sheet', async () => {
+    const { InfoButton } = await import('./CompanionSession');
+    const s = source();
+    render(withSource(s, <InfoButton soul={luna} />));
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+    const sheet = screen.getByRole('dialog', { name: 'Details · luna' });
+    expect(await within(sheet).findByText("Start luna when a message arrives, even if it's asleep.")).toBeTruthy();
+    expect(await within(sheet).findByText('Signed in')).toBeTruthy();
+    expect(within(sheet).getByText('Connected · luna-bot')).toBeTruthy();
+    expect(within(sheet).queryByRole('button', { name: /Connect|Rotate/ })).toBeNull();
+    fireEvent.click(within(sheet).getByRole('switch', { name: 'Wake luna on new messages' }));
+    expect(s.setColdWake).toHaveBeenCalledWith(luna.agentId, false);
+  });
+
+  it('shows the expired sign-in banner above the chat only', async () => {
+    const s = source({ population: vi.fn(async () => ({ ...record, harnessAuth: { status: 'expired' as const, harness: 'codex', since: null } })) });
+    const chat = { entries: [], composer: emptyComposer, onDraft: () => {}, onSend: () => {} };
+    render(withSource(s, <CompanionSession soul={luna} forest={forest} roster={sampleCensus} chat={chat} onOpen={() => {}} onClose={() => {}} />));
+    expect((await screen.findByRole('alert')).textContent).toContain('codex sign-in expired');
+    expect(screen.getByRole('textbox', { name: 'Message to luna' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in again' }));
+    expect(s.signIn).toHaveBeenCalledWith('codex', luna.agentId);
   });
 });

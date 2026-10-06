@@ -1,5 +1,6 @@
 // The fixed fake census and health from R1's snapshot test, for tests and
 // for previewing the popup before the bridge (#7) supplies real rows.
+import type { SoulColdWake, SoulPopulation } from '../bridge';
 import type { AuditRecord } from './audit';
 import type { CensusRow } from './census';
 import type { ApprovalRecord, ChatEntry, InboxMessage } from './chat';
@@ -105,3 +106,21 @@ export const sampleAudit: readonly AuditRecord[] = [
   { at: '2026-10-05T10:02:05Z', event: 'approval-decision', principalId: 'principal_1', agentId: 'agent_p', operation: 'prop_1', decision: 'approve', detail: 'Bash: git push origin main' },
   { at: '2026-10-05T10:03:40Z', event: 'permission', principalId: 'principal_1', transport: 'hook', agentId: 'agent_p', operation: 'Bash', decision: 'allow', detail: 'Bash: npm test' },
 ];
+
+/**
+ * agent-bot's census records for the preview's souls (#122): luna has a
+ * GitHub App, scout's claude sign-in expired (the banner), the rest joined
+ * without an App.
+ */
+export const samplePopulation: Readonly<Record<string, SoulPopulation>> = {
+  agent_p: { agentId: 'agent_p', appSlug: 'luna-geniusbar', harnessAuth: null },
+  agent_s: { agentId: 'agent_s', appSlug: null, harnessAuth: { status: 'expired', harness: 'claude', since: '2026-10-05T09:40:00Z' } },
+  agent_c: { agentId: 'agent_c', appSlug: null, harnessAuth: null },
+};
+
+/** Wake on new messages per soul (`soul cold-wake show --json`, #122): luna wakes, others do not. */
+export const sampleColdWake: Readonly<Record<string, SoulColdWake>> = {
+  agent_p: { on: true, lane: 'acp' },
+  agent_s: { on: false, lane: null },
+  agent_c: { on: false, lane: null },
+};

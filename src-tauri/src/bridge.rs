@@ -1297,3 +1297,228 @@ mod chat_feed_tests {
         );
     }
 }
+
+/// A soul's cold-wake setting (#122, Lovable "Wake on new messages"), from
+/// agent-bot's `soul cold-wake <agentId> show --json`: `{agentId, setting,
+/// policy, lane}`. `on` and `off` are owner-gated by agent-bot (its consent
+/// dialog, Touch ID); GeniusBar never asks itself. agent-bot takes `--json`
+/// only with `show`, so a change runs plain and the setting is read back.
+#[tauri::command]
+pub async fn soul_cold_wake<R: Runtime>(
+    app: AppHandle<R>,
+    agent: String,
+    action: String,
+) -> Result<Value, BridgeError> {
+    let change = cold_wake_args(&agent, &action)?;
+    if action != "show" {
+        let output = run_agent_bot(&app, change, "cold-wake-unavailable").await?;
+        if !output.status.success() {
+            return Err(cold_wake_refusal(&output.stderr));
+        }
+    }
+    let show = cold_wake_args(&agent, "show")?;
+    let output = run_agent_bot(&app, show, "cold-wake-unavailable").await?;
+    parse_cold_wake(&output.stdout, &output.stderr)
+}
+
+fn cold_wake_args(agent: &str, action: &str) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    if agent.is_empty() || agent.starts_with('-') {
+        return Err(BridgeError::new(
+            "cold-wake-invalid",
+            "agent must be an agent id",
+        ));
+    }
+    let mut args: Vec<std::ffi::OsString> = vec!["soul".into(), "cold-wake".into(), agent.into()];
+    match action {
+        "show" => args.extend(["show".into(), "--json".into()]),
+        "on" | "off" => args.push(action.into()),
+        _ => {
+            return Err(BridgeError::new(
+                "cold-wake-invalid",
+                "action must be show, on or off",
+            ))
+        }
+    }
+    Ok(args)
+}
+
+/// Why agent-bot refused a cold-wake change: its stderr line, unprefixed.
+fn cold_wake_refusal(stderr: &[u8]) -> BridgeError {
+    let message = last_line(stderr);
+    let message = message
+        .strip_prefix("agent-bot soul cold-wake: ")
+        .unwrap_or(&message);
+    BridgeError::new(
+        "cold-wake-failed",
+        if message.is_empty() {
+            "agent-bot did not change the wake setting"
+        } else {
+            message
+        },
+    )
+}
+
+fn parse_cold_wake(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    parse_agent_bot_json(
+        stdout,
+        stderr,
+        "cold-wake-failed",
+        "agent-bot soul cold-wake: ",
+        "agent-bot gave no wake setting",
+        |value| {
+            value.get("agentId").and_then(Value::as_str).is_some() && value.get("setting").is_some()
+        },
+    )
+}
+
+/// The facts agent-bot's population census keeps about one soul that the
+/// broker's census does not (#122): its GitHub App slug, the harness sign-in
+/// a daemon turn found missing or expired (#84), and its role line. From
+/// `population show <agentId>` (pretty JSON); only those fields come back,
+/// so paths and transcript locators never reach the web view.
+#[tauri::command]
+pub async fn soul_population<R: Runtime>(
+    app: AppHandle<R>,
+    agent: String,
+) -> Result<Value, BridgeError> {
+    if agent.is_empty() || agent.starts_with('-') {
+        return Err(BridgeError::new(
+            "population-invalid",
+            "agent must be an agent id",
+        ));
+    }
+    let args: Vec<std::ffi::OsString> = vec!["population".into(), "show".into(), agent.into()];
+    let output = run_agent_bot(&app, args, "population-unavailable").await?;
+    parse_soul_population(&output.stdout, &output.stderr)
+}
+
+fn parse_soul_population(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    if let Ok(value) = serde_json::from_slice::<Value>(stdout) {
+        if let Some(id) = value.get("id").and_then(Value::as_str) {
+            let field = |name: &str| value.get(name).cloned().unwrap_or(Value::Null);
+            return Ok(json!({
+                "agentId": id,
+                "appSlug": field("appSlug"),
+                "harnessAuth": field("harnessAuth"),
+                "managed": field("managed"),
+                "comms": field("comms"),
+                "roleLine": field("roleLine"),
+            }));
+        }
+    }
+    let message = last_line(stderr);
+    let message = message
+        .strip_prefix("agent-population: ")
+        .unwrap_or(&message);
+    Err(BridgeError::new(
+        "population-failed",
+        if message.is_empty() {
+            "agent-bot gave no census record"
+        } else {
+            message
+        },
+    ))
+}
+
+#[cfg(test)]
+mod details_rows_tests {
+    use super::*;
+
+    #[test]
+    fn builds_cold_wake_arguments() {
+        assert_eq!(
+            cold_wake_args("agent_1", "show").unwrap(),
+            vec!["soul", "cold-wake", "agent_1", "show", "--json"]
+        );
+        // agent-bot takes --json only with show.
+        assert_eq!(
+            cold_wake_args("agent_1", "on").unwrap(),
+            vec!["soul", "cold-wake", "agent_1", "on"]
+        );
+        assert_eq!(
+            cold_wake_args("agent_1", "off").unwrap(),
+            vec!["soul", "cold-wake", "agent_1", "off"]
+        );
+        assert_eq!(
+            cold_wake_args("agent_1", "resume").unwrap_err().code,
+            "cold-wake-invalid"
+        );
+        assert_eq!(
+            cold_wake_args("--json", "show").unwrap_err().code,
+            "cold-wake-invalid"
+        );
+        assert_eq!(
+            cold_wake_args("", "show").unwrap_err().code,
+            "cold-wake-invalid"
+        );
+    }
+
+    #[test]
+    fn parses_cold_wake_settings_or_their_error() {
+        let on = parse_cold_wake(
+            b"{\"agentId\":\"agent_1\",\"setting\":\"on\",\"policy\":null,\"lane\":\"acp\"}\n",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(on["lane"], "acp");
+        assert_eq!(
+            parse_cold_wake(
+                b"{\"error\":{\"code\":\"cold-wake-failed\",\"message\":\"cold wake settings are owner only\"}}\n",
+                b""
+            ),
+            Err(BridgeError::new(
+                "cold-wake-failed",
+                "cold wake settings are owner only"
+            ))
+        );
+        assert_eq!(
+            parse_cold_wake(b"", b""),
+            Err(BridgeError::new(
+                "cold-wake-failed",
+                "agent-bot gave no wake setting"
+            ))
+        );
+        assert_eq!(
+            cold_wake_refusal(b"agent-bot soul cold-wake: the owner did not approve\n"),
+            BridgeError::new("cold-wake-failed", "the owner did not approve")
+        );
+        assert_eq!(
+            cold_wake_refusal(b"").message,
+            "agent-bot did not change the wake setting"
+        );
+    }
+
+    #[test]
+    fn keeps_only_the_details_fields_of_a_census_record() {
+        let record = parse_soul_population(
+            br#"{
+  "id": "agent_1",
+  "name": "luna",
+  "appSlug": "luna-bot",
+  "spacePath": "/Users/x/.agent-space",
+  "transcriptLocator": {"provider": "claude", "id": "t1"},
+  "managed": true,
+  "comms": true,
+  "harnessAuth": {"status": "expired", "harness": "claude", "since": "2026-10-05T10:00:00.000Z"},
+  "roleLine": "Lead, 2 subagents"
+}
+"#,
+            b"",
+        )
+        .unwrap();
+        assert_eq!(record["agentId"], "agent_1");
+        assert_eq!(record["appSlug"], "luna-bot");
+        assert_eq!(record["harnessAuth"]["status"], "expired");
+        assert!(record.get("spacePath").is_none());
+        assert!(record.get("transcriptLocator").is_none());
+        let bare = parse_soul_population(b"{\"id\":\"agent_2\",\"appSlug\":null}", b"").unwrap();
+        assert_eq!(bare["harnessAuth"], Value::Null);
+        assert_eq!(
+            parse_soul_population(b"", b"agent-population: no population record for agent_3\n"),
+            Err(BridgeError::new(
+                "population-failed",
+                "no population record for agent_3"
+            ))
+        );
+    }
+}

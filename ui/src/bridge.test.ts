@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BridgeError, call, decideApproval, inApp, listApprovals, listAudit, normalizeRuntimeMetrics, normalizeSoulComms, setSoulComms, soulAsides, soulComms } from './bridge';
+import { BridgeError, call, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulPopulation, setSoulColdWake, setSoulComms, soulAsides, soulColdWake, soulComms, soulPopulation } from './bridge';
 
 describe('bridge', () => {
   it('invokes the shell command with the method and params', async () => {
@@ -121,5 +121,89 @@ describe('audit log (#122)', () => {
     await expect(listAudit('agent_1', older)).resolves.toBeNull();
     await expect(listAudit('agent_1', (async () => ({ error: {} })) as never)).resolves.toBeNull();
     await expect(listAudit(null)).resolves.toBeNull();
+  });
+});
+
+describe('soul cold wake (#122)', () => {
+  it('reads soul cold-wake show, normalized, and is null when it cannot say', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => {
+      calls.push([cmd, args]);
+      return { agentId: 'agent_1', setting: 'on', policy: null, lane: 'acp' };
+    }) as never;
+    await expect(soulColdWake('agent_1', fake)).resolves.toEqual({ on: true, lane: 'acp' });
+    expect(calls).toEqual([['soul_cold_wake', { agent: 'agent_1', action: 'show' }]]);
+    const failing = (async () => { throw { code: 'cold-wake-failed', message: 'owner only' }; }) as never;
+    await expect(soulColdWake('agent_1', failing)).resolves.toBeNull();
+    await expect(soulColdWake('agent_1')).resolves.toBeNull();
+  });
+
+  it('normalizes every setting shape agent-bot may give', () => {
+    expect(normalizeSoulColdWake({ setting: 'off', lane: null })).toEqual({ on: false, lane: null });
+    expect(normalizeSoulColdWake({ setting: 'resume', policy: 'read-only', lane: 'resume' })).toEqual({ on: true, lane: 'resume' });
+    expect(normalizeSoulColdWake({ setting: true })).toEqual({ on: true, lane: 'acp' });
+    expect(normalizeSoulColdWake({ setting: false })).toEqual({ on: false, lane: null });
+    expect(normalizeSoulColdWake({ setting: { lane: 'webhook' } })).toEqual({ on: true, lane: 'webhook' });
+    expect(normalizeSoulColdWake({})).toBeNull();
+    expect(normalizeSoulColdWake({ setting: 3 })).toBeNull();
+    expect(normalizeSoulColdWake('on')).toBeNull();
+  });
+
+  it('changes it through agent-bot, which asks the owner; a refusal rejects', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => {
+      calls.push([cmd, args]);
+      return { agentId: 'agent_1', setting: 'off', policy: null, lane: null };
+    }) as never;
+    await expect(setSoulColdWake('agent_1', false, fake)).resolves.toEqual({ on: false, lane: null });
+    expect(calls).toEqual([['soul_cold_wake', { agent: 'agent_1', action: 'off' }]]);
+    const refused = (async () => { throw { code: 'cold-wake-failed', message: 'the owner did not approve' }; }) as never;
+    await expect(setSoulColdWake('agent_1', true, refused)).rejects.toMatchObject({ code: 'cold-wake-failed', message: 'the owner did not approve' });
+    const empty = (async () => ({})) as never;
+    await expect(setSoulColdWake('agent_1', true, empty)).rejects.toBeInstanceOf(BridgeError);
+  });
+});
+
+describe('soul population record (#122)', () => {
+  it('keeps the App slug and a recorded sign-in failure, and is null when it cannot say', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => {
+      calls.push([cmd, args]);
+      return { agentId: 'agent_1', appSlug: 'luna-bot', harnessAuth: { status: 'expired', harness: 'claude', since: '2026-10-05T10:00:00Z' } };
+    }) as never;
+    await expect(soulPopulation('agent_1', fake)).resolves.toEqual({
+      agentId: 'agent_1', appSlug: 'luna-bot', harnessAuth: { status: 'expired', harness: 'claude', since: '2026-10-05T10:00:00Z' },
+    });
+    expect(calls).toEqual([['soul_population', { agent: 'agent_1' }]]);
+    await expect(soulPopulation('agent_1', (async () => { throw new Error('no'); }) as never)).resolves.toBeNull();
+    await expect(soulPopulation('agent_1')).resolves.toBeNull();
+  });
+
+  it('drops a malformed sign-in failure or slug', () => {
+    expect(normalizeSoulPopulation({ agentId: 'a', appSlug: '', harnessAuth: { status: 'stale', harness: 'claude' } }))
+      .toEqual({ agentId: 'a', appSlug: null, harnessAuth: null });
+    expect(normalizeSoulPopulation({ agentId: 'a', harnessAuth: { status: 'signed-out', harness: 'codex' } }))
+      .toEqual({ agentId: 'a', appSlug: null, harnessAuth: { status: 'signed-out', harness: 'codex', since: null } });
+    expect(normalizeSoulPopulation({ appSlug: 'x' })).toBeNull();
+  });
+});
+
+describe('harness sign-in for a soul (#122)', () => {
+  it('reads harness auth status with --soul, and is null when it cannot say', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); return { harness: 'claude', loggedIn: true }; }) as never;
+    await expect(harnessSignedIn('claude', 'agent_1', fake)).resolves.toBe(true);
+    expect(calls).toEqual([['harness_auth', { action: 'status', harness: 'claude', soul: 'agent_1' }]]);
+    await expect(harnessSignedIn('claude', 'agent_1', (async () => ({})) as never)).resolves.toBeNull();
+    await expect(harnessSignedIn('claude', 'agent_1')).resolves.toBeNull();
+  });
+
+  it('runs the harness sign-in and rejects with its reason', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); return { harness: 'claude', loggedIn: true }; }) as never;
+    await expect(harnessSignIn('claude', 'agent_1', fake)).resolves.toBe(true);
+    expect(calls).toEqual([['harness_auth', { action: 'login', harness: 'claude', soul: 'agent_1' }]]);
+    const failed = (async () => { throw { code: 'harness-auth-failed', message: 'claude sign-in did not finish' }; }) as never;
+    await expect(harnessSignIn('claude', 'agent_1', failed)).rejects.toMatchObject({ code: 'harness-auth-failed', message: 'claude sign-in did not finish' });
   });
 });

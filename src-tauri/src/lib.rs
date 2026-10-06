@@ -245,6 +245,8 @@ pub fn run() {
             bridge::soul_asides,
             bridge::approvals,
             bridge::audit_list,
+            bridge::soul_cold_wake,
+            bridge::soul_population,
             tray::set_tray_badge,
             updates::update_status,
             updates::update_action,
