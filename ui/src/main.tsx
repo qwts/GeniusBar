@@ -5,7 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { App, type AppMode } from './App';
 import type { CliToolsApi } from './components/CliTools';
 import type { DevTools, HarnessAuth, Starter } from './components/FirstLaunch';
-import { inApp } from './bridge';
+import { inApp, openDesktop } from './bridge';
 import { menuApprovals } from './model/approvals';
 import { useCensus } from './useCensus';
 import { useChat } from './useChat';
@@ -99,13 +99,15 @@ function Live({ snapshot }: { snapshot: SnapshotOptions | null }) {
     install: (replace) => invoke('cli_tools', { action: 'install', replace }),
     uninstall: () => invoke('cli_tools', { action: 'uninstall' }),
   };
-  // The shell's --window flag picks the desktop; the popup is the default.
+  // The shell answers per window (#69): the desktop window and --window draw
+  // the desktop; the popup is the default.
   const [mode, setMode] = useState<AppMode>('tray');
   useEffect(() => { invoke<AppMode>('app_mode').then(setMode, () => {}); }, []);
   return (
     <App mode={mode} census={census} connection={connection} onRefresh={refresh} setup={setup} isStatic={Boolean(snapshot)} select={select}
       onSetup={(migrate) => { void runSetup(migrate); }} existingServices={existing} cliTools={cliTools} chat={snapshot ? undefined : chat} launcher={launcher} starter={starter} harnessAuth={harnessAuth}
       devTools={devTools} openedPackage={openedPackage} updates={updates}
+      onOpenDesktop={inApp() && !snapshot ? () => { void openDesktop().catch(() => {}); } : undefined}
       onRemoveServices={async () => { await invoke('remove_services'); void refresh?.(); }} />
   );
 }

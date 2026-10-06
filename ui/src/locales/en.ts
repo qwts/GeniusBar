@@ -163,6 +163,7 @@ export const en = {
   close: 'Close',
   cancel: 'Cancel',
   checkUpdates: 'Check for Updates…',
+  openDesktop: 'Open desktop',
   refresh: 'Refresh',
   'remove.action': 'Remove services…',
   'remove.label': 'Remove services',
