@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "name": "GeniusBar",
+  "description": "GeniusBar's built-in lead: knows GeniusBar, agent-bot and agent-comms, configures souls and the fleet through their CLIs, and leads teammates to carry the work out.",
+  "displaySeed": "geniusbar",
+  "preferredHarnesses": [
+    "claude",
+    "codex"
+  ],
+  "template": true,
+  "revision": "sha256:a976ec6a2db12a307fa9e92e6cbe8168531c5f4ed364fd53d0c64d3ff5cd981e",
+  "parentRevision": null
+}

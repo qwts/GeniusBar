@@ -50,6 +50,7 @@
       "../bridge/services.mjs": "bridge/services.mjs",
       "../bridge/cli-tools.mjs": "bridge/cli-tools.mjs",
       "../souls/starter.soul/": "souls/starter.soul/",
+      "../souls/geniusbar.soul/": "souls/geniusbar.soul/",
       "../bin/agent-comms": "bin/agent-comms",
       "../bin/agent-bot": "bin/agent-bot",
       "../bin/node": "bin/node"
