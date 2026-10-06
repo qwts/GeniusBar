@@ -1,6 +1,6 @@
 // The fixed fake census and health from R1's snapshot test, for tests and
 // for previewing the popup before the bridge (#7) supplies real rows.
-import type { SoulColdWake, SoulMode, SoulModel, SoulPopulation } from '../bridge';
+import type { SoulColdWake, SoulMode, SoulModel, SoulPopulation, SoulTemplateList } from '../bridge';
 import type { AuditRecord } from './audit';
 import type { CensusRow } from './census';
 import type { PauseEntry } from './pause';
@@ -206,3 +206,20 @@ export const samplePaused: readonly PauseEntry[] = [
   { agentId: 'agent_c', managed: true, paused: false, status: 'active' },
   { agentId: 'agent_gone', managed: true, paused: true, status: 'retired' },
 ];
+
+/**
+ * agent-bot `soul templates --json` for the launch form's soul picker (#65):
+ * three templates, then "Custom soul" (preview and tests).
+ */
+export const sampleTemplates: SoulTemplateList = {
+  templates: [
+    { name: 'Coder', description: 'Writes and reviews code in your repositories.', preferredHarnesses: ['claude', 'opencode'], defaultHarness: 'claude',
+      package: '/Users/user/Souls/Coder.soul', revision: null, source: 'souls-root' },
+    { name: 'Researcher', description: 'Reads the web and your files, then reports back.', preferredHarnesses: ['opencode'], defaultHarness: 'opencode',
+      package: '/Users/user/Souls/Researcher.soul', revision: null, source: 'souls-root' },
+    { name: 'Starter', description: 'A first companion that answers questions about this Mac.', preferredHarnesses: [], defaultHarness: null,
+      package: '/Applications/GeniusBar.app/Contents/Resources/components/agent-bot/souls/Starter.soul', revision: null, source: 'bundled' },
+  ],
+  soulsRoot: '/Users/user/Souls',
+  errors: [],
+};

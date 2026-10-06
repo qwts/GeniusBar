@@ -1,7 +1,9 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { I18nProvider } from '../lib/i18n';
 import type { CensusRow } from '../model/census';
+import { BridgeError, type SoulTemplateList } from '../bridge';
+import { sampleTemplates } from '../model/fixtures';
 import type { LaunchState } from '../model/launch';
 import type { LaunchApi } from '../useLaunch';
 import { LaunchForm } from './LaunchForm';
@@ -140,5 +142,113 @@ describe('LaunchForm prefill from an opened package (#120)', () => {
   it('keeps the default harness when the package prefers none the app offers', () => {
     render(form(launcherIn({ phase: 'idle' }), { initialPackagePath: '/souls/helper.soul', preferredHarnesses: ['nonesuch'] }));
     expect((screen.getByLabelText('Harness') as HTMLSelectElement).value).toBe('claude');
+  });
+});
+
+describe('LaunchForm soul templates (#65)', () => {
+  const listed = async () => sampleTemplates;
+  const radios = () => screen.getAllByRole('radio') as HTMLButtonElement[];
+  const checked = () => radios().find((r) => r.getAttribute('aria-checked') === 'true')?.textContent;
+  const picker = async () => screen.findByRole('radiogroup', { name: 'Soul' });
+
+  it('offers each template, then "Custom soul", with the first chosen', async () => {
+    render(form(launcherIn({ phase: 'idle' }), { harnesses: ['claude', 'opencode'], listTemplates: listed }));
+    await picker();
+    expect(radios().map((r) => r.textContent)).toEqual(['Coder', 'Researcher', 'Starter', 'Custom soul']);
+    expect(checked()).toBe('Coder');
+    expect(screen.getByText('Writes and reviews code in your repositories.')).toBeTruthy();
+    expect(screen.queryByLabelText('Package')).toBeNull();
+  });
+
+  it('launches the chosen template\'s package with its default harness', async () => {
+    const launcher = launcherIn({ phase: 'idle' });
+    render(form(launcher, { harnesses: ['claude'], listTemplates: listed }));
+    await picker();
+    fireEvent.click(screen.getByRole('radio', { name: 'Researcher' }));
+    expect(screen.getByText('Reads the web and your files, then reports back.')).toBeTruthy();
+    expect((screen.getByLabelText('Harness') as HTMLSelectElement).value).toBe('opencode');
+    fireEvent.submit(screen.getByRole('form'));
+    expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ target: { package: '/Users/user/Souls/Researcher.soul' }, harness: 'opencode' }));
+  });
+
+  it('keeps the owner\'s harness and falls back to the default for a template with none', async () => {
+    const launcher = launcherIn({ phase: 'idle' });
+    render(form(launcher, { harnesses: ['claude', 'opencode'], listTemplates: listed }));
+    await picker();
+    fireEvent.click(screen.getByRole('radio', { name: 'Starter' }));
+    expect((screen.getByLabelText('Harness') as HTMLSelectElement).value).toBe('claude');
+    fireEvent.change(screen.getByLabelText('Harness'), { target: { value: 'muse' } });
+    fireEvent.click(screen.getByRole('radio', { name: 'Researcher' }));
+    expect((screen.getByLabelText('Harness') as HTMLSelectElement).value).toBe('muse');
+  });
+
+  it('"Custom soul" shows the package path field and launches the typed path', async () => {
+    const launcher = launcherIn({ phase: 'idle' });
+    render(form(launcher, { listTemplates: listed }));
+    await picker();
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom soul' }));
+    const path = screen.getByLabelText('Package') as HTMLInputElement;
+    expect(path.value).toBe('');
+    fireEvent.change(path, { target: { value: '/souls/mine.soul/' } });
+    fireEvent.submit(screen.getByRole('form'));
+    expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ target: { package: '/souls/mine.soul' } }));
+  });
+
+  it('starts on "Custom soul" for a package opened from Finder', async () => {
+    const launcher = launcherIn({ phase: 'idle' });
+    render(form(launcher, { initialPackagePath: '/souls/helper.soul', packageDescription: 'Answers questions.', listTemplates: listed }));
+    await picker();
+    expect(checked()).toBe('Custom soul');
+    expect((screen.getByLabelText('Package') as HTMLInputElement).value).toBe('/souls/helper.soul');
+    expect(screen.getByText('Answers questions.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: 'Coder' }));
+    expect(screen.queryByText('Answers questions.')).toBeNull();
+  });
+
+  it('moves the selection with the arrow keys', async () => {
+    render(form(launcherIn({ phase: 'idle' }), { listTemplates: listed }));
+    const group = await picker();
+    screen.getByRole('radio', { name: 'Coder' }).focus();
+    fireEvent.keyDown(group, { key: 'ArrowRight' });
+    expect(checked()).toBe('Researcher');
+    expect(document.activeElement?.textContent).toBe('Researcher');
+    fireEvent.keyDown(group, { key: 'End' });
+    expect(checked()).toBe('Custom soul');
+    fireEvent.keyDown(group, { key: 'ArrowDown' });
+    expect(checked()).toBe('Coder');
+    fireEvent.keyDown(group, { key: 'ArrowLeft' });
+    expect(checked()).toBe('Custom soul');
+    expect(screen.getByLabelText('Package')).toBeTruthy();
+  });
+
+  it('notes templates agent-bot could not read', async () => {
+    const lister = async () => ({ ...sampleTemplates, errors: [{ package: '/souls/Bad.soul', message: 'soul.json is missing' }] });
+    render(form(launcherIn({ phase: 'idle' }), { listTemplates: lister }));
+    await picker();
+    expect(screen.getByText('Some soul templates could not be read.').getAttribute('title')).toBe('/souls/Bad.soul: soul.json is missing');
+  });
+
+  it('keeps today\'s form on an agent-bot without soul templates, or with none listed', async () => {
+    for (const lister of [
+      vi.fn(async (): Promise<SoulTemplateList> => { throw new BridgeError('soul-templates-unsupported', 'no soul templates'); }),
+      vi.fn(async (): Promise<SoulTemplateList> => ({ templates: [], soulsRoot: '/souls', errors: [] })),
+    ]) {
+      const launcher = launcherIn({ phase: 'idle' });
+      render(form(launcher, { listTemplates: lister }));
+      await waitFor(() => expect(lister).toHaveBeenCalled());
+      await Promise.resolve();
+      expect(screen.queryByRole('radiogroup')).toBeNull();
+      fireEvent.change(screen.getByLabelText('Package'), { target: { value: '/souls/a.soul' } });
+      fireEvent.submit(screen.getByRole('form'));
+      expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ target: { package: '/souls/a.soul' } }));
+      cleanup();
+    }
+  });
+
+  it('never lists templates to relaunch an existing companion', () => {
+    const lister = vi.fn(listed);
+    render(form(launcherIn({ phase: 'idle' }), { soul: starter, listTemplates: lister }));
+    expect(lister).not.toHaveBeenCalled();
+    expect(screen.queryByRole('radiogroup')).toBeNull();
   });
 });

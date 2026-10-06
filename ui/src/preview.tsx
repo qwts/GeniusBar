@@ -18,7 +18,9 @@
 // samplePaused, and &paused=1 starts with luna paused so the chip shows;
 // Details (and ⓘ) show the Computer use row from samplePopulation (scout's
 // is off), and with &dudle=… the quick menu's "Toggle computer use" flips
-// the lead's (luna's), as agent-bot `soul computer-use` would:
+// the lead's (luna's), as agent-bot `soul computer-use` would; Launch… shows
+// the soul picker with sampleTemplates' three templates and "Custom soul"
+// (&templates=0 shows the form an agent-bot without `soul templates` gives):
 // the app on the fixed fixtures, without Tauri. Not part of the build.
 import { StrictMode, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -30,8 +32,9 @@ import { AuditSourceContext, type AuditSource } from './components/AuditLog';
 import { SoulSourceContext, type SoulSource } from './components/SoulNotices';
 import type { CensusRow } from './model/census';
 import { emptyChat, emptyComposer, mergeIncoming, type ChatState } from './model/chat';
-import { inboxMessage, sampleApprovals, sampleAudit, sampleBadges, sampleCensus, sampleColdWake, sampleConnection, sampleFloating, sampleModels, sampleModes, sampleOpenedPackages, samplePaused, samplePopulation, sampleSessionEntries } from './model/fixtures';
+import { inboxMessage, sampleApprovals, sampleAudit, sampleBadges, sampleCensus, sampleColdWake, sampleConnection, sampleFloating, sampleModels, sampleModes, sampleOpenedPackages, samplePaused, samplePopulation, sampleSessionEntries, sampleTemplates } from './model/fixtures';
 import type { Pauser } from './usePause';
+import type { TemplateLister } from './useSoulTemplates';
 import type { ChatApi } from './useChat';
 import '@fontsource/ibm-plex-sans/latin-400.css';
 import '@fontsource/ibm-plex-sans/latin-500.css';
@@ -160,10 +163,12 @@ function Preview() {
       resume: async (agentId) => set(agentId, false),
     };
   }, []);
+  // The launch form's soul picker (#65), as agent-bot `soul templates` would list it.
+  const templateLister = useMemo<TemplateLister | undefined>(() => (params.get('templates') === '0' ? undefined : async () => sampleTemplates), []);
   const opened = params.get('open');
   const fixture = opened === 'copy' || opened === 'described' ? sampleOpenedPackages[opened] : null;
   const openedPackage = opened ? { id: 1, checking: false, error: null, path: opened, ...fixture } : undefined;
-  const app = <App mode={mode} select={params.get('select')} openedPackage={openedPackage} census={souls} badges={floating ? { ...sampleBadges, computerUse: driving ?? floating.computerUse, busy: floating.busy } : sampleBadges} stopper={stopper} pauser={pauser} computerUseSwitch={computerUseSwitch} floatingButton={floating !== null} archiver={archiver} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}
+  const app = <App mode={mode} select={params.get('select')} openedPackage={openedPackage} census={souls} badges={floating ? { ...sampleBadges, computerUse: driving ?? floating.computerUse, busy: floating.busy } : sampleBadges} stopper={stopper} pauser={pauser} computerUseSwitch={computerUseSwitch} templateLister={templateLister} floatingButton={floating !== null} archiver={archiver} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}
     onRefresh={() => {}} onRemoveServices={async () => {}} updates={{ status: { state: 'idle', version: null }, act: () => {} }}
     launcher={{ state: { phase: 'idle' }, launch: async () => {}, reset: () => {} }} />;
   // The tray popup is a fixed 384×560 window (tauri.conf.json).

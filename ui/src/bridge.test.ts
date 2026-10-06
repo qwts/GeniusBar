@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BridgeError, call, openDesktop, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported, normalizeSoulComputerUse, soulComputerUse, soulComputerUseSupported, liveComputerUse } from './bridge';
+import { BridgeError, call, openDesktop, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported, normalizeSoulComputerUse, soulComputerUse, soulComputerUseSupported, liveComputerUse, listSoulTemplates, normalizeSoulTemplates } from './bridge';
 
 describe('bridge', () => {
   it('invokes the shell command with the method and params', async () => {
@@ -550,5 +550,42 @@ describe('soul computer-use (#122, agent-bot-identity #482)', () => {
   it('offers nothing outside the app', async () => {
     await expect(liveComputerUse.supported()).resolves.toBe(false);
     await expect(liveComputerUse.read('agent_1')).resolves.toBeNull();
+  });
+});
+
+describe('soul templates (#65)', () => {
+  const row = { name: 'Coder', description: 'Writes code.', preferredHarnesses: ['claude', 7], defaultHarness: 'claude',
+    package: '/souls/Coder.soul', revision: 'r1', source: 'config' };
+
+  it('normalizes agent-bot\'s listing, dropping malformed rows', () => {
+    expect(normalizeSoulTemplates({
+      templates: [row, { ...row }, { ...row, package: 'relative.soul' }, { ...row, name: ' ', package: '/souls/x.soul' },
+        { name: 'Bare', package: '/souls/Bare.soul', defaultHarness: '', source: 'elsewhere' }, null],
+      soulsRoot: '/souls',
+      errors: [{ package: '/souls/Bad.soul', message: 'soul.json is missing' }, { message: 'teams.template must be absolute' }, 'x'],
+    })).toEqual({
+      templates: [
+        { name: 'Coder', description: 'Writes code.', preferredHarnesses: ['claude'], defaultHarness: 'claude', package: '/souls/Coder.soul', revision: 'r1', source: 'config' },
+        { name: 'Bare', description: '', preferredHarnesses: [], defaultHarness: null, package: '/souls/Bare.soul', revision: null, source: 'souls-root' },
+      ],
+      soulsRoot: '/souls',
+      errors: [{ package: '/souls/Bad.soul', message: 'soul.json is missing' }, { package: null, message: 'teams.template must be absolute' }],
+    });
+    expect(normalizeSoulTemplates({ soulsRoot: '/souls' })).toBeNull();
+    expect(normalizeSoulTemplates(null)).toBeNull();
+  });
+
+  it('lists through the shell, keeping its error code', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); return { templates: [row], soulsRoot: '/souls', errors: [] }; }) as never;
+    await expect(listSoulTemplates(fake)).resolves.toMatchObject({ templates: [{ name: 'Coder' }] });
+    expect(calls).toEqual([['list_soul_templates', undefined]]);
+    const old = (async () => { throw { code: 'soul-templates-unsupported', message: 'this agent-bot has no soul templates' }; }) as never;
+    await expect(listSoulTemplates(old)).rejects.toMatchObject({ code: 'soul-templates-unsupported' });
+    await expect(listSoulTemplates((async () => ({ nope: true })) as never)).rejects.toMatchObject({ code: 'soul-templates-failed' });
+  });
+
+  it('is unsupported outside the app', async () => {
+    await expect(listSoulTemplates()).rejects.toMatchObject({ code: 'soul-templates-unsupported' });
   });
 });

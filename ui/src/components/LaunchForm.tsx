@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { displayName, type CensusRow } from '../model/census';
 import { canLaunch, harnessOptions, MAX_HARNESS, normalPackagePath, preferredHarness, prefillHarness, suggestedName, type LaunchState } from '../model/launch';
 import { useI18n } from '../lib/i18n';
+import { chosenTemplate, CUSTOM_SOUL, initialChoice } from '../model/templates';
 import type { LaunchApi } from '../useLaunch';
+import { useSoulTemplates, type TemplateLister } from '../useSoulTemplates';
 import { ModelField } from './ModelField';
 
 interface LaunchFormProps {
@@ -47,6 +49,13 @@ interface LaunchFormProps {
    * offers; without it the field offers the default and "Other…" only.
    */
   roster?: readonly CensusRow[];
+  /**
+   * Lists agent-bot's soul templates (#65), offered as the design's soul
+   * choices beside "Custom soul" when the form launches a package. Without
+   * it, or on an agent-bot without `soul templates`, the form has the
+   * package path field alone.
+   */
+  listTemplates?: TemplateLister;
 }
 
 export function LaunchStatus({ state }: { state: LaunchState }) {
@@ -80,6 +89,24 @@ export function LaunchStatus({ state }: { state: LaunchState }) {
 }
 
 const OTHER = '__other';
+
+/** Arrow keys, Home and End move the selection in a radiogroup (the design's a11y helper). */
+function radioGroupKeys(e: KeyboardEvent<HTMLElement>) {
+  const keys = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'];
+  if (!keys.includes(e.key)) return;
+  const radios = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]:not([disabled])'));
+  if (!radios.length) return;
+  e.preventDefault();
+  const i = Math.max(0, radios.indexOf(document.activeElement as HTMLElement));
+  const n = radios.length;
+  const next = e.key === 'Home' ? 0 : e.key === 'End' ? n - 1
+    : e.key === 'ArrowRight' || e.key === 'ArrowDown' ? (i + 1) % n : (i - 1 + n) % n;
+  radios[next]?.focus();
+  radios[next]?.click();
+}
+const radio = 'min-h-9 rounded-md border px-2 py-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring';
+const radioOn = 'border-primary bg-primary/10 text-foreground';
+const radioOff = 'border-border text-muted-foreground hover:bg-accent';
 const legend = 'mb-2 font-mono text-[11px] font-semibold uppercase tracking-wide text-muted-foreground';
 const field = 'h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm text-foreground';
 
@@ -92,12 +119,24 @@ const field = 'h-9 w-full rounded-md border border-input bg-transparent px-3 tex
  * One launch at a time; the result stays on screen and is never retried.
  */
 export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness = null, initialPackagePath = '', packageName, preferredHarnesses,
-  packageDescription, copyOf, checkingPackage = false, packageError: initialPackageError = null, initialComms, onCancel, onLaunched, roster = [] }: LaunchFormProps) {
+  packageDescription, copyOf: openedCopyOf, checkingPackage: checkingOpened = false, packageError: initialPackageError = null, initialComms, onCancel, onLaunched,
+  roster = [], listTemplates }: LaunchFormProps) {
   const { t } = useI18n();
+  // The design's soul choices (#65): agent-bot's templates, then "Custom
+  // soul", which is the package path field. Asked once; never waited on.
+  const { templates, supported: templatesListed, error: templateError } = useSoulTemplates(soul ? undefined : listTemplates);
+  const picker = !soul && templatesListed && templates.length > 0;
+  const [choice, setChoice] = useState<string | null>(null);
   const [account, setAccount] = useState(soul?.account ?? (accounts.length === 1 ? accounts[0] : ''));
   const [otherAccount, setOtherAccount] = useState(!soul && accounts.length === 0);
   const [packagePath, setPackagePath] = useState(() => normalPackagePath(initialPackagePath));
   const [packageError, setPackageError] = useState(initialPackageError);
+  const selected = picker ? choice ?? initialChoice(templates, packagePath, Boolean(initialPackagePath || openedCopyOf)) : CUSTOM_SOUL;
+  const template = chosenTemplate(templates, selected);
+  const custom = template === null;
+  // What the opened package says applies to "Custom soul" only; a template is its own package.
+  const copyOf = custom ? openedCopyOf : undefined;
+  const checkingPackage = custom && checkingOpened;
   const packageHarness = soul ? null : preferredHarness(preferredHarnesses, harnesses);
   // The package's own preference wins over the viewer's default (#120).
   const [harness, setHarness] = useState(prefillHarness(soul?.harness, packageHarness, defaultHarness));
@@ -115,8 +154,14 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
     if (!soul && !copyOf && !touched.name) setName(suggestedName(packageName));
   }, [packageName]);
   useEffect(() => {
-    if (!soul && !touched.harness && packageHarness) setHarness(packageHarness);
+    if (!soul && !touched.harness && packageHarness && custom) setHarness(packageHarness);
   }, [packageHarness]);
+  // A template's default harness is prefilled like a package's (#65), until the owner picks one.
+  const templateHarness = template?.defaultHarness ?? null;
+  useEffect(() => {
+    if (!picker || touched.harness) return;
+    setHarness(prefillHarness(templateHarness, custom ? packageHarness : null, defaultHarness));
+  }, [selected, picker]);
   // Follows the soul's setting as it arrives, until the owner changes it here.
   const [chosenComms, setComms] = useState<boolean | undefined>(undefined);
   const comms = chosenComms ?? initialComms ?? (soul ? undefined : true);
@@ -136,7 +181,8 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
   const what = soul ? displayName(soul) : t('launch.aPackage');
   // A copy launches only under a new name; the daemon refuses it unnamed.
   const needsName = Boolean(copyOf && !soul) && name.trim() === '';
-  const options = harnessOptions(harnesses, soul?.harness, defaultHarness);
+  const options = harnessOptions(harnesses, soul?.harness, templateHarness, defaultHarness);
+  const pathError = custom ? packageError : null;
 
   useEffect(() => setPackageError(initialPackageError), [initialPackageError]);
 
@@ -146,13 +192,13 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
       aria-label={t('launch.formLabel', { what })}
       onSubmit={(e) => {
         e.preventDefault();
-        if (!ready || checkingPackage || packageError || needsName) return;
+        if (!ready || checkingPackage || pathError || needsName) return;
         setStarted(true);
         const path = normalPackagePath(packagePath);
-        if (!soul) setPackagePath(path);
+        if (!soul && custom) setPackagePath(path);
         void launcher.launch({
           account,
-          target: soul ? { soul: soul.agentId } : { package: path },
+          target: soul ? { soul: soul.agentId } : { package: template ? template.package : path },
           harness,
           name: soul ? '' : name,
           ...(comms === undefined ? {} : { comms }),
@@ -162,12 +208,29 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
     >
       <fieldset>
         <legend className={legend}>{t('launch.step.what')}</legend>
-        {/* TODO(#65): offer SOP-provided soul templates (the design's presets) once agent-bot lists them. */}
+        {picker && (
+          <div role="radiogroup" aria-label={t('launch.template')} onKeyDown={radioGroupKeys} className="grid grid-cols-3 gap-1.5">
+            {templates.map((tp) => (
+              <button key={tp.package} type="button" role="radio" aria-checked={selected === tp.package} tabIndex={selected === tp.package ? 0 : -1}
+                title={tp.description || undefined} onClick={() => setChoice(tp.package)}
+                className={`${radio} ${selected === tp.package ? radioOn : radioOff}`}>
+                {tp.name}
+              </button>
+            ))}
+            <button type="button" role="radio" aria-checked={custom} tabIndex={custom ? 0 : -1} onClick={() => setChoice(CUSTOM_SOUL)}
+              className={`${radio} ${custom ? radioOn : radioOff}`}>
+              {t('launch.custom')}
+            </button>
+          </div>
+        )}
+        {picker && template?.description && <p className="text-xs text-muted-foreground">{template.description}</p>}
+        {picker && templateError && <p className="text-xs text-muted-foreground" title={templateError}>{t('launch.templateErrors')}</p>}
         {soul ? (
           <p className="text-sm font-medium">{displayName(soul)}</p>
-        ) : (
+        ) : custom && (
           <input value={packagePath} aria-label={t('launch.package')} placeholder={t('launch.packagePlaceholder')} className={field}
             onChange={(e) => {
+              if (picker) setChoice(CUSTOM_SOUL);
               setPackagePath(e.target.value);
               setPackageError(null);
             }}
@@ -185,7 +248,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
         {!soul && copyOf && (
           <p id="launch-copy-hint" className="text-xs text-muted-foreground">{t('launch.copyHint', { name: copyOf.name || copyOf.agentId })}</p>
         )}
-        {!soul && packageDescription && <p className="text-xs text-muted-foreground">{packageDescription}</p>}
+        {!soul && custom && packageDescription && <p className="text-xs text-muted-foreground">{packageDescription}</p>}
       </fieldset>
       <fieldset>
         <legend className={legend}>{t('launch.step.harness')}</legend>
@@ -248,14 +311,14 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
         </fieldset>
       )}
       {checkingPackage && <p className="muted small" role="status">{t('launch.checking')}</p>}
-      {packageError && <p className="error small" role="alert">{packageError}</p>}
+      {pathError && <p className="error small" role="alert">{pathError}</p>}
       {started ? <LaunchStatus state={launcher.state} />
         : !ready && <p className="muted small">{t('launch.busy')}</p>}
       <div className="flex items-center justify-end gap-2 pt-1">
         {onCancel && (
           <button type="button" onClick={onCancel} className="h-9 rounded-md px-4 text-sm font-medium hover:bg-accent">{t('cancel')}</button>
         )}
-        <button type="submit" disabled={!ready || checkingPackage || Boolean(packageError) || needsName}
+        <button type="submit" disabled={!ready || checkingPackage || Boolean(pathError) || needsName}
           className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
           {t('launch.go')}
         </button>

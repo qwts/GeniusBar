@@ -405,6 +405,7 @@ pub fn run() {
             bridge::soul_pause_probe,
             bridge::soul_computer_use,
             bridge::soul_computer_use_probe,
+            bridge::list_soul_templates,
             bridge::soul_remove,
             bridge::daemon_status,
             bridge::services_installed,

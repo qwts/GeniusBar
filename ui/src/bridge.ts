@@ -789,3 +789,77 @@ export function computerUseSupported(sw: ComputerUseSwitch): Promise<boolean> {
   }
   return probe;
 }
+
+/**
+ * One soul template from agent-bot's `soul templates --json` (#65,
+ * agent-bot-identity #374): a local package the launch form offers as a
+ * preset. Launching it is launching `package`, as a typed path would.
+ */
+export interface SoulTemplate {
+  name: string;
+  description: string;
+  preferredHarnesses: string[];
+  /** The first preferred harness, or null. */
+  defaultHarness: string | null;
+  /** Absolute package path. */
+  package: string;
+  revision: string | null;
+  source: 'souls-root' | 'config' | 'bundled';
+}
+
+export interface SoulTemplateList {
+  templates: SoulTemplate[];
+  soulsRoot: string | null;
+  /** Packages agent-bot could not read; the listing still answers. */
+  errors: { package: string | null; message: string }[];
+}
+
+const TEMPLATE_SOURCES: readonly SoulTemplate['source'][] = ['souls-root', 'config', 'bundled'];
+
+/**
+ * Keeps only well-formed templates (a name and an absolute package, once
+ * each), in agent-bot's order; null when the answer is not a listing.
+ */
+export function normalizeSoulTemplates(raw: unknown): SoulTemplateList | null {
+  if (!isRecord(raw) || !Array.isArray(raw.templates)) return null;
+  const templates: SoulTemplate[] = [];
+  for (const row of raw.templates) {
+    if (!isRecord(row) || typeof row.name !== 'string' || row.name.trim() === '' || typeof row.package !== 'string'
+      || !row.package.startsWith('/') || templates.some((t) => t.package === row.package)) continue;
+    const preferred = Array.isArray(row.preferredHarnesses)
+      ? row.preferredHarnesses.filter((h): h is string => typeof h === 'string' && h.trim() !== '') : [];
+    const harness = typeof row.defaultHarness === 'string' && row.defaultHarness.trim() !== '' ? row.defaultHarness : null;
+    templates.push({
+      name: row.name,
+      description: typeof row.description === 'string' ? row.description : '',
+      preferredHarnesses: preferred,
+      defaultHarness: harness,
+      package: row.package,
+      revision: typeof row.revision === 'string' ? row.revision : null,
+      source: TEMPLATE_SOURCES.includes(row.source as SoulTemplate['source']) ? row.source as SoulTemplate['source'] : 'souls-root',
+    });
+  }
+  const errors = Array.isArray(raw.errors) ? raw.errors.flatMap((e) => (isRecord(e) && typeof e.message === 'string'
+    ? [{ package: typeof e.package === 'string' ? e.package : null, message: e.message }] : [])) : [];
+  return { templates, soulsRoot: typeof raw.soulsRoot === 'string' ? raw.soulsRoot : null, errors };
+}
+
+/**
+ * The soul templates agent-bot lists. Rejects with a BridgeError;
+ * `soul-templates-unsupported` means the bundled agent-bot has no
+ * `soul templates` (and is what a plain browser or a test gets).
+ */
+export async function listSoulTemplates(invokeImpl: typeof invoke = invoke): Promise<SoulTemplateList> {
+  if (!inApp() && invokeImpl === invoke) throw new BridgeError('soul-templates-unsupported', 'not in the app');
+  let raw: unknown;
+  try {
+    raw = await invokeImpl<unknown>('list_soul_templates');
+  } catch (error) {
+    const e = error as { code?: unknown; message?: unknown };
+    throw new BridgeError(typeof e?.code === 'string' ? e.code : 'soul-templates-failed',
+      typeof e?.message === 'string' ? e.message : String(error));
+  }
+  const result = normalizeSoulTemplates(raw);
+  if (!result) throw new BridgeError('soul-templates-failed', 'agent-bot gave no soul templates');
+  return result;
+}
