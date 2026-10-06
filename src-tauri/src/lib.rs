@@ -78,6 +78,15 @@ fn flag_value<'a>(arg: &'a str, next: Option<&'a str>, flag: &str) -> Option<&'a
 }
 
 impl Mode {
+    /// Whether this launch takes the single-instance lock (#61). The tray
+    /// app and `--window` do, so a second launch shows the running copy
+    /// instead of starting another tray item and bridge. A snapshot does
+    /// not: test tooling runs one beside the tray app with `open -n`, and
+    /// it must neither be turned away nor take the lock from the tray app.
+    pub fn single_instance(&self) -> bool {
+        !matches!(self, Mode::Snapshot(_))
+    }
+
     /// The name the web view branches on: the popup, or the desktop. A
     /// snapshot draws the popup, so it names that.
     pub fn as_str(&self) -> &'static str {
@@ -133,6 +142,44 @@ fn toggle_popup(window: &WebviewWindow) {
         let _ = window.show();
         let _ = window.set_focus();
     }
+}
+
+/// Brings the main window forward: the popup under the tray item in tray
+/// mode, the desktop window as it is otherwise.
+fn reveal_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    if *app.state::<Mode>() == Mode::Tray {
+        let _ = window.move_window(Position::TrayCenter);
+    }
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+/// Queues the `.soul` packages among `urls` for the web view and shows
+/// the window that will offer them. Other files are ignored.
+fn open_soul_packages<R: tauri::Runtime>(app: &tauri::AppHandle<R>, urls: &[tauri::Url]) {
+    let opened = app
+        .state::<soul_package::PendingSoulPackages>()
+        .enqueue_urls(urls);
+    if !opened.is_empty() {
+        let _ = app.emit("soul-package-opened", ());
+        reveal_main_window(app);
+    }
+}
+
+/// A second launch of the tray app or `--window` (#61): the running copy
+/// shows itself and takes any `.soul` package named on the second launch's
+/// command line; the plugin then exits the second copy.
+fn on_second_instance<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    argv: Vec<String>,
+    cwd: String,
+) {
+    let urls = soul_package::argv_urls(argv.iter().skip(1), std::path::Path::new(&cwd));
+    open_soul_packages(app, &urls);
+    reveal_main_window(app);
 }
 
 fn show_window_mode(app: &mut App, window: &WebviewWindow) -> tauri::Result<()> {
@@ -210,13 +257,19 @@ fn start_snapshot(app: &mut App, window: &WebviewWindow) {
 
 pub fn run() {
     let mode = parse_mode(std::env::args().skip(1));
-    let tray_mode = mode == Mode::Tray;
     let snapshot_mode = matches!(mode, Mode::Snapshot(_));
     let snapshot = match &mode {
         Mode::Snapshot(request) => Some(request.clone()),
         _ => None,
     };
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+    // The single-instance plugin must be registered before any other.
+    if mode.single_instance() {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            on_second_instance(app, argv, cwd)
+        }));
+    }
+    builder
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_shell::init())
         .manage(bridge::Bridge::default())
@@ -282,19 +335,7 @@ pub fn run() {
             // Finder meanwhile is left for the next normal launch.
             #[cfg(target_os = "macos")]
             if let (false, RunEvent::Opened { urls }) = (snapshot_mode, &event) {
-                let opened = app
-                    .state::<soul_package::PendingSoulPackages>()
-                    .enqueue_urls(urls);
-                if !opened.is_empty() {
-                    let _ = app.emit("soul-package-opened", ());
-                    if let Some(window) = app.get_webview_window("main") {
-                        if tray_mode {
-                            let _ = window.move_window(Position::TrayCenter);
-                        }
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
-                }
+                open_soul_packages(app, urls);
             }
             if let RunEvent::Exit = event {
                 bridge::stop(app);
@@ -389,5 +430,16 @@ mod tests {
         );
         // Lookalike flags are not these flags.
         assert_eq!(parse_mode(["--snapshots", "a.png"]), Mode::Tray);
+    }
+
+    #[test]
+    fn only_a_snapshot_skips_the_single_instance_guard() {
+        assert!(parse_mode(Vec::<String>::new()).single_instance());
+        assert!(parse_mode(["--window"]).single_instance());
+        assert!(!parse_mode(["--snapshot", "a.png"]).single_instance());
+        assert!(!parse_mode(["--window", "--snapshot", "a.png"]).single_instance());
+        assert!(
+            !parse_mode(["--snapshot", "a.png", "--snapshot-detail", "agent_1"]).single_instance()
+        );
     }
 }
