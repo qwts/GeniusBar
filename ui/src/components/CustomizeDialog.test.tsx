@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BridgeError, type SoulProfile, type SoulProfileFile } from '../bridge';
 import { sampleCensus, sampleProfile, sampleProfileFiles } from '../model/fixtures';
 import { ProfileSourceContext, type ProfileSource } from '../useSoulProfile';
-import { CustomizeDialog } from './CustomizeDialog';
+import { CustomizeDialog, type SaveRevision } from './CustomizeDialog';
 
 afterEach(cleanup);
 
@@ -18,13 +18,15 @@ function source(overrides: Partial<ProfileSource> = {}): ProfileSource {
   };
 }
 
-function open(s: ProfileSource, onClose = vi.fn(), wrap = (node: ReactNode) => node) {
-  render(<ProfileSourceContext.Provider value={s}>{wrap(<CustomizeDialog soul={luna} onClose={onClose} />)}</ProfileSourceContext.Provider>);
+function open(s: ProfileSource, onClose = vi.fn(), wrap = (node: ReactNode) => node, save?: SaveRevision) {
+  render(<ProfileSourceContext.Provider value={s}>{wrap(<CustomizeDialog soul={luna} onClose={onClose} save={save} />)}</ProfileSourceContext.Provider>);
   return { onClose, dialog: screen.getByRole('dialog') };
 }
 
+const REVISION = 'sha256:4be1c0ffee5a9d8e7f6a5b4c3d2e1f00112233445566778899aabbccddeeff00';
+
 describe('CustomizeDialog (#64)', () => {
-  it('is named by its heading and shows the profile read-only, with no Save', async () => {
+  it('is named by its heading and shows the profile, Save off until something changes', async () => {
     const s = source();
     const { dialog } = open(s);
     expect(await screen.findByRole('dialog', { name: 'Luna' })).toBe(dialog);
@@ -33,15 +35,16 @@ describe('CustomizeDialog (#64)', () => {
     expect(within(dialog).getByRole('tab', { name: 'Profile' }).getAttribute('aria-selected')).toBe('true');
     const name = within(dialog).getByLabelText('Name') as HTMLInputElement;
     expect(name.value).toBe('Luna');
-    expect(name.disabled && name.readOnly).toBe(true);
+    expect(name.disabled).toBe(false);
     const role = within(dialog).getByLabelText('Role') as HTMLInputElement;
     expect(role.disabled).toBe(true);
     const description = within(dialog).getByLabelText('Description') as HTMLTextAreaElement;
     expect(description.value).toBe(sampleProfile.profile.description);
-    expect(description.disabled).toBe(true);
+    expect(description.disabled).toBe(false);
+    expect((within(dialog).getByLabelText('Why') as HTMLInputElement).value).toBe('Edited in GeniusBar');
     expect(within(dialog).getByText('/Users/user/Souls/Luna.soul')).toBeTruthy();
     expect(within(dialog).getByText('2026.10.1')).toBeTruthy();
-    expect(within(dialog).queryByRole('button', { name: 'Save' })).toBeNull();
+    expect((within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
     expect(within(dialog).queryByText('Color')).toBeNull();
   });
 
@@ -160,5 +163,101 @@ describe('CustomizeDialog (#64)', () => {
     fireEvent.keyDown(within(dialog).getByRole('tab', { name: 'Profile' }), { key: 'ArrowRight' });
     await waitFor(() => expect(within(dialog).getByRole('tab', { name: 'Context' }).getAttribute('aria-selected')).toBe('true'));
     expect(document.activeElement).toBe(within(dialog).getByRole('tab', { name: 'Context' }));
+  });
+
+  it('saves only what changed, as one revision with the reason', async () => {
+    const s = source();
+    const save = vi.fn<SaveRevision>(async () => ({ revision: REVISION }));
+    const { dialog } = open(s, vi.fn(), undefined, save);
+    const name = await within(dialog).findByDisplayValue('Luna');
+    const button = within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement;
+    fireEvent.change(name, { target: { value: 'Nova ' } });
+    expect(button.disabled).toBe(false);
+    // Typing it back is clean again.
+    fireEvent.change(name, { target: { value: 'Luna' } });
+    expect(button.disabled).toBe(true);
+    fireEvent.change(name, { target: { value: 'Nova ' } });
+    fireEvent.click(within(dialog).getByRole('tab', { name: 'Context' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: /^soul\.md/ }));
+    const editor = await within(dialog).findByRole('textbox', { name: 'soul.md' });
+    expect((editor as HTMLTextAreaElement).value).toBe(sampleProfileFiles['soul.md']);
+    fireEvent.change(editor, { target: { value: '# Nova\n' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Back to context' }));
+    expect(within(dialog).getByRole('button', { name: /^soul\.md/ }).textContent).toContain('edited');
+    // Opened and left unchanged: not sent.
+    fireEvent.click(within(dialog).getByRole('button', { name: /skills\/triage\/SKILL\.md/ }));
+    await within(dialog).findByRole('textbox', { name: 'skills/triage/SKILL.md' });
+    fireEvent.change(within(dialog).getByLabelText('Why'), { target: { value: ' Renamed to Nova ' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    expect(save).toHaveBeenCalledOnce();
+    expect(save).toHaveBeenCalledWith('agent_p', {
+      expectedRevision: '2026.10.1',
+      reason: 'Renamed to Nova',
+      edit: { name: 'Nova', files: { 'soul.md': '# Nova\n' } },
+    });
+    expect((await within(dialog).findByText('Saved as revision 4be1c0ffee5a.')).getAttribute('role')).toBe('status');
+    expect(within(dialog).getByRole('heading', { name: 'Nova' })).toBeTruthy();
+    expect((within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('keeps generated files and harness settings read-only', async () => {
+    const { dialog } = open(source(), vi.fn(), undefined, vi.fn<SaveRevision>());
+    await within(dialog).findByDisplayValue('Luna');
+    fireEvent.click(within(dialog).getByRole('tab', { name: 'Context' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: /\.claude\/settings\.json/ }));
+    expect((await within(dialog).findByLabelText('.claude/settings.json')).tagName).toBe('PRE');
+    expect(within(dialog).queryByRole('textbox', { name: '.claude/settings.json' })).toBeNull();
+  });
+
+  it('will not save an empty name or reason', async () => {
+    const save = vi.fn<SaveRevision>();
+    const { dialog } = open(source(), vi.fn(), undefined, save);
+    const description = await within(dialog).findByLabelText('Description');
+    fireEvent.change(description, { target: { value: 'Reviews pull requests.' } });
+    const button = within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    fireEvent.change(within(dialog).getByLabelText('Why'), { target: { value: '  ' } });
+    expect(button.disabled).toBe(true);
+    fireEvent.change(within(dialog).getByLabelText('Why'), { target: { value: 'Clearer' } });
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: ' ' } });
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('says when the owner did not approve, and keeps the edits', async () => {
+    const save = vi.fn<SaveRevision>(async () => { throw new BridgeError('owner-credential-required', 'owner consent requires an interactive terminal'); });
+    const { dialog } = open(source(), vi.fn(), undefined, save);
+    fireEvent.change(await within(dialog).findByDisplayValue('Luna'), { target: { value: 'Nova' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    expect((await within(dialog).findByRole('alert')).textContent).toBe(
+      'Not saved: only you can approve this change, and agent-bot could not confirm it was you (owner consent requires an interactive terminal).');
+    expect(within(dialog).queryByRole('button', { name: 'Reload' })).toBeNull();
+    expect((within(dialog).getByLabelText('Name') as HTMLInputElement).value).toBe('Nova');
+    expect((within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('shows any other refusal as it came', async () => {
+    const save = vi.fn<SaveRevision>(async () => { throw new BridgeError('soul-revision-failed', 'adopt a starting package before editing or proposing'); });
+    const { dialog } = open(source(), vi.fn(), undefined, save);
+    fireEvent.change(await within(dialog).findByDisplayValue('Luna'), { target: { value: 'Nova' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    expect((await within(dialog).findByRole('alert')).textContent).toBe('Not saved: adopt a starting package before editing or proposing');
+  });
+
+  it('offers Reload on a stale revision, which reads the profile again and drops the edits', async () => {
+    const s = source();
+    const save = vi.fn<SaveRevision>(async () => { throw new BridgeError('soul-revision-stale', 'the package changed since the dialog read it'); });
+    const { dialog } = open(s, vi.fn(), undefined, save);
+    fireEvent.change(await within(dialog).findByDisplayValue('Luna'), { target: { value: 'Nova' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('changed since the dialog opened');
+    expect(s.profile).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+    await waitFor(() => expect(s.profile).toHaveBeenCalledTimes(2));
+    const fresh = screen.getByRole('dialog');
+    expect((await within(fresh).findByLabelText('Name') as HTMLInputElement).value).toBe('Luna');
+    expect(within(fresh).queryByRole('alert')).toBeNull();
+    expect((within(fresh).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
