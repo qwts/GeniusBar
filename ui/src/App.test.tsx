@@ -336,10 +336,9 @@ describe('App setup', () => {
     const devTools = { install: vi.fn(async () => {}), recheck: vi.fn() };
     const { rerender } = render(<App census={[]} connection={sampleConnection} launcher={launcher} starter={starter} devTools={devTools} isStatic />);
     expect(screen.queryByRole('button', { name: 'Start with Starter' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Install developer tools' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     expect(devTools.install).toHaveBeenCalled();
-    fireEvent.click(await screen.findByRole('button', { name: "I've installed them" }));
-    expect(devTools.recheck).toHaveBeenCalled();
+    expect(await screen.findByText(/Waiting for the installer/)).toBeTruthy();
     rerender(<App census={[]} connection={sampleConnection} launcher={launcher} starter={{ ...starter, devTools: true }} devTools={devTools} isStatic />);
     expect(screen.getByRole('button', { name: 'Start with Starter' })).toBeTruthy();
   });

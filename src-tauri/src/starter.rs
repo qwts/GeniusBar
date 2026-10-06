@@ -21,6 +21,10 @@ pub struct Starter {
     /// Whether git works, from Apple's command line tools or Xcode.
     #[serde(rename = "devTools")]
     pub dev_tools: bool,
+    /// Whether Apple's installer for them is open now, so the web view can
+    /// tell a running install from a cancelled one (#101).
+    #[serde(rename = "devToolsInstalling")]
+    pub dev_tools_installing: bool,
 }
 
 /// Metadata read from the soul manifest. Launching a package uses the same
@@ -58,6 +62,7 @@ pub fn read_starter(package: &Path, account: &str, dev_tools: bool) -> Result<St
         name: metadata.name,
         harnesses: metadata.harnesses,
         dev_tools,
+        dev_tools_installing: false,
     })
 }
 
@@ -75,19 +80,39 @@ fn dev_tools_installed() -> bool {
         .is_ok_and(|status| status.success())
 }
 
+/// `xcode-select --install` opens this app; it stays open while the tools
+/// download and install, and closes when the owner cancels.
+const DEV_TOOLS_INSTALLER: &str = "Install Command Line Developer Tools.app";
+
+fn dev_tools_installer_open() -> bool {
+    if !cfg!(target_os = "macos") {
+        return false;
+    }
+    std::process::Command::new("/usr/bin/pgrep")
+        .args(["-f", DEV_TOOLS_INSTALLER])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
 #[tauri::command]
 pub fn starter_soul<R: Runtime>(app: AppHandle<R>) -> Result<Starter, String> {
     let resources = app.path().resource_dir().map_err(|e| e.to_string())?;
     let account = std::env::var("USER").unwrap_or_default();
-    read_starter(
+    let dev_tools = dev_tools_installed();
+    let mut starter = read_starter(
         &resources.join("souls").join("starter.soul"),
         &account,
-        dev_tools_installed(),
-    )
+        dev_tools,
+    )?;
+    starter.dev_tools_installing = !dev_tools && dev_tools_installer_open();
+    Ok(starter)
 }
 
 /// Opens Apple's own installer for the command line tools. It runs on its
-/// own; the web view checks again once the owner says it finished.
+/// own; the web view polls `starter_soul` until the tools are there or the
+/// installer has closed.
 #[tauri::command]
 pub fn install_dev_tools() -> Result<(), String> {
     std::process::Command::new("/usr/bin/xcode-select")
@@ -108,6 +133,7 @@ mod tests {
         assert_eq!(starter.account, "friend");
         assert_eq!(starter.name, "Starter");
         assert!(!starter.dev_tools);
+        assert!(!starter.dev_tools_installing);
         assert_eq!(
             starter.harnesses.first().map(String::as_str),
             Some("claude")
