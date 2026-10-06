@@ -271,8 +271,6 @@ describe('useChat asides and approvals (#122, #85, #86)', () => {
     expect(approval).toMatchObject({ kind: 'approval_request', id: 'p1', tool: 'Bash', args: 'git push', risk: 'external', status: 'pending' });
     expect(unreadOf(result.current.chat, 'user/agent_p')).toBe(0);
 
-    await act(() => result.current.resolve!('user/agent_p', 'p1', 'approved_session'));
-    expect(decisions).toEqual([]);
     await act(() => result.current.resolve!('user/agent_p', 'p1', 'approved'));
     expect(decisions).toEqual([['p1', 'approve']]);
     expect(conversationOf(result.current.chat, 'user/agent_p').entries[1]).toMatchObject({ id: 'p1', status: 'approved', deciding: false });
@@ -280,14 +278,16 @@ describe('useChat asides and approvals (#122, #85, #86)', () => {
 
   it('reads the pending list with no conversation open and decides from the menu', async () => {
     const decisions: [string, string][] = [];
+    const scopes: (string | undefined)[] = [];
     let opened = 0;
     let pending = [{ proposalId: 'p1', agentId: 'agent_p', soul: null, tool: 'Bash', summary: 'git push',
       createdAt: '2026-10-05T10:00:00Z', expiresAt: null, status: 'pending' }];
     const feed: AgentBotFeed = {
       asides: async () => { opened += 1; return null; },
       approvals: async () => pending,
-      decide: async (proposalId, decision) => {
+      decide: async (proposalId, decision, options) => {
         decisions.push([proposalId, decision]);
+        scopes.push(options?.scope);
         pending = [];
         return { proposalId, agentId: 'agent_p', soul: null, tool: 'Bash', summary: 'git push', createdAt: '',
           expiresAt: null, status: 'denied' };
@@ -298,6 +298,8 @@ describe('useChat asides and approvals (#122, #85, #86)', () => {
     expect(opened).toBe(0);
     await act(() => result.current.decide!('p1', 'deny'));
     expect(decisions).toEqual([['p1', 'deny']]);
+    // The menu decides this call only.
+    expect(scopes).toEqual([undefined]);
     expect(result.current.approvals?.records).toEqual([]);
     expect(result.current.approvals?.local.get('p1')?.entry).toMatchObject({ status: 'denied', deciding: false });
     await act(() => result.current.decide!('p1', 'approve'));
@@ -317,5 +319,57 @@ describe('useChat asides and approvals (#122, #85, #86)', () => {
     await act(() => result.current.resolve!('user/agent_p', 'p1', 'denied'));
     expect(conversationOf(result.current.chat, 'user/agent_p').entries[0])
       .toMatchObject({ status: 'pending', deciding: false, error: 'the owner did not confirm', tool: 'tool' });
+  });
+
+  const sessionFeed = (decide: AgentBotFeed['decide']): AgentBotFeed => ({
+    asides: async () => null,
+    approvals: async () => [{ proposalId: 'p1', agentId: 'agent_p', soul: null, tool: 'Bash', summary: 'git push',
+      createdAt: '2026-10-05T10:00:00Z', expiresAt: null, status: 'pending' }],
+    decide,
+  });
+
+  it('approves for the session through agent-bot’s session scope', async () => {
+    const calls: unknown[] = [];
+    const feed = sessionFeed(async (proposalId, decision, options) => {
+      calls.push([proposalId, decision, options]);
+      return { proposalId, agentId: 'agent_p', soul: null, tool: 'Bash', summary: 'git push', createdAt: '',
+        expiresAt: null, status: 'approved', scope: 'session', decision: 'approved_session' };
+    });
+    const { result } = renderHook(() => useChat({ enabled: true, callImpl: quietBridge, intervalMs: 60_000, storage: memoryStorage(), feed }));
+    act(() => result.current.open('user/agent_p'));
+    await waitFor(() => expect(conversationOf(result.current.chat, 'user/agent_p').entries).toHaveLength(1));
+    await act(() => result.current.resolve!('user/agent_p', 'p1', 'approved_session'));
+    expect(calls).toEqual([['p1', 'approve', { scope: 'session' }]]);
+    expect(conversationOf(result.current.chat, 'user/agent_p').entries[0])
+      .toMatchObject({ id: 'p1', status: 'approved_session', deciding: false, error: null });
+    expect(result.current.approvals?.local.get('p1')?.entry).toMatchObject({ status: 'approved_session' });
+    // Decided once; a second click does nothing.
+    await act(() => result.current.resolve!('user/agent_p', 'p1', 'approved_session'));
+    expect(calls).toHaveLength(1);
+  });
+
+  it('shows the record’s decision when agent-bot gives one', async () => {
+    // A daemon that answered once despite the session ask: its decision wins.
+    const feed = sessionFeed(async (proposalId) => ({ proposalId, agentId: 'agent_p', soul: null, tool: 'Bash',
+      summary: 'git push', createdAt: '', expiresAt: null, status: 'approved', scope: 'once', decision: 'approved' }));
+    const { result } = renderHook(() => useChat({ enabled: true, callImpl: quietBridge, intervalMs: 60_000, storage: memoryStorage(), feed }));
+    act(() => result.current.open('user/agent_p'));
+    await waitFor(() => expect(conversationOf(result.current.chat, 'user/agent_p').entries).toHaveLength(1));
+    await act(() => result.current.resolve!('user/agent_p', 'p1', 'approved_session'));
+    expect(conversationOf(result.current.chat, 'user/agent_p').entries[0]).toMatchObject({ status: 'approved' });
+  });
+
+  it('keeps a session grant an older agent-bot refuses pending with the reason', async () => {
+    const feed = sessionFeed(async () => {
+      throw new BridgeError('approval-scope-unsupported', 'this agent-bot cannot approve for the session; update agent-bot');
+    });
+    const { result } = renderHook(() => useChat({ enabled: true, callImpl: quietBridge, intervalMs: 60_000, storage: memoryStorage(), feed }));
+    act(() => result.current.open('user/agent_p'));
+    await waitFor(() => expect(conversationOf(result.current.chat, 'user/agent_p').entries).toHaveLength(1));
+    await act(() => result.current.resolve!('user/agent_p', 'p1', 'approved_session'));
+    expect(conversationOf(result.current.chat, 'user/agent_p').entries[0]).toMatchObject({
+      status: 'pending', deciding: false,
+      error: 'this agent-bot cannot approve for the session; update agent-bot',
+    });
   });
 });

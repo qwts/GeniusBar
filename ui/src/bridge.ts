@@ -398,15 +398,22 @@ export async function listAudit(agentId: string | null, invokeImpl: typeof invok
   }
 }
 
+/** How far an approval reaches: this call only, or the soul's current harness session. */
+export type ApprovalScope = 'once' | 'session';
+
 /**
  * Approves or denies one proposal (#86). The daemon asks the owner to
  * confirm (Touch ID) before the decision lands; GeniusBar never asks itself.
+ * `scope: 'session'` (approve only, agent-bot-identity #486) also lets the
+ * soul use that tool for the rest of its harness session; an older bundle
+ * refuses it with `approval-scope-unsupported` and decides nothing.
  */
 export async function decideApproval(proposalId: string, decision: 'approve' | 'deny',
-  invokeImpl: typeof invoke = invoke): Promise<ApprovalRecord> {
+  { scope }: { scope?: ApprovalScope } = {}, invokeImpl: typeof invoke = invoke): Promise<ApprovalRecord> {
   let raw: unknown;
   try {
-    raw = await invokeImpl<unknown>('approvals', { action: decision, proposal: proposalId });
+    raw = await invokeImpl<unknown>('approvals',
+      { action: decision, proposal: proposalId, ...(scope === 'session' ? { scope } : {}) });
   } catch (error) {
     const e = error as { code?: unknown; message?: unknown };
     throw new BridgeError(typeof e?.code === 'string' ? e.code : 'approvals-failed',

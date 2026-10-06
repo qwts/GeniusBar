@@ -1112,31 +1112,75 @@ fn parse_soul_asides(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError>
 
 /// Tool-permission requests waiting on the owner (#85, #86), from agent-bot's
 /// `approvals list --json` (`{approvals: [...]}`) and `approvals approve|deny
-/// <proposalId> --json` (the decided proposal). The daemon asks for the
-/// owner's presence (Touch ID) before a decision lands; GeniusBar never does.
+/// <proposalId> [--scope session] --json` (the decided proposal). The daemon
+/// asks for the owner's presence (Touch ID) before a decision lands;
+/// GeniusBar never does. `scope: "session"` (approve only, agent-bot-identity
+/// #486) also grants that tool for the soul's current harness session; an
+/// older bundle without `--scope` answers with its usage line, which maps to
+/// `approval-scope-unsupported`.
 #[tauri::command]
 pub async fn approvals<R: Runtime>(
     app: AppHandle<R>,
     action: String,
     proposal: Option<String>,
+    scope: Option<String>,
 ) -> Result<Value, BridgeError> {
-    let args: Vec<std::ffi::OsString> = match (action.as_str(), proposal) {
-        ("list", None) => vec!["approvals".into(), "list".into(), "--json".into()],
-        ("approve" | "deny", Some(id)) if !id.is_empty() && !id.starts_with('-') => vec![
-            "approvals".into(),
-            action.clone().into(),
-            id.into(),
-            "--json".into(),
-        ],
-        _ => {
-            return Err(BridgeError::new(
-                "approvals-invalid",
-                "action must be list, or approve or deny with a proposal id",
+    let session = scope.as_deref() == Some("session");
+    let args = approvals_args(&action, proposal, scope.as_deref())?;
+    let output = run_agent_bot(&app, args, "approvals-unavailable").await?;
+    let parsed = parse_approvals(&action, &output.stdout, &output.stderr);
+    if session {
+        scope_refused(parsed)
+    } else {
+        parsed
+    }
+}
+
+fn approvals_args(
+    action: &str,
+    proposal: Option<String>,
+    scope: Option<&str>,
+) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    let mut args: Vec<std::ffi::OsString> = match (action, proposal, scope) {
+        ("list", None, None) => vec!["approvals".into(), "list".into(), "--json".into()],
+        ("approve", Some(id), None | Some("once" | "session"))
+        | ("deny", Some(id), None | Some("once"))
+            if !id.is_empty() && !id.starts_with('-') =>
+        {
+            vec!["approvals".into(), action.into(), id.into()]
+        }
+        _ => return Err(BridgeError::new(
+            "approvals-invalid",
+            "action must be list, or approve (scope once or session) or deny with a proposal id",
+        )),
+    };
+    if action != "list" {
+        // Once is agent-bot's default, so only a session grant names a scope:
+        // an older bundle keeps working for every other decision.
+        if scope == Some("session") {
+            args.push("--scope".into());
+            args.push("session".into());
+        }
+        args.push("--json".into());
+    }
+    Ok(args)
+}
+
+/// An older agent-bot's `approvals` usage line, which has no `--scope`, is a
+/// refused session grant rather than a failed decision: nothing was decided.
+fn scope_refused(parsed: Result<Value, BridgeError>) -> Result<Value, BridgeError> {
+    match parsed {
+        Err(error)
+            if error.message.starts_with("usage: agent-bot approvals")
+                && !error.message.contains("--scope") =>
+        {
+            Err(BridgeError::new(
+                "approval-scope-unsupported",
+                "this agent-bot cannot approve for the session; update agent-bot",
             ))
         }
-    };
-    let output = run_agent_bot(&app, args, "approvals-unavailable").await?;
-    parse_approvals(&action, &output.stdout, &output.stderr)
+        other => other,
+    }
 }
 
 fn parse_approvals(action: &str, stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
@@ -1321,6 +1365,98 @@ mod chat_feed_tests {
                 "not-open",
                 "prop_1 is not waiting on a decision"
             ))
+        );
+    }
+
+    #[test]
+    fn approval_args_add_a_scope_only_for_a_session_grant() {
+        let args = |action: &str, id: Option<&str>, scope: Option<&str>| {
+            approvals_args(action, id.map(String::from), scope).map(|args| {
+                args.iter()
+                    .map(|a| a.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+        };
+        assert_eq!(args("list", None, None).unwrap(), "approvals list --json");
+        assert_eq!(
+            args("approve", Some("prop_1"), None).unwrap(),
+            "approvals approve prop_1 --json"
+        );
+        assert_eq!(
+            args("approve", Some("prop_1"), Some("once")).unwrap(),
+            "approvals approve prop_1 --json"
+        );
+        assert_eq!(
+            args("approve", Some("prop_1"), Some("session")).unwrap(),
+            "approvals approve prop_1 --scope session --json"
+        );
+        assert_eq!(
+            args("deny", Some("prop_1"), None).unwrap(),
+            "approvals deny prop_1 --json"
+        );
+        for (action, id, scope) in [
+            ("deny", Some("prop_1"), Some("session")),
+            ("approve", Some("prop_1"), Some("forever")),
+            ("list", None, Some("session")),
+            ("approve", Some("--scope"), None),
+            ("approve", Some(""), None),
+            ("approve", None, None),
+            ("list", Some("prop_1"), None),
+            ("expire", Some("prop_1"), None),
+        ] {
+            assert_eq!(
+                args(action, id, scope).unwrap_err().code,
+                "approvals-invalid",
+                "{action} {id:?} {scope:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn maps_an_older_bundles_scope_refusal() {
+        // agent-bot 0.10.20 has no --scope: its usage line comes back.
+        let old = parse_approvals(
+            "approve",
+            b"{\"error\":{\"code\":\"approvals-failed\",\"message\":\"usage: agent-bot approvals list [--json] | approvals approve|deny <proposalId> [--json] [--principal-stdin]\"}}\n",
+            b"agent-bot approvals: usage: agent-bot approvals list [--json] | approvals approve|deny <proposalId> [--json] [--principal-stdin]\n",
+        );
+        assert_eq!(
+            scope_refused(old).unwrap_err().code,
+            "approval-scope-unsupported"
+        );
+        // The same line on stderr alone (no JSON) is refused the same way.
+        let old_stderr = parse_approvals(
+            "approve",
+            b"",
+            b"agent-bot approvals: usage: agent-bot approvals list [--json] | approvals approve|deny <proposalId> [--json]\n",
+        );
+        assert_eq!(
+            scope_refused(old_stderr).unwrap_err().code,
+            "approval-scope-unsupported"
+        );
+        // A newer bundle's own usage names --scope and stays a plain failure.
+        let new = parse_approvals(
+            "approve",
+            b"",
+            b"agent-bot approvals: usage: agent-bot approvals list [--json] | approvals approve <proposalId> [--scope once|session] [--json]\n",
+        );
+        assert_eq!(scope_refused(new).unwrap_err().code, "approvals-failed");
+        // Other refusals and successes pass through.
+        let not_open = parse_approvals(
+            "approve",
+            b"{\"error\":{\"code\":\"not-open\",\"message\":\"prop_1 is not waiting on a decision\"}}\n",
+            b"",
+        );
+        assert_eq!(scope_refused(not_open).unwrap_err().code, "not-open");
+        let granted = parse_approvals(
+            "approve",
+            b"{\"proposalId\":\"prop_1\",\"status\":\"approved\",\"scope\":\"session\",\"decision\":\"approved_session\"}\n",
+            b"",
+        );
+        assert_eq!(
+            scope_refused(granted).unwrap()["decision"],
+            "approved_session"
         );
     }
 }

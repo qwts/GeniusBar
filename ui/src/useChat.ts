@@ -5,7 +5,7 @@
 // from agent-bot (#122, #85, #86), read on the same cadence; the pending
 // list is read even with no conversation open, for the menu and tray badge.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BridgeError, call, decideApproval, inApp, listApprovals, soulAsides } from './bridge';
+import { BridgeError, call, decideApproval, inApp, listApprovals, soulAsides, type ApprovalScope } from './bridge';
 import type { CensusRow } from './model/census';
 import {
   addSent,
@@ -103,19 +103,31 @@ function defaultStorage(): ChatStorage | null {
 export interface AgentBotFeed {
   asides: (agentId: string, after: string | null) => Promise<{ asides: AsideRecord[]; next: string | null } | null>;
   approvals: () => Promise<ApprovalRecord[] | null>;
-  decide: (proposalId: string, decision: 'approve' | 'deny') => Promise<ApprovalRecord>;
+  decide: (proposalId: string, decision: 'approve' | 'deny', options?: { scope?: ApprovalScope }) => Promise<ApprovalRecord>;
 }
 
 const bridgeFeed: AgentBotFeed = {
   asides: (agentId, after) => soulAsides(agentId, after),
   approvals: () => listApprovals(),
-  decide: (proposalId, decision) => decideApproval(proposalId, decision),
+  decide: (proposalId, decision, options) => decideApproval(proposalId, decision, options),
 };
 
 /** Asides kept per soul; agent-bot keeps up to 2000, the view needs far fewer. */
 export const ASIDES_KEPT = 500;
 
 const agentIdOf = (key: string) => key.slice(key.lastIndexOf('/') + 1);
+
+/**
+ * How a decided proposal shows: agent-bot's `decision` when it gives one
+ * (agent-bot-identity #486), else its `status` and what was asked.
+ */
+function shownStatus(decided: ApprovalRecord, asked: 'approve' | 'deny', scope: ApprovalScope): ApprovalDecision {
+  if (decided.decision === 'approved' || decided.decision === 'approved_session' || decided.decision === 'denied') {
+    return decided.decision;
+  }
+  if (decided.status === 'denied' || asked === 'deny') return 'denied';
+  return scope === 'session' && decided.scope !== 'once' ? 'approved_session' : 'approved';
+}
 
 export interface ChatOptions {
   storage?: ChatStorage | null;
@@ -137,9 +149,10 @@ export interface ChatApi {
   setDraft: (key: string, draft: string) => void;
   send: (key: string) => Promise<void>;
   /**
-   * Answers an approval request in that conversation. Approve and deny go
-   * to agent-bot (the daemon asks the owner to confirm); approving for the
-   * session has no daemon scope yet and does nothing.
+   * Answers an approval request in that conversation through agent-bot (the
+   * daemon asks the owner to confirm). Approving for the session also lets
+   * the soul use that tool for the rest of its harness session; an older
+   * agent-bot refuses it and the request stays pending with the reason.
    */
   resolve?: (key: string, entryId: string, decision: ApprovalDecision) => Promise<void>;
   /**
@@ -147,7 +160,7 @@ export interface ChatApi {
    * app's decisions on them: the menu's approval list and the tray badge.
    */
   approvals?: PendingApprovals;
-  /** Approves or denies one proposal from the menu, as `resolve` does in a conversation. */
+  /** Approves (this call only) or denies one proposal from the menu, as `resolve` does in a conversation. */
   decide?: (proposalId: string, decision: 'approve' | 'deny') => Promise<void>;
 }
 
@@ -291,7 +304,7 @@ export function useChat({
 
   /** One decision, from a conversation's card or the menu; both show its progress. */
   const decideShown = useCallback(async (key: string | null, agentId: string, shown: ApprovalEntry,
-    decision: 'approve' | 'deny') => {
+    decision: 'approve' | 'deny', scope: ApprovalScope = 'once') => {
     const entryId = shown.id;
     const mark = (entry: Partial<ApprovalEntry>) => {
       local.current.set(entryId, { agentId, entry: { ...shown, deciding: false, error: null, ...entry } });
@@ -301,19 +314,19 @@ export function useChat({
     };
     mark({ deciding: true });
     try {
-      const decided = await deps.current.feed.decide(entryId, decision);
+      const decided = await deps.current.feed.decide(entryId, decision, scope === 'session' ? { scope } : undefined);
       pending.current = pending.current.filter((p) => p.proposalId !== entryId);
-      mark({ status: decided.status === 'denied' || decision === 'deny' ? 'denied' : 'approved' });
+      mark({ status: shownStatus(decided, decision, scope) });
     } catch (error) {
       mark({ error: asBridgeError(error).message });
     }
   }, [showSide, publishApprovals]);
 
   const resolve = useCallback(async (key: string, entryId: string, decision: ApprovalDecision) => {
-    if (decision === 'approved_session') return;
     const shown = store.current.conversations[key]?.entries.find((e) => e.id === entryId);
     if (shown?.kind !== 'approval_request' || shown.status !== 'pending' || shown.deciding) return;
-    await decideShown(key, agentIdOf(key), shown, decision === 'approved' ? 'approve' : 'deny');
+    await decideShown(key, agentIdOf(key), shown, decision === 'denied' ? 'deny' : 'approve',
+      decision === 'approved_session' ? 'session' : 'once');
   }, [decideShown]);
 
   const decide = useCallback(async (proposalId: string, decision: 'approve' | 'deny') => {

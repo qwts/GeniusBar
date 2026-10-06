@@ -96,10 +96,37 @@ describe('agent-bot asides and approvals', () => {
   it('decides a proposal and keeps the shell’s error code', async () => {
     const ok = (async (_c: string, args: { action: string; proposal: string }) =>
       ({ proposalId: args.proposal, agentId: 'agent_1', status: args.action === 'deny' ? 'denied' : 'approved', summary: 's' })) as never;
-    await expect(decideApproval('p1', 'deny', ok)).resolves.toMatchObject({ proposalId: 'p1', status: 'denied' });
+    await expect(decideApproval('p1', 'deny', {}, ok)).resolves.toMatchObject({ proposalId: 'p1', status: 'denied' });
     const refused = (async () => { throw { code: 'not-open', message: 'p1 is not waiting on a decision' }; }) as never;
-    await expect(decideApproval('p1', 'approve', refused)).rejects.toMatchObject({ code: 'not-open' });
-    await expect(decideApproval('p1', 'approve', (async () => ({})) as never)).rejects.toMatchObject({ code: 'approvals-failed' });
+    await expect(decideApproval('p1', 'approve', {}, refused)).rejects.toMatchObject({ code: 'not-open' });
+    await expect(decideApproval('p1', 'approve', {}, (async () => ({})) as never)).rejects.toMatchObject({ code: 'approvals-failed' });
+  });
+
+  it('asks for a session grant only when told to, and reads the scope and decision back', async () => {
+    const calls: unknown[] = [];
+    const granted = (async (_c: string, args: { proposal: string; scope?: string }) => {
+      calls.push(args);
+      return { proposalId: args.proposal, agentId: 'agent_1', status: 'approved', summary: 's',
+        scope: args.scope ?? 'once', decision: args.scope === 'session' ? 'approved_session' : 'approved' };
+    }) as never;
+    await expect(decideApproval('p1', 'approve', { scope: 'session' }, granted))
+      .resolves.toMatchObject({ proposalId: 'p1', status: 'approved', scope: 'session', decision: 'approved_session' });
+    await expect(decideApproval('p1', 'approve', { scope: 'once' }, granted))
+      .resolves.toMatchObject({ scope: 'once', decision: 'approved' });
+    await expect(decideApproval('p1', 'deny', {}, granted)).resolves.toMatchObject({ scope: 'once' });
+    expect(calls).toEqual([
+      { action: 'approve', proposal: 'p1', scope: 'session' },
+      { action: 'approve', proposal: 'p1' },
+      { action: 'deny', proposal: 'p1' },
+    ]);
+    // An older bundle has neither field.
+    const old = (async () => ({ proposalId: 'p1', agentId: 'agent_1', status: 'approved', summary: 's' })) as never;
+    const record = await decideApproval('p1', 'approve', {}, old);
+    expect(record).not.toHaveProperty('scope');
+    expect(record).not.toHaveProperty('decision');
+    const refused = (async () => { throw { code: 'approval-scope-unsupported', message: 'update agent-bot' }; }) as never;
+    await expect(decideApproval('p1', 'approve', { scope: 'session' }, refused))
+      .rejects.toMatchObject({ code: 'approval-scope-unsupported', message: 'update agent-bot' });
   });
 });
 
