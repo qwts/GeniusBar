@@ -3573,3 +3573,982 @@ mod soul_profile_tests {
         );
     }
 }
+
+/// GitHub identities (#67), from agent-bot's managed Apps
+/// (agent-bot-identity #373, `docs/identity-apps.md`): `identity apps list
+/// --json` is offline and secret-free, `{schemaVersion: 1, apps: [...]}`.
+/// With the `github-identity` add-on off the list is empty and every
+/// mutation answers `identity-app-disabled`. Mutations are owner-gated by
+/// agent-bot (its consent dialog, Touch ID); GeniusBar never asks itself.
+/// Every parser here passes on only the documented fields, so nothing else
+/// agent-bot or a provider printed reaches the web view.
+#[tauri::command]
+pub async fn identity_apps_list<R: Runtime>(app: AppHandle<R>) -> Result<Value, BridgeError> {
+    let output = run_agent_bot(&app, identity_apps_list_args(), "identity-app-unavailable").await?;
+    parse_identity_apps_list(&output.stdout, &output.stderr)
+}
+
+/// Connects an existing App: its ID and a private key file the owner picks
+/// in the native open dialog. Only the path goes to agent-bot; the key is
+/// never read here. `{id, slug, installUrl}`.
+#[tauri::command]
+pub async fn identity_app_connect<R: Runtime>(
+    app: AppHandle<R>,
+    id: String,
+    prompt: String,
+) -> Result<Value, BridgeError> {
+    identity_app_id(&id)?;
+    let key = pick_key_file(prompt).await?;
+    let args = identity_app_connect_args(&id, &key)?;
+    let output = run_agent_bot(&app, args, "identity-app-unavailable").await?;
+    parse_identity_app_result(&output.stdout, &output.stderr, false)
+}
+
+/// Rotates a managed App's key to a new file the owner downloaded from the
+/// App's settings on github.com and picks in the native open dialog.
+/// `{id, slug, installUrl, retired}`; `retired` is the old key's public
+/// fingerprint, which the owner must still delete on github.com.
+#[tauri::command]
+pub async fn identity_app_rotate_key<R: Runtime>(
+    app: AppHandle<R>,
+    slug: String,
+    prompt: String,
+) -> Result<Value, BridgeError> {
+    identity_app_slug(&slug)?;
+    let key = pick_key_file(prompt).await?;
+    let args = identity_app_rotate_args(&slug, &key)?;
+    let output = run_agent_bot(&app, args, "identity-app-unavailable").await?;
+    parse_identity_app_result(&output.stdout, &output.stderr, true)
+}
+
+/// Assigns a managed App to a harness or a soul: `{slug, harness}` or
+/// `{slug, soul}`.
+#[tauri::command]
+pub async fn identity_app_assign<R: Runtime>(
+    app: AppHandle<R>,
+    slug: String,
+    harness: Option<String>,
+    soul: Option<String>,
+) -> Result<Value, BridgeError> {
+    let args = identity_app_assign_args(&slug, harness.as_deref(), soul.as_deref())?;
+    let output = run_agent_bot(&app, args, "identity-app-unavailable").await?;
+    parse_identity_app_assign(&output.stdout, &output.stderr)
+}
+
+/// Starts GitHub's manifest flow with `identity app create --manifest
+/// --json`: agent-bot asks the owner, opens a ten-minute loopback listener
+/// and prints `{status: "pending", localUrl}`, which this returns at once
+/// with a `handle`; the same process later prints `{id, slug, installUrl}`
+/// or an error, which `identity_app_create_status` reports.
+#[tauri::command]
+pub async fn identity_app_create<R: Runtime>(
+    app: AppHandle<R>,
+    jobs: State<'_, IdentityJobs>,
+    name: Option<String>,
+    org: Option<String>,
+) -> Result<Value, BridgeError> {
+    let args = identity_app_create_args(name.as_deref(), org.as_deref())?;
+    let unavailable = |e: String| BridgeError::new("identity-app-unavailable", &e);
+    let resources = app
+        .path()
+        .resource_dir()
+        .map_err(|e| unavailable(e.to_string()))?;
+    let mut argv: Vec<std::ffi::OsString> = vec![resources
+        .join("components")
+        .join("agent-bot")
+        .join("agent-bot.mjs")
+        .into_os_string()];
+    argv.extend(args);
+    let (mut events, child) = app
+        .shell()
+        .sidecar("node")
+        .map_err(|e| unavailable(e.to_string()))?
+        .envs(HOST_ENV.iter().copied())
+        .args(argv)
+        .spawn()
+        .map_err(|e| unavailable(e.to_string()))?;
+    let handle = jobs.next.fetch_add(1, Ordering::Relaxed) + 1;
+    jobs.jobs.lock().unwrap().insert(
+        handle,
+        IdentityJob {
+            state: json!({ "status": "pending" }),
+            child: Some(child),
+        },
+    );
+    let (first, started) = oneshot::channel::<Result<String, BridgeError>>();
+    let watcher = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut first = Some(first);
+        let mut last_stderr = Vec::new();
+        let mut settled = false;
+        while let Some(event) = events.recv().await {
+            match event {
+                CommandEvent::Stdout(line) => match parse_create_line(&line) {
+                    CreateLine::Pending(url) => {
+                        if let Some(sender) = first.take() {
+                            let _ = sender.send(Ok(url.clone()));
+                        }
+                        watcher
+                            .state::<IdentityJobs>()
+                            .update(handle, json!({ "status": "pending", "localUrl": url }));
+                    }
+                    CreateLine::Done(result) => {
+                        settled = true;
+                        watcher
+                            .state::<IdentityJobs>()
+                            .finish(handle, json!({ "status": "complete", "result": result }));
+                    }
+                    CreateLine::Failed(error) => {
+                        settled = true;
+                        if let Some(sender) = first.take() {
+                            let _ = sender.send(Err(error.clone()));
+                        }
+                        watcher.state::<IdentityJobs>().finish(
+                            handle,
+                            json!({ "status": "failed", "error": { "code": error.code, "message": error.message } }),
+                        );
+                    }
+                    CreateLine::Other => {}
+                },
+                CommandEvent::Stderr(line) => last_stderr = line,
+                CommandEvent::Terminated(_) => break,
+                _ => {}
+            }
+        }
+        if !settled {
+            let error = identity_error(parse_agent_bot_json(
+                b"",
+                &last_stderr,
+                "identity-app-failed",
+                "agent-bot: ",
+                "agent-bot ended App creation without a result",
+                |_| false,
+            ))
+            .unwrap_err();
+            if let Some(sender) = first.take() {
+                let _ = sender.send(Err(error.clone()));
+            }
+            watcher.state::<IdentityJobs>().finish(
+                handle,
+                json!({ "status": "failed", "error": { "code": error.code, "message": error.message } }),
+            );
+        }
+    });
+    // agent-bot asks the owner before it listens, so the first line waits
+    // on that answer; a dialog left alone gives up with the listener.
+    match tokio::time::timeout(Duration::from_secs(600), started).await {
+        Ok(Ok(Ok(local_url))) => Ok(json!({ "handle": handle, "localUrl": local_url })),
+        Ok(Ok(Err(error))) => {
+            jobs.jobs.lock().unwrap().remove(&handle);
+            Err(error)
+        }
+        _ => {
+            jobs.cancel(handle);
+            jobs.jobs.lock().unwrap().remove(&handle);
+            Err(BridgeError::new(
+                "identity-app-timeout",
+                "agent-bot did not start App creation",
+            ))
+        }
+    }
+}
+
+/// Where a create started by `identity_app_create` stands: `{status:
+/// "pending", localUrl}`, `{status: "complete", result: {id, slug,
+/// installUrl}}` or `{status: "failed", error: {code, message}}`.
+#[tauri::command]
+pub fn identity_app_create_status(
+    jobs: State<'_, IdentityJobs>,
+    handle: u64,
+) -> Result<Value, BridgeError> {
+    jobs.jobs
+        .lock()
+        .unwrap()
+        .get(&handle)
+        .map(|job| job.state.clone())
+        .ok_or_else(|| {
+            BridgeError::new(
+                "identity-app-job-not-found",
+                "this App creation is no longer running",
+            )
+        })
+}
+
+/// Stops a create that is still waiting for GitHub; agent-bot's listener
+/// closes with its process.
+#[tauri::command]
+pub fn identity_app_create_cancel(jobs: State<'_, IdentityJobs>, handle: u64) {
+    jobs.cancel(handle);
+    jobs.jobs.lock().unwrap().remove(&handle);
+}
+
+/// Opens the create flow's loopback page or a GitHub App page in the
+/// owner's browser with the system opener. Nothing else is opened.
+#[tauri::command]
+pub async fn identity_app_open(url: String) -> Result<(), BridgeError> {
+    if !identity_url_allowed(&url) {
+        return Err(BridgeError::new(
+            "identity-app-invalid",
+            "only the App creation page or github.com can be opened",
+        ));
+    }
+    let status = tauri::async_runtime::spawn_blocking(move || {
+        std::process::Command::new("/usr/bin/open")
+            .arg(url)
+            .status()
+    })
+    .await
+    .map_err(|e| BridgeError::new("identity-app-open-failed", &e.to_string()))?
+    .map_err(|e| BridgeError::new("identity-app-open-failed", &e.to_string()))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(BridgeError::new(
+            "identity-app-open-failed",
+            "the browser could not be opened",
+        ))
+    }
+}
+
+/// Create jobs this app started; each keeps its agent-bot process until it
+/// finishes or is cancelled.
+#[derive(Default)]
+pub struct IdentityJobs {
+    next: AtomicU64,
+    jobs: Mutex<HashMap<u64, IdentityJob>>,
+}
+
+struct IdentityJob {
+    state: Value,
+    child: Option<CommandChild>,
+}
+
+impl IdentityJobs {
+    fn update(&self, handle: u64, state: Value) {
+        if let Some(job) = self.jobs.lock().unwrap().get_mut(&handle) {
+            job.state = state;
+        }
+    }
+
+    fn finish(&self, handle: u64, state: Value) {
+        if let Some(job) = self.jobs.lock().unwrap().get_mut(&handle) {
+            job.state = state;
+            job.child = None;
+        }
+    }
+
+    fn cancel(&self, handle: u64) {
+        let child = self
+            .jobs
+            .lock()
+            .unwrap()
+            .get_mut(&handle)
+            .and_then(|job| job.child.take());
+        if let Some(child) = child {
+            let _ = child.kill();
+        }
+    }
+}
+
+/// Lets the owner pick a private key file in the native open dialog.
+/// `prompt` goes to AppleScript as an argument, never as script text.
+async fn pick_key_file(prompt: String) -> Result<String, BridgeError> {
+    let output = tauri::async_runtime::spawn_blocking(move || {
+        std::process::Command::new("/usr/bin/osascript")
+            .args([
+                "-e",
+                "on run argv",
+                "-e",
+                "POSIX path of (choose file with prompt (item 1 of argv) of type {\"pem\"})",
+                "-e",
+                "end run",
+            ])
+            .arg(prompt)
+            .output()
+    })
+    .await
+    .map_err(|e| BridgeError::new("identity-app-key-unavailable", &e.to_string()))?
+    .map_err(|e| BridgeError::new("identity-app-key-unavailable", &e.to_string()))?;
+    picked_key_file(output.status.success(), &output.stdout, &output.stderr)
+}
+
+/// The chosen path, or `identity-app-cancelled` when the owner closed the
+/// dialog (AppleScript error -128).
+fn picked_key_file(ok: bool, stdout: &[u8], stderr: &[u8]) -> Result<String, BridgeError> {
+    let path = last_line(stdout);
+    if ok && path.starts_with('/') {
+        return Ok(path);
+    }
+    if last_line(stderr).contains("-128") {
+        return Err(BridgeError::new(
+            "identity-app-cancelled",
+            "no key file was chosen",
+        ));
+    }
+    Err(BridgeError::new(
+        "identity-app-key-unavailable",
+        "the key file could not be chosen",
+    ))
+}
+
+fn identity_url_allowed(url: &str) -> bool {
+    let loopback = url.strip_prefix("http://127.0.0.1:").is_some_and(|rest| {
+        rest.split(['/', '?'])
+            .next()
+            .is_some_and(|port| !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()))
+    });
+    let github = url.starts_with("https://github.com/");
+    (loopback || github) && !url.chars().any(|c| c.is_whitespace() || c.is_control())
+}
+
+/// agent-bot's App slug rule, `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$`.
+fn valid_identity_slug(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let edge = |b: &u8| b.is_ascii_lowercase() || b.is_ascii_digit();
+    !bytes.is_empty()
+        && bytes.len() <= 64
+        && bytes.first().is_some_and(edge)
+        && bytes.last().is_some_and(edge)
+        && bytes.iter().all(|b| edge(b) || *b == b'-')
+}
+
+fn identity_invalid(message: &str) -> BridgeError {
+    BridgeError::new("identity-app-invalid", message)
+}
+
+fn identity_app_slug(slug: &str) -> Result<(), BridgeError> {
+    if valid_identity_slug(slug) {
+        Ok(())
+    } else {
+        Err(identity_invalid("a valid App slug is required"))
+    }
+}
+
+fn identity_app_id(id: &str) -> Result<(), BridgeError> {
+    if !id.is_empty() && id.len() <= 20 && id.bytes().all(|b| b.is_ascii_digit()) {
+        Ok(())
+    } else {
+        Err(identity_invalid("the App ID is a number"))
+    }
+}
+
+fn identity_key_path(path: &str) -> Result<(), BridgeError> {
+    if path.starts_with('/') && !path.contains('\0') {
+        Ok(())
+    } else {
+        Err(identity_invalid("the key file must be an absolute path"))
+    }
+}
+
+fn identity_apps_list_args() -> Vec<std::ffi::OsString> {
+    vec![
+        "identity".into(),
+        "apps".into(),
+        "list".into(),
+        "--json".into(),
+    ]
+}
+
+fn identity_app_create_args(
+    name: Option<&str>,
+    org: Option<&str>,
+) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    let mut args: Vec<std::ffi::OsString> = vec![
+        "identity".into(),
+        "app".into(),
+        "create".into(),
+        "--manifest".into(),
+    ];
+    if let Some(name) = name.filter(|n| !n.is_empty()) {
+        if name.starts_with('-')
+            || name.chars().count() > 100
+            || !name
+                .chars()
+                .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '.' | '_' | '-'))
+        {
+            return Err(identity_invalid(
+                "the App name uses letters, digits, spaces, dots, _ and -",
+            ));
+        }
+        args.push("--name".into());
+        args.push(name.into());
+    }
+    if let Some(org) = org.filter(|o| !o.is_empty()) {
+        if !valid_identity_slug(org) {
+            return Err(identity_invalid("the organization is a GitHub login"));
+        }
+        args.push("--org".into());
+        args.push(org.into());
+    }
+    args.push("--json".into());
+    Ok(args)
+}
+
+fn identity_app_connect_args(id: &str, key: &str) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    identity_app_id(id)?;
+    identity_key_path(key)?;
+    Ok(vec![
+        "identity".into(),
+        "app".into(),
+        "connect".into(),
+        "--id".into(),
+        id.into(),
+        "--key-file".into(),
+        key.into(),
+        "--json".into(),
+    ])
+}
+
+fn identity_app_rotate_args(slug: &str, key: &str) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    identity_app_slug(slug)?;
+    identity_key_path(key)?;
+    Ok(vec![
+        "identity".into(),
+        "app".into(),
+        "rotate-key".into(),
+        slug.into(),
+        "--key-file".into(),
+        key.into(),
+        "--json".into(),
+    ])
+}
+
+fn identity_app_assign_args(
+    slug: &str,
+    harness: Option<&str>,
+    soul: Option<&str>,
+) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    identity_app_slug(slug)?;
+    let target = |flag: &str, value: &str| -> Result<[std::ffi::OsString; 2], BridgeError> {
+        if value.is_empty() || value.starts_with('-') {
+            return Err(identity_invalid("assign to a harness or a companion"));
+        }
+        Ok([flag.into(), value.into()])
+    };
+    let [flag, value] = match (harness, soul) {
+        (Some(harness), None) => target("--harness", harness)?,
+        (None, Some(soul)) => target("--soul", soul)?,
+        _ => {
+            return Err(identity_invalid(
+                "assign to exactly one harness or companion",
+            ))
+        }
+    };
+    Ok(vec![
+        "identity".into(),
+        "app".into(),
+        "assign".into(),
+        slug.into(),
+        flag,
+        value,
+        "--json".into(),
+    ])
+}
+
+/// Never lets key material through an error message, even one agent-bot
+/// did not construct (a stray stderr line).
+fn identity_error(result: Result<Value, BridgeError>) -> Result<Value, BridgeError> {
+    result.map_err(|mut error| {
+        if error.message.contains("-----BEGIN") || error.message.contains("PRIVATE KEY") {
+            error.message = "agent-bot could not complete the App operation".into();
+        }
+        if error.code.contains("-----BEGIN") || error.code.len() > 64 {
+            error.code = "identity-app-failed".into();
+        }
+        error
+    })
+}
+
+fn parse_identity(
+    stdout: &[u8],
+    stderr: &[u8],
+    fallback: &str,
+    valid: fn(&Value) -> bool,
+) -> Result<Value, BridgeError> {
+    identity_error(parse_agent_bot_json(
+        stdout,
+        stderr,
+        "identity-app-failed",
+        "agent-bot: ",
+        fallback,
+        valid,
+    ))
+}
+
+fn str_field(value: &Value, name: &str) -> Option<String> {
+    value.get(name).and_then(Value::as_str).map(str::to_owned)
+}
+
+fn str_list(value: &Value, name: &str) -> Vec<Value> {
+    value
+        .get(name)
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|s| Value::String(s.into()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// One list row with only its documented, secret-free fields.
+fn identity_app_row(row: &Value) -> Option<Value> {
+    let slug = str_field(row, "slug").filter(|s| valid_identity_slug(s))?;
+    let installations: Vec<Value> = row
+        .get("installations")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    Some(json!({
+                        "id": item.get("id").and_then(Value::as_u64)?,
+                        "account": str_field(item, "account")?,
+                        "repositorySelection": match item.get("repositorySelection").and_then(Value::as_str) {
+                            Some("all") => "all",
+                            _ => "selected",
+                        },
+                    }))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let mint = row.get("liveMint").unwrap_or(&Value::Null);
+    let live_mint = match mint.get("status").and_then(Value::as_str) {
+        Some(status @ ("ready" | "failed")) => json!({
+            "status": status,
+            "code": str_field(mint, "code"),
+            "checkedAt": str_field(mint, "checkedAt"),
+        }),
+        _ => json!({ "status": "unknown" }),
+    };
+    Some(json!({
+        "slug": slug,
+        "botLogin": str_field(row, "botLogin").unwrap_or_else(|| format!("{slug}[bot]")),
+        "issuerPresent": row.get("issuerPresent").and_then(Value::as_bool).unwrap_or(false),
+        "keyPresent": row.get("keyPresent").and_then(Value::as_bool).unwrap_or(false),
+        "installations": installations,
+        "harnesses": str_list(row, "harnesses"),
+        "souls": str_list(row, "souls"),
+        "liveMint": live_mint,
+    }))
+}
+
+fn parse_identity_apps_list(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    let list = parse_identity(stdout, stderr, "agent-bot gave no App list", |value| {
+        value.get("schemaVersion").and_then(Value::as_u64) == Some(1)
+            && value.get("apps").and_then(Value::as_array).is_some()
+    })?;
+    let apps: Vec<Value> = list["apps"]
+        .as_array()
+        .map(|rows| rows.iter().filter_map(identity_app_row).collect())
+        .unwrap_or_default();
+    Ok(json!({ "apps": apps }))
+}
+
+/// A connect or rotation result: `{id, slug, installUrl}`, and `retired`
+/// for a rotation.
+fn parse_identity_app_result(
+    stdout: &[u8],
+    stderr: &[u8],
+    rotated: bool,
+) -> Result<Value, BridgeError> {
+    let value = parse_identity(stdout, stderr, "agent-bot gave no App", |value| {
+        value.get("id").and_then(Value::as_str).is_some()
+            && value
+                .get("slug")
+                .and_then(Value::as_str)
+                .is_some_and(valid_identity_slug)
+            && value
+                .get("installUrl")
+                .and_then(Value::as_str)
+                .is_some_and(|url| url.starts_with("https://github.com/"))
+    })?;
+    let mut result = json!({
+        "id": value["id"],
+        "slug": value["slug"],
+        "installUrl": value["installUrl"],
+    });
+    if rotated {
+        result["retired"] = value
+            .get("retired")
+            .and_then(Value::as_str)
+            .filter(|f| f.starts_with("SHA256:") && f.len() <= 80)
+            .map_or(Value::Null, |f| Value::String(f.into()));
+    }
+    Ok(result)
+}
+
+fn parse_identity_app_assign(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    let value = parse_identity(stdout, stderr, "agent-bot gave no assignment", |value| {
+        value.get("slug").and_then(Value::as_str).is_some()
+            && (value.get("harness").and_then(Value::as_str).is_some()
+                || value.get("soul").and_then(Value::as_str).is_some())
+    })?;
+    let mut result = json!({ "slug": value["slug"] });
+    for field in ["harness", "soul"] {
+        if let Some(target) = str_field(&value, field) {
+            result[field] = Value::String(target);
+        }
+    }
+    Ok(result)
+}
+
+#[derive(Debug, PartialEq)]
+enum CreateLine {
+    Pending(String),
+    Done(Value),
+    Failed(BridgeError),
+    Other,
+}
+
+/// One line of `identity app create --json`.
+fn parse_create_line(line: &[u8]) -> CreateLine {
+    let Ok(value) = serde_json::from_slice::<Value>(line) else {
+        return CreateLine::Other;
+    };
+    if value.get("status").and_then(Value::as_str) == Some("pending") {
+        return match value.get("localUrl").and_then(Value::as_str) {
+            Some(url) if url.starts_with("http://127.0.0.1:") && identity_url_allowed(url) => {
+                CreateLine::Pending(url.into())
+            }
+            _ => CreateLine::Failed(BridgeError::new(
+                "identity-app-failed",
+                "agent-bot gave no App creation page",
+            )),
+        };
+    }
+    match parse_identity_app_result(line, b"", false) {
+        Ok(result) => CreateLine::Done(result),
+        Err(error) if value.get("error").is_some() => CreateLine::Failed(error),
+        Err(_) => CreateLine::Other,
+    }
+}
+
+#[cfg(test)]
+mod identity_app_tests {
+    use super::*;
+
+    const KEY: &[u8] = b"-----BEGIN RSA PRIVATE KEY-----\nMIIEow\n-----END RSA PRIVATE KEY-----\n";
+
+    #[test]
+    fn builds_identity_app_arguments() {
+        assert_eq!(
+            identity_apps_list_args(),
+            vec!["identity", "apps", "list", "--json"]
+        );
+        assert_eq!(
+            identity_app_create_args(None, None).unwrap(),
+            vec!["identity", "app", "create", "--manifest", "--json"]
+        );
+        assert_eq!(
+            identity_app_create_args(Some("Luna Bot"), Some("qwts")).unwrap(),
+            vec![
+                "identity",
+                "app",
+                "create",
+                "--manifest",
+                "--name",
+                "Luna Bot",
+                "--org",
+                "qwts",
+                "--json"
+            ]
+        );
+        assert_eq!(
+            identity_app_create_args(Some(""), Some("")).unwrap(),
+            vec!["identity", "app", "create", "--manifest", "--json"]
+        );
+        for (name, org) in [
+            (Some("--org"), None),
+            (Some("a;b"), None),
+            (None, Some("Qwts")),
+            (None, Some("-x")),
+        ] {
+            assert_eq!(
+                identity_app_create_args(name, org).unwrap_err().code,
+                "identity-app-invalid"
+            );
+        }
+        assert_eq!(
+            identity_app_connect_args("123", "/Users/me/Downloads/app.pem").unwrap(),
+            vec![
+                "identity",
+                "app",
+                "connect",
+                "--id",
+                "123",
+                "--key-file",
+                "/Users/me/Downloads/app.pem",
+                "--json"
+            ]
+        );
+        for (id, key) in [
+            ("", "/k.pem"),
+            ("12a", "/k.pem"),
+            ("--json", "/k.pem"),
+            ("1", "k.pem"),
+            ("1", "--json"),
+        ] {
+            assert_eq!(
+                identity_app_connect_args(id, key).unwrap_err().code,
+                "identity-app-invalid"
+            );
+        }
+        assert_eq!(
+            identity_app_rotate_args("luna-bot", "/k.pem").unwrap(),
+            vec![
+                "identity",
+                "app",
+                "rotate-key",
+                "luna-bot",
+                "--key-file",
+                "/k.pem",
+                "--json"
+            ]
+        );
+        for (slug, key) in [
+            ("--json", "/k.pem"),
+            ("Luna", "/k.pem"),
+            ("", "/k.pem"),
+            ("a", ""),
+        ] {
+            assert_eq!(
+                identity_app_rotate_args(slug, key).unwrap_err().code,
+                "identity-app-invalid"
+            );
+        }
+        assert_eq!(
+            identity_app_assign_args("luna-bot", None, Some("agent_1")).unwrap(),
+            vec!["identity", "app", "assign", "luna-bot", "--soul", "agent_1", "--json"]
+        );
+        assert_eq!(
+            identity_app_assign_args("luna-bot", Some("codex"), None).unwrap(),
+            vec![
+                "identity",
+                "app",
+                "assign",
+                "luna-bot",
+                "--harness",
+                "codex",
+                "--json"
+            ]
+        );
+        for (slug, harness, soul) in [
+            ("luna-bot", None, None),
+            ("luna-bot", Some("codex"), Some("agent_1")),
+            ("luna-bot", None, Some("--json")),
+            ("luna-bot", Some(""), None),
+            ("-x", None, Some("agent_1")),
+        ] {
+            assert_eq!(
+                identity_app_assign_args(slug, harness, soul)
+                    .unwrap_err()
+                    .code,
+                "identity-app-invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn keeps_only_the_documented_list_fields() {
+        let list = parse_identity_apps_list(
+            br#"{"schemaVersion":1,"apps":[{"slug":"luna-bot","botLogin":"luna-bot[bot]","issuerPresent":true,"keyPresent":true,"privateKeyPem":"-----BEGIN RSA PRIVATE KEY-----","installations":[{"id":7,"account":"qwts","repositorySelection":"all","token":"ghs_x"}],"harnesses":["codex"],"souls":["agent_1"],"liveMint":{"status":"ready","code":null,"checkedAt":"2026-10-06T10:00:00Z","jwt":"x"}},{"slug":"Bad Slug"},{"slug":"old-app","keyPresent":false,"liveMint":{"status":"weird"}}]}
+"#,
+            b"",
+        )
+        .unwrap();
+        assert_eq!(
+            list,
+            json!({ "apps": [
+                {
+                    "slug": "luna-bot", "botLogin": "luna-bot[bot]", "issuerPresent": true, "keyPresent": true,
+                    "installations": [{ "id": 7, "account": "qwts", "repositorySelection": "all" }],
+                    "harnesses": ["codex"], "souls": ["agent_1"],
+                    "liveMint": { "status": "ready", "code": null, "checkedAt": "2026-10-06T10:00:00Z" },
+                },
+                {
+                    "slug": "old-app", "botLogin": "old-app[bot]", "issuerPresent": false, "keyPresent": false,
+                    "installations": [], "harnesses": [], "souls": [], "liveMint": { "status": "unknown" },
+                },
+            ] })
+        );
+        assert!(!list.to_string().contains("BEGIN"));
+        assert!(!list.to_string().contains("ghs_"));
+        // The add-on off: an empty list, not a failure.
+        assert_eq!(
+            parse_identity_apps_list(b"{\"schemaVersion\":1,\"apps\":[]}\n", b"").unwrap(),
+            json!({ "apps": [] })
+        );
+    }
+
+    #[test]
+    fn a_failed_or_older_list_is_an_error() {
+        assert_eq!(
+            parse_identity_apps_list(
+                b"{\"error\":{\"code\":\"identity-app-failed\",\"message\":\"App operation failed\"}}\n",
+                b""
+            )
+            .unwrap_err()
+            .code,
+            "identity-app-failed"
+        );
+        // agent-bot 0.10.23 hands `identity apps` to its identity command.
+        assert_eq!(
+            parse_identity_apps_list(b"", b"agent-bot: usage: agent-bot identity show\n")
+                .unwrap_err()
+                .code,
+            "identity-app-failed"
+        );
+        assert_eq!(
+            parse_identity_apps_list(b"{\"apps\":[]}\n", b"")
+                .unwrap_err()
+                .message,
+            "agent-bot gave no App list"
+        );
+    }
+
+    #[test]
+    fn never_surfaces_key_material() {
+        let mut stdout = KEY.to_vec();
+        stdout.extend_from_slice(b"{\"id\":\"123\",\"slug\":\"luna-bot\",\"installUrl\":\"https://github.com/apps/luna-bot/installations/new\",\"pem\":\"-----BEGIN RSA PRIVATE KEY-----\"}\n");
+        let result = parse_identity_app_result(&stdout, b"", false).unwrap();
+        assert_eq!(
+            result,
+            json!({ "id": "123", "slug": "luna-bot", "installUrl": "https://github.com/apps/luna-bot/installations/new" })
+        );
+        // A key printed on its own is neither a result nor an error message.
+        let error = parse_identity_app_result(KEY, KEY, false).unwrap_err();
+        assert!(!error.message.contains("BEGIN"), "{error:?}");
+        let error = parse_identity_apps_list(b"", KEY).unwrap_err();
+        assert!(!error.message.contains("BEGIN") && !error.message.contains("PRIVATE"));
+        let error = parse_identity_app_assign(
+            b"{\"error\":{\"code\":\"identity-app-failed\",\"message\":\"-----BEGIN PRIVATE KEY-----\"}}\n",
+            b"",
+        )
+        .unwrap_err();
+        assert!(!error.message.contains("BEGIN"));
+        assert_eq!(parse_create_line(KEY), CreateLine::Other);
+    }
+
+    #[test]
+    fn parses_rotation_and_assignment_results() {
+        let rotated = parse_identity_app_result(
+            b"{\"id\":\"123\",\"slug\":\"luna-bot\",\"installUrl\":\"https://github.com/apps/luna-bot/installations/new\",\"retired\":\"SHA256:abc=\",\"action\":\"Delete it.\"}\n",
+            b"",
+            true,
+        )
+        .unwrap();
+        assert_eq!(rotated["retired"], "SHA256:abc=");
+        assert!(rotated.get("action").is_none());
+        assert_eq!(
+            parse_identity_app_result(
+                b"{\"error\":{\"code\":\"identity-app-disabled\",\"message\":\"Enable the github-identity add-on before managing Apps.\"}}\n",
+                b"",
+                true
+            ),
+            Err(BridgeError::new(
+                "identity-app-disabled",
+                "Enable the github-identity add-on before managing Apps."
+            ))
+        );
+        // An install URL that is not GitHub's is not a result.
+        assert_eq!(
+            parse_identity_app_result(
+                b"{\"id\":\"1\",\"slug\":\"a\",\"installUrl\":\"https://evil.example/\"}\n",
+                b"",
+                false
+            )
+            .unwrap_err()
+            .message,
+            "agent-bot gave no App"
+        );
+        assert_eq!(
+            parse_identity_app_assign(
+                b"{\"slug\":\"luna-bot\",\"soul\":\"agent_1\",\"x\":1}\n",
+                b""
+            )
+            .unwrap(),
+            json!({ "slug": "luna-bot", "soul": "agent_1" })
+        );
+        assert_eq!(
+            parse_identity_app_assign(b"{\"slug\":\"luna-bot\",\"harness\":\"codex\"}\n", b"")
+                .unwrap(),
+            json!({ "slug": "luna-bot", "harness": "codex" })
+        );
+        assert_eq!(
+            parse_identity_app_assign(b"{\"slug\":\"luna-bot\"}\n", b"")
+                .unwrap_err()
+                .code,
+            "identity-app-failed"
+        );
+    }
+
+    #[test]
+    fn reads_create_lines() {
+        assert_eq!(
+            parse_create_line(
+                b"{\"status\":\"pending\",\"localUrl\":\"http://127.0.0.1:5123/?state=ab\"}"
+            ),
+            CreateLine::Pending("http://127.0.0.1:5123/?state=ab".into())
+        );
+        assert!(matches!(
+            parse_create_line(b"{\"status\":\"pending\",\"localUrl\":\"https://evil.example/\"}"),
+            CreateLine::Failed(_)
+        ));
+        assert_eq!(
+            parse_create_line(b"{\"id\":\"9\",\"slug\":\"luna-bot\",\"installUrl\":\"https://github.com/apps/luna-bot/installations/new\",\"pem\":\"x\"}"),
+            CreateLine::Done(json!({ "id": "9", "slug": "luna-bot", "installUrl": "https://github.com/apps/luna-bot/installations/new" }))
+        );
+        assert_eq!(
+            parse_create_line(b"{\"error\":{\"code\":\"identity-app-timeout\",\"message\":\"App creation timed out after 10 minutes; start create again.\"}}"),
+            CreateLine::Failed(BridgeError::new(
+                "identity-app-timeout",
+                "App creation timed out after 10 minutes; start create again."
+            ))
+        );
+        assert_eq!(
+            parse_create_line(b"Open http://127.0.0.1:1/"),
+            CreateLine::Other
+        );
+    }
+
+    #[test]
+    fn opens_only_the_loopback_page_or_github() {
+        assert!(identity_url_allowed("http://127.0.0.1:5123/?state=ab"));
+        assert!(identity_url_allowed(
+            "https://github.com/apps/luna-bot/installations/new"
+        ));
+        for url in [
+            "http://127.0.0.1.evil.example/",
+            "http://127.0.0.1:/",
+            "http://localhost:5123/",
+            "https://github.com.evil.example/",
+            "file:///etc/passwd",
+            "https://github.com/a b",
+            "-a",
+        ] {
+            assert!(!identity_url_allowed(url), "{url}");
+        }
+    }
+
+    #[test]
+    fn reads_the_open_dialogs_answer() {
+        assert_eq!(
+            picked_key_file(true, b"/Users/me/Downloads/app.pem\n", b""),
+            Ok("/Users/me/Downloads/app.pem".into())
+        );
+        assert_eq!(
+            picked_key_file(false, b"", b"execution error: User canceled. (-128)\n")
+                .unwrap_err()
+                .code,
+            "identity-app-cancelled"
+        );
+        assert_eq!(
+            picked_key_file(false, b"", b"boom\n").unwrap_err().code,
+            "identity-app-key-unavailable"
+        );
+    }
+}
