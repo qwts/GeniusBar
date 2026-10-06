@@ -45,12 +45,20 @@ function Preview() {
   const params = new URLSearchParams(location.search);
   const mode = (params.get('mode') === 'window' ? 'window' : 'tray') as AppMode;
   const [composers, setComposers] = useState<ChatApi['composers']>({});
+  const [chatState, setChatState] = useState(state);
   const chat: ChatApi = {
-    chat: state,
+    chat: chatState,
     composers,
     open: () => {},
     setDraft: (key, draft) => setComposers((c) => ({ ...c, [key]: { ...(c[key] ?? emptyComposer), draft } })),
     send: async () => {},
+    // Answers approvals locally, as agent-bot would once the owner confirms.
+    resolve: async (key, entryId, decision) => setChatState((s) => {
+      const c = s.conversations[key];
+      if (!c) return s;
+      const entries = c.entries.map((e) => (e.id === entryId && e.kind === 'approval_request' ? { ...e, status: decision } : e));
+      return { ...s, conversations: { ...s.conversations, [key]: { ...c, entries } } };
+    }),
   };
   const opened = params.get('open');
   const app = <App mode={mode} select={params.get('select')} openedPackage={opened ? { id: 1, path: opened, checking: false, error: null } : undefined} census={census} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}

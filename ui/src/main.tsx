@@ -25,7 +25,7 @@ function Live({ snapshot }: { snapshot: SnapshotOptions | null }) {
   const { census, connection, refresh } = useCensus();
   const select = useSnapshot(snapshot, census, connection, refresh);
   const { setup, existing, runSetup } = useSetup(() => { void refresh?.(); });
-  const chat = useChat({ enabled: inApp() && !snapshot });
+  const chat = useChat({ enabled: inApp() && !snapshot, roster: census });
   const launcher = useLaunch();
   const updates = useUpdates();
   const [openedPackage, setOpenedPackage] = useState<{ id: number; path: string; checking: boolean; error: string | null; agentId?: string; name?: string; preferredHarnesses?: string[] }>();

@@ -175,6 +175,8 @@ export const es: Catalog = {
   'approval.approved_session': 'Aprobado para esta sesión',
   'approval.denied': 'Denegado',
   'approval.unavailable': 'Las aprobaciones llegarán en una próxima actualización',
+  'approval.deciding': 'Confirma en este Mac para terminar…',
+  'approval.failed': 'Sin decidir: {message}',
   asideLabel: '{from} → {to}',
   asideHint: 'Coordinación interna, no dirigida a ti',
   'aside.team': 'Equipo {team}',

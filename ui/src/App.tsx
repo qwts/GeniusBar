@@ -191,6 +191,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
         composer: chat.composers[openKey] ?? emptyComposer,
         onDraft: (draft) => chat.setDraft(openKey, draft),
         onSend: () => { void chat.send(openKey); },
+        onResolve: chat.resolve && ((entryId, decision) => { void chat.resolve?.(openKey, entryId, decision); }),
       } : undefined}
       launch={launch}
       onOpen={open}

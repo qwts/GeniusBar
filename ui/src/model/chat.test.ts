@@ -19,6 +19,13 @@ import {
   unreadOf,
   fromStored,
   isTextEntry,
+  approvalEntries,
+  asideEntries,
+  normalizeApprovals,
+  normalizeAsides,
+  withSideEntries,
+  type AsideRecord,
+  type ApprovalRecord,
   needsApproval,
   pendingApprovals,
   STORED_ENTRIES,
@@ -391,5 +398,93 @@ describe('entry kinds', () => {
     const state: ChatState = { conversations: { 'user/agent_p': { entries, unread: 0 } }, ids: new Set(entries.map((e) => e.id)) };
     const back = fromStored(toStored(state));
     expect(conversationOf(back, 'user/agent_p').entries.map((e) => e.id)).toEqual(['m1']);
+  });
+});
+
+describe('asides from agent-bot', () => {
+  const peer = (agentId: string, name: string | null = null) => ({ address: `user/${agentId}`, agentId, principal: null, name });
+  const aside = (id: string, dir: 'in' | 'out', p: AsideRecord['peer'], body: string, extra: Partial<AsideRecord> = {}): AsideRecord => ({
+    id, at: `2026-10-05T10:00:0${id.slice(-1)}Z`, dir, via: 'send_message', reshown: false, peer: p,
+    messageId: `msg_${id}`, replyTo: null, correlation: null, teamId: null, body, ...extra,
+  });
+  const roster = [
+    { agentId: 'agent_lead', name: 'luna', parent: null },
+    { agentId: 'agent_a', name: 'scout', parent: 'agent_lead' },
+    { agentId: 'agent_b', name: 'quill', parent: 'agent_a' },
+    { agentId: 'agent_x', name: 'nova', parent: null },
+  ];
+
+  it('normalizes a page and drops malformed asides', () => {
+    expect(normalizeAsides({ asides: [{ id: 'aside_1', at: 'x', dir: 'out', body: 'hi', peer: { agentId: 'agent_b' } }, { id: 2 }], next: 'aside_1' }))
+      .toMatchObject({ asides: [{ id: 'aside_1', peer: { agentId: 'agent_b', name: null }, reshown: false }], next: 'aside_1' });
+    expect(normalizeAsides({ error: {} })).toBeNull();
+  });
+
+  it('pairs an aside with the reply to it and names the shared team lead', () => {
+    const records = [
+      aside('aside_1', 'out', peer('agent_b', 'quill'), 'Is CI green?'),
+      aside('aside_2', 'in', peer('agent_x'), 'unrelated'),
+      aside('aside_3', 'in', peer('agent_b', 'quill'), 'Yes.', { replyTo: 'msg_aside_1' }),
+    ];
+    expect(asideEntries('agent_a', records, roster)).toEqual([
+      { id: 'aside:aside_1', kind: 'aside', from: 'scout', to: 'quill', body: 'Is CI green?', reply: 'Yes.', team: 'luna',
+        at: Date.parse('2026-10-05T10:00:01Z'), seq: null },
+      { id: 'aside:aside_2', kind: 'aside', from: 'nova', to: 'scout', body: 'unrelated', at: Date.parse('2026-10-05T10:00:02Z'), seq: null },
+    ]);
+  });
+
+  it('pairs by correlation, skips reshown context and principals, and falls back to ids for names', () => {
+    const records = [
+      aside('aside_1', 'in', peer('agent_q'), 'ping', { correlation: 'c1' }),
+      aside('aside_2', 'out', peer('agent_q'), 'old', { reshown: true, via: 'thread-context' }),
+      aside('aside_3', 'out', { address: 'principal_1', agentId: null, principal: 'principal_1', name: null }, 'to the owner'),
+      aside('aside_4', 'out', peer('agent_q'), 'pong', { correlation: 'c1' }),
+    ];
+    expect(asideEntries('agent_lead', records, roster)).toEqual([
+      expect.objectContaining({ from: 'agent_q', to: 'luna', body: 'ping', reply: 'pong' }),
+    ]);
+    expect(asideEntries('agent_lead', records, roster)[0].team).toBeUndefined();
+  });
+});
+
+describe('approvals from agent-bot', () => {
+  const row = (proposalId: string, agentId = 'agent_p', status = 'pending'): ApprovalRecord => ({
+    proposalId, agentId, soul: 'luna', tool: 'Bash', summary: `git push ${proposalId}`,
+    createdAt: '2026-10-05T10:00:00Z', expiresAt: null, status,
+  });
+
+  it('normalizes the list', () => {
+    expect(normalizeApprovals({ approvals: [{ proposalId: 'p1', agentId: 'agent_p', status: 'pending', summary: 's' }, {}] }))
+      .toMatchObject([{ proposalId: 'p1', tool: null, summary: 's' }]);
+    expect(normalizeApprovals({})).toBeNull();
+  });
+
+  it('maps the open soul’s pending proposals as external, with local decisions on top', () => {
+    const records = [row('p1'), row('p2', 'agent_other'), row('p3', 'agent_p', 'approved')];
+    const entries = approvalEntries('agent_p', records);
+    expect(entries).toEqual([{ id: 'p1', kind: 'approval_request', tool: 'Bash', args: 'git push p1', risk: 'external',
+      status: 'pending', at: Date.parse('2026-10-05T10:00:00Z'), seq: null }]);
+    const local = new Map([
+      ['p1', { agentId: 'agent_p', entry: { ...entries[0], deciding: true, error: null } }],
+      ['p9', { agentId: 'agent_p', entry: { ...entries[0], id: 'p9', status: 'denied' as const } }],
+      ['p8', { agentId: 'agent_p', entry: { ...entries[0], id: 'p8' } }],
+    ]);
+    expect(approvalEntries('agent_p', records, local).map((e) => [e.id, e.status, e.deciding ?? false]))
+      .toEqual([['p1', 'pending', true], ['p9', 'denied', false]]);
+  });
+});
+
+describe('withSideEntries', () => {
+  it('replaces one kind in a conversation, keeps the rest, and is a no-op when unchanged', () => {
+    const base = mergeIncoming(emptyChat, [inboxMessage('msg_1', 1)]).state;
+    const side: ChatEntry[] = [{ id: 'aside:1', kind: 'aside', from: 'a', to: 'b', body: 'x', at: 1_000, seq: null }];
+    const once = withSideEntries(base, 'user/agent_p', 'aside', side);
+    expect(conversationOf(once, 'user/agent_p').entries.map((e) => e.id)).toEqual(['aside:1', 'msg_1']);
+    expect(unreadOf(once, 'user/agent_p')).toBe(1);
+    expect(withSideEntries(once, 'user/agent_p', 'aside', side)).toBe(once);
+    const cleared = withSideEntries(once, 'user/agent_p', 'aside', []);
+    expect(conversationOf(cleared, 'user/agent_p').entries.map((e) => e.id)).toEqual(['msg_1']);
+    expect(cleared.ids.has('aside:1')).toBe(false);
+    expect(withSideEntries(emptyChat, 'user/x', 'approval_request', [])).toBe(emptyChat);
   });
 });

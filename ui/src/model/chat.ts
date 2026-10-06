@@ -9,6 +9,8 @@
 // { principal } for a principal. A principal's mailbox only ever holds
 // messages from souls, and its own sends are not echoed back to it.
 
+import { displayName, type CensusRow } from './census';
+
 /** A message as the principal client's `inbox` returns it. */
 export interface InboxMessage {
   id: string;
@@ -72,6 +74,10 @@ export interface ApprovalEntry extends EntryBase {
   args: string;
   risk: Risk;
   status: ApprovalStatus;
+  /** A decision is on its way (the daemon is asking the owner to confirm). */
+  deciding?: boolean | undefined;
+  /** Why the last decision did not land; the request stays pending. */
+  error?: string | null | undefined;
 }
 
 /** Background coordination between two agents, not addressed to the owner. */
@@ -211,6 +217,203 @@ export function markRead(state: ChatState, key: string): ChatState {
   const prev = state.conversations[key];
   if (!prev || prev.unread === 0) return state;
   return { ...state, conversations: { ...state.conversations, [key]: { ...prev, unread: 0 } } };
+}
+
+// ---- Asides and approvals from agent-bot (#122, #85, #86) -----------------
+//
+// agent-bot 0.10.13 records the agent-comms messages that entered or left a
+// soul's context (`soul asides <soul> --json`) and lists the tool calls
+// waiting on the owner (`approvals list --json`). These turn its lines into
+// conversation entries; the bridge only relays them.
+
+export interface AsidePeer {
+  address: string | null;
+  agentId: string | null;
+  principal: string | null;
+  name: string | null;
+}
+
+/** One line of agent-bot's aside journal for a soul. */
+export interface AsideRecord {
+  id: string;
+  /** ISO time. */
+  at: string;
+  /** Out: the soul sent it; in: it entered the soul's context. */
+  dir: 'in' | 'out';
+  via: string;
+  /** Thread context shown again in a later turn, not a new message. */
+  reshown: boolean;
+  peer: AsidePeer;
+  messageId: string | null;
+  replyTo: string | null;
+  correlation: string | null;
+  teamId: string | null;
+  body: string;
+}
+
+/** A pending (or just decided) proposal from `approvals list|approve|deny --json`. */
+export interface ApprovalRecord {
+  proposalId: string;
+  agentId: string;
+  soul: string | null;
+  tool: string | null;
+  summary: string;
+  createdAt: string;
+  expiresAt: string | null;
+  status: string;
+}
+
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+const stringOrNull = (value: unknown): string | null => (typeof value === 'string' && value !== '' ? value : null);
+
+function normalizeAside(raw: unknown): AsideRecord | null {
+  if (!isObject(raw) || typeof raw.id !== 'string' || typeof raw.at !== 'string' || typeof raw.body !== 'string') return null;
+  if (raw.dir !== 'in' && raw.dir !== 'out') return null;
+  const peer = isObject(raw.peer) ? raw.peer : {};
+  return {
+    id: raw.id, at: raw.at, dir: raw.dir, via: typeof raw.via === 'string' ? raw.via : '', reshown: raw.reshown === true,
+    peer: {
+      address: stringOrNull(peer.address), agentId: stringOrNull(peer.agentId),
+      principal: stringOrNull(peer.principal), name: stringOrNull(peer.name),
+    },
+    messageId: stringOrNull(raw.messageId), replyTo: stringOrNull(raw.replyTo),
+    correlation: stringOrNull(raw.correlation), teamId: stringOrNull(raw.teamId), body: raw.body,
+  };
+}
+
+/** A `soul asides --json` page, keeping well-formed asides; null when it is not one. */
+export function normalizeAsides(raw: unknown): { asides: AsideRecord[]; next: string | null } | null {
+  if (!isObject(raw) || !Array.isArray(raw.asides)) return null;
+  return {
+    asides: raw.asides.map(normalizeAside).filter((a): a is AsideRecord => a !== null),
+    next: stringOrNull(raw.next),
+  };
+}
+
+export function normalizeApproval(raw: unknown): ApprovalRecord | null {
+  if (!isObject(raw) || typeof raw.proposalId !== 'string' || typeof raw.agentId !== 'string'
+    || typeof raw.status !== 'string') return null;
+  return {
+    proposalId: raw.proposalId, agentId: raw.agentId, soul: stringOrNull(raw.soul), tool: stringOrNull(raw.tool),
+    summary: typeof raw.summary === 'string' ? raw.summary : '',
+    createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : '', expiresAt: stringOrNull(raw.expiresAt),
+    status: raw.status,
+  };
+}
+
+/** An `approvals list --json` result, keeping well-formed rows; null when it is not one. */
+export function normalizeApprovals(raw: unknown): ApprovalRecord[] | null {
+  if (!isObject(raw) || !Array.isArray(raw.approvals)) return null;
+  return raw.approvals.map(normalizeApproval).filter((a): a is ApprovalRecord => a !== null);
+}
+
+type RosterRow = Pick<CensusRow, 'agentId' | 'name' | 'parent'>;
+
+/** The top of a soul's parent chain in the roster, or null when it is not there. */
+function teamRoot(agentId: string, roster: readonly RosterRow[]): RosterRow | null {
+  const byId = new Map(roster.map((row) => [row.agentId, row]));
+  let row = byId.get(agentId);
+  for (let depth = 0; row && row.parent !== null && depth < 64; depth += 1) {
+    const parent = byId.get(row.parent);
+    if (!parent) break;
+    row = parent;
+  }
+  return row ?? null;
+}
+
+/**
+ * A soul's asides as conversation entries, oldest first: "A → B" with B's
+ * answer as the reply when a later aside from the same peer replies to it
+ * (by message id, or the same correlation). Thread context shown again and
+ * messages to or from a principal (the owner's own chat) are left out. The
+ * team is the shared lead's name when both souls are in one team.
+ */
+export function asideEntries(agentId: string, records: readonly AsideRecord[], roster: readonly RosterRow[] = []): AsideEntry[] {
+  const rows = records.filter((r) => !r.reshown && r.peer.principal === null && (r.peer.agentId ?? r.peer.address) !== null);
+  const self = roster.find((row) => row.agentId === agentId);
+  const selfName = self ? displayName(self) : agentId;
+  const selfRoot = teamRoot(agentId, roster);
+  const used = new Set<string>();
+  const entries: AsideEntry[] = [];
+  rows.forEach((r, i) => {
+    if (used.has(r.id)) return;
+    const peerKey = r.peer.agentId ?? r.peer.address;
+    const answer = rows.slice(i + 1).find((a) => !used.has(a.id) && a.dir !== r.dir
+      && (a.peer.agentId ?? a.peer.address) === peerKey
+      && ((r.messageId !== null && a.replyTo === r.messageId) || (r.correlation !== null && a.correlation === r.correlation)));
+    if (answer) used.add(answer.id);
+    const peerRow = r.peer.agentId ? roster.find((row) => row.agentId === r.peer.agentId) : undefined;
+    const peerName = r.peer.name ?? (peerRow ? displayName(peerRow) : peerKey ?? 'unknown');
+    const peerRoot = r.peer.agentId ? teamRoot(r.peer.agentId, roster) : null;
+    const team = selfRoot && peerRoot && selfRoot.agentId === peerRoot.agentId ? displayName(selfRoot) : undefined;
+    const at = Date.parse(r.at);
+    entries.push({
+      id: `aside:${r.id}`, kind: 'aside',
+      from: r.dir === 'out' ? selfName : peerName,
+      to: r.dir === 'out' ? peerName : selfName,
+      body: r.body,
+      ...(answer ? { reply: answer.body } : {}),
+      ...(team ? { team } : {}),
+      at: Number.isFinite(at) ? at : 0, seq: null,
+    });
+  });
+  return entries;
+}
+
+/** What GeniusBar knows locally about a proposal: a decision in flight, failed, or landed. */
+export interface LocalApproval {
+  agentId: string;
+  entry: ApprovalEntry;
+}
+
+/**
+ * A soul's approval requests as entries: each pending proposal for it (the
+ * daemon has no risk levels yet, so every one reads as external), overlaid
+ * with a local decision in flight or failed, plus proposals decided here
+ * that have since left the pending list, so the card shows the answer.
+ */
+export function approvalEntries(agentId: string, records: readonly ApprovalRecord[],
+  local: ReadonlyMap<string, LocalApproval> = new Map()): ApprovalEntry[] {
+  const entries: ApprovalEntry[] = [];
+  const listed = new Set<string>();
+  for (const r of records) {
+    if (r.agentId !== agentId || r.status !== 'pending') continue;
+    listed.add(r.proposalId);
+    const at = Date.parse(r.createdAt);
+    const base: ApprovalEntry = {
+      id: r.proposalId, kind: 'approval_request', tool: r.tool ?? 'tool', args: r.summary, risk: 'external',
+      status: 'pending', at: Number.isFinite(at) ? at : 0, seq: null,
+    };
+    const mine = local.get(r.proposalId)?.entry;
+    entries.push(mine ? { ...base, status: mine.status, deciding: mine.deciding, error: mine.error } : base);
+  }
+  for (const [id, mine] of local) {
+    if (mine.agentId === agentId && !listed.has(id) && mine.entry.status !== 'pending') entries.push(mine.entry);
+  }
+  return entries.sort(byTime);
+}
+
+/**
+ * Replaces one conversation's entries of `kind` (asides or approvals, which
+ * agent-bot reports whole each time) with `entries`. Returns the same state
+ * when nothing changed. Never counts as unread.
+ */
+export function withSideEntries(state: ChatState, key: string, kind: 'aside' | 'approval_request',
+  entries: readonly ChatEntry[]): ChatState {
+  const prev = state.conversations[key];
+  const all = prev?.entries ?? [];
+  const old = all.filter((e) => e.kind === kind);
+  const fresh = [...entries].sort(byTime);
+  if (JSON.stringify(old) === JSON.stringify(fresh)) return state;
+  const ids = new Set(state.ids);
+  old.forEach((e) => ids.delete(e.id));
+  fresh.forEach((e) => ids.add(e.id));
+  const next = [...all.filter((e) => e.kind !== kind), ...fresh].sort(byTime);
+  return enforceAggregateBounds({
+    conversations: { ...state.conversations, [key]: { entries: next, unread: prev?.unread ?? 0 } },
+    ids,
+  });
 }
 
 // ---- Composer -------------------------------------------------------------

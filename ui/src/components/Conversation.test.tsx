@@ -51,8 +51,12 @@ describe('Conversation', () => {
     const ask: ChatEntry[] = [{ id: 'a', kind: 'approval_request', tool: 'terminal', args: 'rm x', risk: 'destructive', status: 'pending', at: 1, seq: null }];
     const onResolve = vi.fn();
     const { rerender } = render(<Conversation name="luna" entries={ask} composer={emptyComposer} onDraft={() => {}} onSend={() => {}} onResolve={onResolve} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Approve for session' }));
-    expect(onResolve).toHaveBeenCalledWith('a', 'approved_session');
+    fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
+    expect(onResolve).toHaveBeenCalledWith('a', 'denied');
+    // The daemon has no session scope yet.
+    const session = screen.getByRole('button', { name: 'Approve for session' }) as HTMLButtonElement;
+    expect(session.disabled).toBe(true);
+    expect(session.title).toBe('Approvals arrive in a later update');
 
     rerender(<Conversation name="luna" entries={ask} composer={emptyComposer} onDraft={() => {}} onSend={() => {}} />);
     const deny = screen.getByRole('button', { name: 'Deny' }) as HTMLButtonElement;

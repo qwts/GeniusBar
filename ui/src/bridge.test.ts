@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BridgeError, call, inApp, normalizeRuntimeMetrics, normalizeSoulComms, setSoulComms, soulComms } from './bridge';
+import { BridgeError, call, decideApproval, inApp, listApprovals, normalizeRuntimeMetrics, normalizeSoulComms, setSoulComms, soulAsides, soulComms } from './bridge';
 
 describe('bridge', () => {
   it('invokes the shell command with the method and params', async () => {
@@ -74,5 +74,31 @@ describe('normalizeRuntimeMetrics', () => {
     for (const raw of [null, { unavailable: true }, { souls: [], errors: [], missing: [] }]) {
       expect(normalizeRuntimeMetrics(raw)).toEqual({ unavailable: true });
     }
+  });
+});
+
+describe('agent-bot asides and approvals', () => {
+  it('reads asides and approvals through the shell, null when it cannot', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (command: string, args: unknown) => {
+      calls.push([command, args]);
+      return command === 'soul_asides' ? { agentId: 'agent_1', asides: [], next: null } : { approvals: [] };
+    }) as never;
+    await expect(soulAsides('agent_1', 'aside_9', fake)).resolves.toEqual({ asides: [], next: null });
+    await expect(listApprovals(fake)).resolves.toEqual([]);
+    expect(calls).toEqual([['soul_asides', { soul: 'agent_1', after: 'aside_9' }], ['approvals', { action: 'list' }]]);
+    const failing = (async () => { throw { code: 'soul-asides-failed', message: 'x' }; }) as never;
+    await expect(soulAsides('agent_1', null, failing)).resolves.toBeNull();
+    await expect(listApprovals(failing)).resolves.toBeNull();
+    await expect(soulAsides('agent_1', null)).resolves.toBeNull();
+  });
+
+  it('decides a proposal and keeps the shell’s error code', async () => {
+    const ok = (async (_c: string, args: { action: string; proposal: string }) =>
+      ({ proposalId: args.proposal, agentId: 'agent_1', status: args.action === 'deny' ? 'denied' : 'approved', summary: 's' })) as never;
+    await expect(decideApproval('p1', 'deny', ok)).resolves.toMatchObject({ proposalId: 'p1', status: 'denied' });
+    const refused = (async () => { throw { code: 'not-open', message: 'p1 is not waiting on a decision' }; }) as never;
+    await expect(decideApproval('p1', 'approve', refused)).rejects.toMatchObject({ code: 'not-open' });
+    await expect(decideApproval('p1', 'approve', (async () => ({})) as never)).rejects.toMatchObject({ code: 'approvals-failed' });
   });
 });

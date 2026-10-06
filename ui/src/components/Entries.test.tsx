@@ -37,6 +37,24 @@ describe('ToolApprovalCard', () => {
   });
 });
 
+describe('ToolApprovalCard while deciding', () => {
+  const e = { id: 'p', kind: 'approval_request', tool: 'Bash', args: 'git push', risk: 'external', status: 'pending', at: 1, seq: null } as const;
+
+  it('waits for the owner to confirm, then shows a failed decision', () => {
+    const { rerender } = render(<ToolApprovalCard e={{ ...e, deciding: true }} name="luna" onResolve={() => {}} />);
+    expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole('status').textContent).toBe('Confirm on this Mac to finish…');
+    rerender(<ToolApprovalCard e={{ ...e, error: 'owner did not confirm' }} name="luna" onResolve={() => {}} />);
+    expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByText('Not decided: owner did not confirm')).toBeTruthy();
+  });
+
+  it('enables Approve for session only when allowed', () => {
+    render(<ToolApprovalCard e={e} name="luna" onResolve={() => {}} allowSession />);
+    expect((screen.getByRole('button', { name: 'Approve for session' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
 describe('AgentAside', () => {
   it('starts open with the reply under the note, and collapses', () => {
     render(<AgentAside e={{ id: 's', kind: 'aside', from: 'luna', to: 'scout', body: 'flaky?', reply: 'Fixed.', team: 'luna', at: 1, seq: null }} />);

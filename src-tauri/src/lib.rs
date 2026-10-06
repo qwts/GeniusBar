@@ -241,6 +241,8 @@ pub fn run() {
             bridge::runtime_metrics,
             bridge::soul_comms,
             bridge::locate_soul_package,
+            bridge::soul_asides,
+            bridge::approvals,
             updates::update_status,
             updates::update_action,
             snapshot::snapshot_options,

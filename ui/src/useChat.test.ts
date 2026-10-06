@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BridgeError } from './bridge';
 import { conversationOf, MAX_AGGREGATE_ENTRIES, MAX_CONVERSATIONS, unreadOf } from './model/chat';
 import { inboxMessage } from './model/fixtures';
-import { CHAT_STORAGE_KEY, INBOX_PAGE, pollInbox, sendMessage, useChat } from './useChat';
+import { CHAT_STORAGE_KEY, INBOX_PAGE, pollInbox, sendMessage, useChat, type AgentBotFeed } from './useChat';
 
 afterEach(() => { cleanup(); globalThis.localStorage?.clear(); });
 
@@ -232,4 +232,64 @@ describe('useChat aggregate bounds (#93)', () => {
     for (const c of Object.values(chat.conversations)) totalEntries += c.entries.length;
     expect(totalEntries).toBeLessThanOrEqual(MAX_AGGREGATE_ENTRIES);
   }, 30_000);  // a 30,000-message flood: slow on a loaded CI runner
+});
+
+describe('useChat asides and approvals (#122, #85, #86)', () => {
+  const quietBridge = (async (method: string) => (method === 'inbox' ? { messages: [], cursor: 0, remaining: 0 } : { ok: true })) as never;
+
+  it('shows the open soul’s asides and pending approvals, and decides through agent-bot', async () => {
+    const afters: (string | null)[] = [];
+    const decisions: [string, string][] = [];
+    let pending = [{ proposalId: 'p1', agentId: 'agent_p', soul: 'luna', tool: 'Bash', summary: 'git push',
+      createdAt: '2026-10-05T10:00:00Z', expiresAt: null, status: 'pending' }];
+    const feed: AgentBotFeed = {
+      asides: async (_agentId, after) => {
+        afters.push(after);
+        return after === null
+          ? { asides: [{ id: 'aside_1', at: '2026-10-05T09:00:00Z', dir: 'out', via: 'send_message', reshown: false,
+            peer: { address: 'user/agent_c', agentId: 'agent_c', principal: null, name: null },
+            messageId: 'm1', replyTo: null, correlation: null, teamId: 'agent_p', body: 'check CI' }], next: null }
+          : { asides: [], next: null };
+      },
+      approvals: async () => pending,
+      decide: async (proposalId, decision) => {
+        decisions.push([proposalId, decision]);
+        pending = [];
+        return { ...pending[0], proposalId, agentId: 'agent_p', soul: null, tool: 'Bash', summary: 'git push', createdAt: '',
+          expiresAt: null, status: decision === 'deny' ? 'denied' : 'approved' };
+      },
+    };
+    const roster = [
+      { account: 'user', agentId: 'agent_p', name: 'luna', harness: null, parent: null, presence: 'joined' as const, unacked: 0, lastWake: null },
+      { account: 'user', agentId: 'agent_c', name: 'scout', harness: null, parent: 'agent_p', presence: 'joined' as const, unacked: 0, lastWake: null },
+    ];
+    const { result } = renderHook(() => useChat({ enabled: true, callImpl: quietBridge, intervalMs: 60_000, storage: memoryStorage(), feed, roster }));
+    act(() => result.current.open('user/agent_p'));
+    await waitFor(() => expect(conversationOf(result.current.chat, 'user/agent_p').entries).toHaveLength(2));
+    const [aside, approval] = conversationOf(result.current.chat, 'user/agent_p').entries;
+    expect(aside).toMatchObject({ kind: 'aside', from: 'luna', to: 'scout', body: 'check CI', team: 'luna' });
+    expect(approval).toMatchObject({ kind: 'approval_request', id: 'p1', tool: 'Bash', args: 'git push', risk: 'external', status: 'pending' });
+    expect(unreadOf(result.current.chat, 'user/agent_p')).toBe(0);
+
+    await act(() => result.current.resolve!('user/agent_p', 'p1', 'approved_session'));
+    expect(decisions).toEqual([]);
+    await act(() => result.current.resolve!('user/agent_p', 'p1', 'approved'));
+    expect(decisions).toEqual([['p1', 'approve']]);
+    expect(conversationOf(result.current.chat, 'user/agent_p').entries[1]).toMatchObject({ id: 'p1', status: 'approved', deciding: false });
+  });
+
+  it('keeps a failed decision pending with its reason', async () => {
+    const feed: AgentBotFeed = {
+      asides: async () => null,
+      approvals: async () => [{ proposalId: 'p1', agentId: 'agent_p', soul: null, tool: null, summary: 'rm -rf dist',
+        createdAt: '2026-10-05T10:00:00Z', expiresAt: null, status: 'pending' }],
+      decide: async () => { throw new BridgeError('presence-declined', 'the owner did not confirm'); },
+    };
+    const { result } = renderHook(() => useChat({ enabled: true, callImpl: quietBridge, intervalMs: 60_000, storage: memoryStorage(), feed }));
+    act(() => result.current.open('user/agent_p'));
+    await waitFor(() => expect(conversationOf(result.current.chat, 'user/agent_p').entries).toHaveLength(1));
+    await act(() => result.current.resolve!('user/agent_p', 'p1', 'denied'));
+    expect(conversationOf(result.current.chat, 'user/agent_p').entries[0])
+      .toMatchObject({ status: 'pending', deciding: false, error: 'the owner did not confirm', tool: 'tool' });
+  });
 });

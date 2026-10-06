@@ -174,6 +174,8 @@ export const en = {
   'approval.approved_session': 'Approved for this session',
   'approval.denied': 'Denied',
   'approval.unavailable': 'Approvals arrive in a later update',
+  'approval.deciding': 'Confirm on this Mac to finish…',
+  'approval.failed': 'Not decided: {message}',
   asideLabel: '{from} → {to}',
   asideHint: 'Background coordination, not addressed to you',
   'aside.team': 'Team {team}',

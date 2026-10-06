@@ -988,3 +988,213 @@ fn parse_harness_auth(stdout: &[u8]) -> Result<Value, BridgeError> {
     }
     Ok(value)
 }
+
+/// Runs the bundled agent-bot with `args` in GeniusBar's host environment.
+async fn run_agent_bot<R: Runtime>(
+    app: &AppHandle<R>,
+    args: Vec<std::ffi::OsString>,
+    unavailable_code: &str,
+) -> Result<tauri_plugin_shell::process::Output, BridgeError> {
+    let unavailable = |e: String| BridgeError::new(unavailable_code, &e);
+    let resources = app
+        .path()
+        .resource_dir()
+        .map_err(|e| unavailable(e.to_string()))?;
+    let mut argv: Vec<std::ffi::OsString> = vec![resources
+        .join("components")
+        .join("agent-bot")
+        .join("agent-bot.mjs")
+        .into_os_string()];
+    argv.extend(args);
+    app.shell()
+        .sidecar("node")
+        .map_err(|e| unavailable(e.to_string()))?
+        .envs(HOST_ENV.iter().copied())
+        .args(argv)
+        .output()
+        .await
+        .map_err(|e| unavailable(e.to_string()))
+}
+
+/// agent-bot's `--json` result line when `valid` accepts it; otherwise its
+/// `{error: {code, message}}` line, or the last stderr line without
+/// `prefix`, as a `failed` error.
+fn parse_agent_bot_json(
+    stdout: &[u8],
+    stderr: &[u8],
+    failed: &str,
+    prefix: &str,
+    fallback: &str,
+    valid: fn(&Value) -> bool,
+) -> Result<Value, BridgeError> {
+    if let Ok(value) = serde_json::from_str::<Value>(&last_line(stdout)) {
+        if valid(&value) {
+            return Ok(value);
+        }
+        if let Some(error) = value.get("error") {
+            let code = error.get("code").and_then(Value::as_str).unwrap_or(failed);
+            let message = error
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or(fallback);
+            return Err(BridgeError::new(code, message));
+        }
+    }
+    let message = last_line(stderr);
+    let message = message.strip_prefix(prefix).unwrap_or(&message);
+    Err(BridgeError::new(
+        failed,
+        if message.is_empty() {
+            fallback
+        } else {
+            message
+        },
+    ))
+}
+
+/// The agent-comms messages that entered or left a soul's context (#122,
+/// agent-bot-identity #404), from `soul asides <soul> [--after ID] --json`:
+/// `{agentId, asides: [...], next}`. Read-only; agent-bot refuses a caller
+/// carrying a soul marker, and GeniusBar runs as the owner.
+#[tauri::command]
+pub async fn soul_asides<R: Runtime>(
+    app: AppHandle<R>,
+    soul: String,
+    after: Option<String>,
+) -> Result<Value, BridgeError> {
+    let mut args: Vec<std::ffi::OsString> = vec!["soul".into(), "asides".into(), soul.into()];
+    if let Some(after) = after.filter(|a| !a.is_empty()) {
+        args.push("--after".into());
+        args.push(after.into());
+    }
+    args.push("--json".into());
+    let output = run_agent_bot(&app, args, "soul-asides-unavailable").await?;
+    parse_soul_asides(&output.stdout, &output.stderr)
+}
+
+fn parse_soul_asides(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    parse_agent_bot_json(
+        stdout,
+        stderr,
+        "soul-asides-failed",
+        "agent-bot soul asides: ",
+        "agent-bot gave no asides",
+        |value| value.get("asides").is_some_and(Value::is_array),
+    )
+}
+
+/// Tool-permission requests waiting on the owner (#85, #86), from agent-bot's
+/// `approvals list --json` (`{approvals: [...]}`) and `approvals approve|deny
+/// <proposalId> --json` (the decided proposal). The daemon asks for the
+/// owner's presence (Touch ID) before a decision lands; GeniusBar never does.
+#[tauri::command]
+pub async fn approvals<R: Runtime>(
+    app: AppHandle<R>,
+    action: String,
+    proposal: Option<String>,
+) -> Result<Value, BridgeError> {
+    let args: Vec<std::ffi::OsString> = match (action.as_str(), proposal) {
+        ("list", None) => vec!["approvals".into(), "list".into(), "--json".into()],
+        ("approve" | "deny", Some(id)) if !id.is_empty() && !id.starts_with('-') => vec![
+            "approvals".into(),
+            action.clone().into(),
+            id.into(),
+            "--json".into(),
+        ],
+        _ => {
+            return Err(BridgeError::new(
+                "approvals-invalid",
+                "action must be list, or approve or deny with a proposal id",
+            ))
+        }
+    };
+    let output = run_agent_bot(&app, args, "approvals-unavailable").await?;
+    parse_approvals(&action, &output.stdout, &output.stderr)
+}
+
+fn parse_approvals(action: &str, stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    let valid: fn(&Value) -> bool = if action == "list" {
+        |value| value.get("approvals").is_some_and(Value::is_array)
+    } else {
+        |value| {
+            value.get("proposalId").and_then(Value::as_str).is_some()
+                && value.get("status").and_then(Value::as_str).is_some()
+        }
+    };
+    parse_agent_bot_json(
+        stdout,
+        stderr,
+        "approvals-failed",
+        "agent-bot approvals: ",
+        "agent-bot gave no approvals",
+        valid,
+    )
+}
+
+#[cfg(test)]
+mod chat_feed_tests {
+    use super::*;
+
+    #[test]
+    fn parses_soul_asides_or_its_error() {
+        let ok = parse_soul_asides(
+            b"{\"agentId\":\"agent_1\",\"asides\":[{\"id\":\"aside_1\"}],\"next\":null}\n",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(ok["asides"][0]["id"], "aside_1");
+        assert_eq!(
+            parse_soul_asides(
+                b"{\"error\":{\"code\":\"not-owner\",\"message\":\"asides are for the owner\"}}\n",
+                b"agent-bot soul asides: asides are for the owner\n"
+            ),
+            Err(BridgeError::new("not-owner", "asides are for the owner"))
+        );
+        // An older bundle without the command: its usage line comes back.
+        assert_eq!(
+            parse_soul_asides(b"", b"agent-bot: usage: agent-bot soul cold-wake\n"),
+            Err(BridgeError::new(
+                "soul-asides-failed",
+                "agent-bot: usage: agent-bot soul cold-wake"
+            ))
+        );
+        assert_eq!(
+            parse_soul_asides(b"", b""),
+            Err(BridgeError::new(
+                "soul-asides-failed",
+                "agent-bot gave no asides"
+            ))
+        );
+    }
+
+    #[test]
+    fn parses_approval_lists_and_decisions() {
+        let list = parse_approvals("list", b"{\"approvals\":[]}\n", b"").unwrap();
+        assert!(list["approvals"].as_array().unwrap().is_empty());
+        let decided = parse_approvals(
+            "approve",
+            b"{\"proposalId\":\"prop_1\",\"status\":\"approved\"}\n",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(decided["status"], "approved");
+        // A list result is not a decision.
+        assert_eq!(
+            parse_approvals("deny", b"{\"approvals\":[]}\n", b"")
+                .unwrap_err()
+                .code,
+            "approvals-failed"
+        );
+        assert_eq!(
+            parse_approvals(
+                "deny",
+                b"{\"error\":{\"code\":\"not-open\",\"message\":\"prop_1 is not waiting on a decision\"}}\n",
+                b""
+            ),
+            Err(BridgeError::new(
+                "not-open",
+                "prop_1 is not waiting on a decision"
+            ))
+        );
+    }
+}

@@ -61,41 +61,54 @@ export function ToolCard({ e }: { e: ToolCallEntry }) {
 
 const BUTTON = 'inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-3 text-xs font-medium';
 
-export function ToolApprovalCard({ e, name, onResolve }:
-  { e: ApprovalEntry; name: string; onResolve?: (entryId: string, decision: ApprovalDecision) => void }) {
+export function ToolApprovalCard({ e, name, onResolve, allowSession = false }: {
+  e: ApprovalEntry;
+  name: string;
+  onResolve?: (entryId: string, decision: ApprovalDecision) => void;
+  /** Approve for session needs a daemon scope that does not exist yet. */
+  allowSession?: boolean;
+}) {
   const { t } = useI18n();
   const pending = e.status === 'pending';
-  // Without a handler (no backend yet) the buttons show but cannot act.
-  const unavailable = onResolve ? undefined : t('approval.unavailable');
+  // Without a handler (no backend) the buttons show but cannot act.
+  const later = t('approval.unavailable');
+  const unavailable = onResolve ? undefined : later;
+  const ready = Boolean(onResolve) && !e.deciding;
   const resolve = (decision: ApprovalDecision) => onResolve?.(e.id, decision);
   return (
     <div
       role={pending ? 'alert' : undefined}
+      aria-busy={e.deciding ? true : undefined}
       className={`max-w-xl rounded-md border-2 p-3 ${pending ? 'border-warning bg-warning/10' : 'border-border bg-card opacity-80'}`}
     >
       <div className="flex items-start gap-2">
         <ShieldAlert className={`mt-0.5 size-4 shrink-0 ${pending ? 'text-warning' : 'text-muted-foreground'}`} aria-hidden />
         <div className="min-w-0 flex-1">
           <p className="m-0 text-sm font-semibold text-foreground">{t('approvalTitle', { name, tool: e.tool })}</p>
-          <code className="selectable mt-1 block truncate rounded bg-background px-2 py-1 font-mono text-xs text-foreground">{e.args}</code>
+          <code className="selectable mt-1 block truncate rounded bg-background px-2 py-1 font-mono text-xs text-foreground" title={e.args}>{e.args}</code>
           <p className="m-0 mt-1 text-xs text-muted-foreground">{t(`risk.${e.risk}`)}</p>
         </div>
       </div>
       {pending ? (
-        <div className="mt-3 flex flex-wrap gap-2" title={unavailable}>
-          <button type="button" disabled={!onResolve} title={unavailable} onClick={() => resolve('approved')}
-            className={`${BUTTON} bg-primary text-primary-foreground hover:bg-primary/90`}>
-            {t('approve')}
-          </button>
-          <button type="button" disabled={!onResolve} title={unavailable} onClick={() => resolve('approved_session')}
-            className={`${BUTTON} bg-secondary text-secondary-foreground hover:bg-accent`}>
-            {t('approveSession')}
-          </button>
-          <button type="button" disabled={!onResolve} title={unavailable} onClick={() => resolve('denied')}
-            className={`${BUTTON} bg-transparent text-destructive hover:bg-accent`}>
-            {t('deny')}
-          </button>
-        </div>
+        <>
+          <div className="mt-3 flex flex-wrap gap-2" title={unavailable}>
+            <button type="button" disabled={!ready} title={unavailable} onClick={() => resolve('approved')}
+              className={`${BUTTON} bg-primary text-primary-foreground hover:bg-primary/90`}>
+              {t('approve')}
+            </button>
+            <button type="button" disabled={!ready || !allowSession} title={allowSession ? unavailable : later}
+              onClick={() => resolve('approved_session')}
+              className={`${BUTTON} bg-secondary text-secondary-foreground hover:bg-accent`}>
+              {t('approveSession')}
+            </button>
+            <button type="button" disabled={!ready} title={unavailable} onClick={() => resolve('denied')}
+              className={`${BUTTON} bg-transparent text-destructive hover:bg-accent`}>
+              {t('deny')}
+            </button>
+          </div>
+          {e.deciding && <p role="status" className="m-0 mt-2 text-xs text-muted-foreground">{t('approval.deciding')}</p>}
+          {!e.deciding && e.error && <p className="m-0 mt-2 text-xs text-destructive">{t('approval.failed', { message: e.error })}</p>}
+        </>
       ) : (
         <p className={`m-0 mt-2 text-xs font-medium ${e.status === 'denied' ? 'text-destructive' : 'text-success'}`}>
           {t(`approval.${e.status as ApprovalDecision}`)}

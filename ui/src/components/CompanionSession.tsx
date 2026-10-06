@@ -11,7 +11,7 @@ import {
   type CensusRow,
   type SoulNode,
 } from '../model/census';
-import type { ChatEntry, Composer } from '../model/chat';
+import type { ApprovalDecision, ChatEntry, Composer } from '../model/chat';
 import { deriveDudle } from '../model/dudle';
 import { teamNodeOf } from '../model/fleet';
 import { useI18n, type Translate } from '../lib/i18n';
@@ -26,6 +26,8 @@ export interface SoulChat {
   composer: Composer;
   onDraft: (draft: string) => void;
   onSend: () => void;
+  /** Answers an approval request (#86); absent until agent-bot can. */
+  onResolve?: (entryId: string, decision: ApprovalDecision) => void;
 }
 
 /** Launching souls (#18), with suggestions from the census. */
@@ -125,7 +127,7 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
         className={`flex min-h-0 flex-1 flex-col ${active === 'chat' ? '' : 'overflow-y-auto'}`}>
         {active === 'chat' && chat && (
           <Conversation name={name} entries={chat.entries} composer={chat.composer} onDraft={chat.onDraft} onSend={chat.onSend}
-            dudle={deriveDudle(soul.agentId)} paused={paused} />
+            dudle={deriveDudle(soul.agentId)} paused={paused} onResolve={chat.onResolve} />
         )}
         {active === 'tree' && <DelegationTree forest={forest} focus={soulKey(soul)} paused={paused} onOpen={onOpen} />}
         {active === 'details' && <CompanionDetails soul={soul} roster={roster} launch={launch} metricsRefresh={metricsRefresh} />}
