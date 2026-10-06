@@ -5,11 +5,14 @@ import {
   harnessSignIn,
   setSoulColdWake,
   setSoulMode,
+  setSoulModel,
   soulColdWake,
   soulMode,
+  soulModel,
   soulPopulation,
   type SoulColdWake,
   type SoulMode,
+  type SoulModel,
   type SoulPopulation,
 } from '../bridge';
 import { displayName, type CensusRow } from '../model/census';
@@ -27,6 +30,10 @@ export interface SoulSource {
   signIn: (harness: string, agentId: string) => Promise<boolean>;
   mode: (agentId: string) => Promise<SoulMode | null>;
   setMode: (agentId: string, mode: SoulMode) => Promise<SoulMode>;
+  /** The soul's model and its harness's list (#128); null when agent-bot cannot say. */
+  model: (agentId: string) => Promise<SoulModel | null>;
+  /** Sets the model, or (null) returns to the harness default; owner-gated. */
+  setModel: (agentId: string, model: string | null) => Promise<SoulModel>;
 }
 
 // A source that throws instead of rejecting still settles as a rejection.
@@ -40,6 +47,8 @@ export const SoulSourceContext = createContext<SoulSource>({
   signIn: (harness, agentId) => settled(() => harnessSignIn(harness, agentId)),
   mode: (agentId) => settled(() => soulMode(agentId)),
   setMode: (agentId, mode) => settled(() => setSoulMode(agentId, mode)),
+  model: (agentId) => settled(() => soulModel(agentId)),
+  setModel: (agentId, model) => settled(() => setSoulModel(agentId, model)),
 });
 
 /**
@@ -125,6 +134,69 @@ export function useSoulMode(agentId: string, refresh = 0) {
       });
   };
   return { mode, saving, error, change };
+}
+
+// A model agent-bot accepted reaches every control showing that soul (the
+// Details row and the ⓘ sheet's row), not only the one used.
+const modelChanges = new Set<(agentId: string, setting: SoulModel) => void>();
+
+/**
+ * The soul's model (#128, agent-bot `soul model`): read when shown and on
+ * refresh, null while agent-bot cannot say. A change asks the owner through
+ * agent-bot; a refusal leaves the model where it was and says why. The
+ * daemon applies it on the soul's next turn. Tickets work as in useSoulMode.
+ */
+export function useSoulModel(agentId: string, refresh = 0) {
+  const source = useContext(SoulSourceContext);
+  const [setting, setSetting] = useState<SoulModel | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ticket = useRef(0);
+  const changing = useRef(false);
+  const heard = useRef<((id: string, next: SoulModel) => void) | null>(null);
+  useEffect(() => {
+    ticket.current += 1;
+    changing.current = false;
+    setSetting(null);
+    setError(null);
+    setSaving(false);
+  }, [agentId]);
+  useEffect(() => {
+    if (changing.current) return;
+    const mine = ++ticket.current;
+    void source.model(agentId).then((result) => { if (ticket.current === mine) setSetting(result); }, () => {});
+  }, [agentId, refresh, source]);
+  useEffect(() => {
+    const hear = (id: string, next: SoulModel) => {
+      if (id !== agentId || changing.current) return;
+      ticket.current += 1;
+      setSetting(next);
+      setError(null);
+    };
+    heard.current = hear;
+    modelChanges.add(hear);
+    return () => { modelChanges.delete(hear); };
+  }, [agentId]);
+  const change = (next: string | null) => {
+    const mine = ++ticket.current;
+    const latest = () => ticket.current === mine;
+    changing.current = true;
+    setSaving(true);
+    setError(null);
+    source.setModel(agentId, next)
+      .then((result) => {
+        if (!latest()) return;
+        setSetting(result);
+        for (const tell of [...modelChanges]) if (tell !== heard.current) tell(agentId, result);
+      })
+      .catch((e: unknown) => { if (latest()) setError(e instanceof Error ? e.message : String(e)); })
+      .finally(() => {
+        if (!latest()) return;
+        changing.current = false;
+        setSaving(false);
+      });
+  };
+  return { setting, saving, error, change };
 }
 
 /**

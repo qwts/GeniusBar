@@ -43,6 +43,15 @@ test('launch forwards the agent comms choice and nothing else extra (#71)', asyn
     { account: 'me', package: '/p.soul', harness: 'claude', comms: false });
 });
 
+test('launch forwards a chosen model and sends no model key without one (#128)', async () => {
+  const seen = [];
+  const h = harness({ launch: async (args) => { seen.push(args); return { requestId: 'r', status: 'pending' }; } });
+  await h.handle(JSON.stringify({ id: 1, method: 'launch', params: { account: 'me', soul: 'agent_1', harness: 'claude', model: 'claude-opus-4-1' } }));
+  await h.handle(JSON.stringify({ id: 2, method: 'launch', params: { account: 'me', soul: 'agent_1', harness: 'claude' } }));
+  assert.equal(seen[0].model, 'claude-opus-4-1');
+  assert.equal('model' in seen[1], false);
+});
+
 test('rejects malformed and unknown requests without calling the client', async () => {
   const h = harness({ census: async () => assert.fail('called') });
   await h.handle('not json');

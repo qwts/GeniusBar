@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BridgeError, call, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulPopulation, setSoulColdWake, setSoulComms, setSoulMode, soulAsides, soulColdWake, soulComms, soulMode, soulPopulation } from './bridge';
+import { BridgeError, call, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation } from './bridge';
 
 describe('bridge', () => {
   it('invokes the shell command with the method and params', async () => {
@@ -242,5 +242,52 @@ describe('soul execution mode (#122)', () => {
     const refused = (async () => { throw { code: 'soul-mode-failed', message: 'the owner did not approve' }; }) as never;
     await expect(setSoulMode('agent_1', 'autopilot', refused)).rejects.toMatchObject({ code: 'soul-mode-failed', message: 'the owner did not approve' });
     await expect(setSoulMode('agent_1', 'autopilot', (async () => ({})) as never)).rejects.toBeInstanceOf(BridgeError);
+  });
+});
+
+describe('soul model (#128)', () => {
+  const shown = {
+    agentId: 'agent_1', model: 'opus', harness: 'claude', listedAt: '2026-10-05T00:00:00.000Z',
+    available: [{ modelId: 'opus', name: 'Opus', description: 'Most capable' }, { modelId: 'sonnet', name: 'Sonnet' }],
+  };
+
+  it('reads soul model show, and is null when agent-bot cannot say', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); return shown; }) as never;
+    await expect(soulModel('agent_1', fake)).resolves.toEqual({
+      model: 'opus', listedAt: '2026-10-05T00:00:00.000Z',
+      available: [{ modelId: 'opus', name: 'Opus', description: 'Most capable' }, { modelId: 'sonnet', name: 'Sonnet', description: null }],
+    });
+    expect(calls).toEqual([['soul_model', { agent: 'agent_1', action: 'show' }]]);
+    // agent-bot 0.10.14 has no `soul model`: the shell reports a failure.
+    const older = (async () => { throw { code: 'soul-model-failed', message: 'unknown command' }; }) as never;
+    await expect(soulModel('agent_1', older)).resolves.toBeNull();
+    await expect(soulModel('agent_1', (async () => ({ agentId: 'agent_1' })) as never)).resolves.toBeNull();
+    await expect(soulModel('agent_1')).resolves.toBeNull();
+  });
+
+  it('normalizes the default, an unlisted harness and malformed list entries', () => {
+    expect(normalizeSoulModel({ agentId: 'a', model: null, available: null, listedAt: null }))
+      .toEqual({ model: null, available: null, listedAt: null });
+    expect(normalizeSoulModel({ model: null, available: [{ modelId: 'x' }, { name: 'no id' }, 'junk'] }))
+      .toEqual({ model: null, available: [{ modelId: 'x', name: 'x', description: null }], listedAt: null });
+    expect(normalizeSoulModel({ model: 3 })).toBeNull();
+    expect(normalizeSoulModel({ model: '' })).toBeNull();
+    expect(normalizeSoulModel({})).toBeNull();
+    expect(normalizeSoulModel(null)).toBeNull();
+  });
+
+  it('sets or clears it through agent-bot, which asks the owner; a refusal rejects with the reason', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); return shown; }) as never;
+    await expect(setSoulModel('agent_1', 'opus', fake)).resolves.toMatchObject({ model: 'opus' });
+    await setSoulModel('agent_1', null, fake);
+    expect(calls).toEqual([
+      ['soul_model', { agent: 'agent_1', action: 'set', model: 'opus' }],
+      ['soul_model', { agent: 'agent_1', action: 'clear' }],
+    ]);
+    const refused = (async () => { throw { code: 'soul-model-failed', message: 'the owner did not approve' }; }) as never;
+    await expect(setSoulModel('agent_1', 'opus', refused)).rejects.toMatchObject({ code: 'soul-model-failed', message: 'the owner did not approve' });
+    await expect(setSoulModel('agent_1', 'opus', (async () => ({})) as never)).rejects.toBeInstanceOf(BridgeError);
   });
 });

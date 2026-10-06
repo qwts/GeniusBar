@@ -1,6 +1,6 @@
 // The fixed fake census and health from R1's snapshot test, for tests and
 // for previewing the popup before the bridge (#7) supplies real rows.
-import type { SoulColdWake, SoulMode, SoulPopulation } from '../bridge';
+import type { SoulColdWake, SoulMode, SoulModel, SoulPopulation } from '../bridge';
 import type { AuditRecord } from './audit';
 import type { CensusRow } from './census';
 import type { ApprovalRecord, ChatEntry, InboxMessage } from './chat';
@@ -130,4 +130,30 @@ export const sampleModes: Readonly<Record<string, SoulMode>> = {
   agent_p: 'autopilot',
   agent_s: 'safe',
   agent_c: 'safe',
+};
+
+/**
+ * Model per soul (`soul model show --json`, #128): luna chose Opus from its
+ * harness's three, scout keeps the harness default from its list, and the
+ * rest have not run a turn, so their harness has listed nothing yet.
+ */
+export const sampleModels: Readonly<Record<string, SoulModel>> = {
+  agent_p: {
+    model: 'claude-opus-4-1',
+    listedAt: '2026-10-05T09:30:00.000Z',
+    available: [
+      { modelId: 'claude-opus-4-1', name: 'Opus 4.1', description: 'Most capable, for complex work' },
+      { modelId: 'claude-sonnet-4-5', name: 'Sonnet 4.5', description: 'Fast and capable, for everyday work' },
+      { modelId: 'claude-haiku-4-5', name: 'Haiku 4.5', description: 'Fastest, for quick answers' },
+    ],
+  },
+  agent_s: {
+    model: null,
+    listedAt: '2026-10-05T09:35:00.000Z',
+    available: [
+      { modelId: 'default', name: 'Default (recommended)', description: null },
+      { modelId: 'opus', name: 'Opus', description: 'Opus for complex tasks' },
+    ],
+  },
+  agent_c: { model: null, available: null, listedAt: null },
 };

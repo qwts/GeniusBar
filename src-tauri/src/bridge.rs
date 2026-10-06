@@ -1646,3 +1646,161 @@ mod soul_mode_tests {
         );
     }
 }
+
+/// A soul's model (#128), from agent-bot's `soul model <agentId> show
+/// --json`: `{agentId, model, available, listedAt, harness}`. `model` is the
+/// owner's choice or null for the harness default; `available` is the
+/// harness's own list, cached by the daemon after the soul's first turn.
+/// `set` and `clear` are owner-gated by agent-bot (its consent dialog,
+/// Touch ID); GeniusBar never asks itself. The daemon applies the model on
+/// the soul's next turn.
+#[tauri::command]
+pub async fn soul_model<R: Runtime>(
+    app: AppHandle<R>,
+    agent: String,
+    action: String,
+    model: Option<String>,
+) -> Result<Value, BridgeError> {
+    let args = soul_model_args(&agent, &action, model.as_deref())?;
+    let output = run_agent_bot(&app, args, "soul-model-unavailable").await?;
+    parse_soul_model(&output.stdout, &output.stderr)
+}
+
+/// The longest model id agent-bot accepts.
+const MAX_MODEL: usize = 120;
+
+fn soul_model_args(
+    agent: &str,
+    action: &str,
+    model: Option<&str>,
+) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    let invalid = |message: &str| BridgeError::new("soul-model-invalid", message);
+    if agent.is_empty() || agent.starts_with('-') {
+        return Err(invalid("agent must be an agent id"));
+    }
+    let mut args: Vec<std::ffi::OsString> = vec!["soul".into(), "model".into(), agent.into()];
+    match action {
+        "show" | "clear" => args.push(action.into()),
+        "set" => {
+            let model = model.unwrap_or("");
+            if model.trim().is_empty()
+                || model.starts_with('-')
+                || model.chars().count() > MAX_MODEL
+                || model.chars().any(char::is_control)
+            {
+                return Err(invalid("model must be printable text up to 120 characters"));
+            }
+            args.push("set".into());
+            args.push(model.into());
+        }
+        _ => return Err(invalid("action must be show, set or clear")),
+    }
+    args.push("--json".into());
+    Ok(args)
+}
+
+fn parse_soul_model(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    parse_agent_bot_json(
+        stdout,
+        stderr,
+        "soul-model-failed",
+        "agent-bot soul model: ",
+        "agent-bot gave no model setting",
+        |value| {
+            value.get("agentId").and_then(Value::as_str).is_some()
+                && matches!(value.get("model"), Some(Value::Null | Value::String(_)))
+                && matches!(value.get("available"), Some(Value::Null | Value::Array(_)))
+        },
+    )
+}
+
+#[cfg(test)]
+mod soul_model_tests {
+    use super::*;
+
+    #[test]
+    fn builds_soul_model_arguments() {
+        assert_eq!(
+            soul_model_args("agent_1", "show", None).unwrap(),
+            vec!["soul", "model", "agent_1", "show", "--json"]
+        );
+        assert_eq!(
+            soul_model_args("agent_1", "clear", Some("ignored")).unwrap(),
+            vec!["soul", "model", "agent_1", "clear", "--json"]
+        );
+        assert_eq!(
+            soul_model_args("agent_1", "set", Some("claude-opus-4-1")).unwrap(),
+            vec![
+                "soul",
+                "model",
+                "agent_1",
+                "set",
+                "claude-opus-4-1",
+                "--json"
+            ]
+        );
+        let long = "m".repeat(121);
+        for (agent, action, model) in [
+            ("agent_1", "set", None),
+            ("agent_1", "set", Some("")),
+            ("agent_1", "set", Some("  ")),
+            ("agent_1", "set", Some("--json")),
+            ("agent_1", "set", Some("a\nb")),
+            ("agent_1", "set", Some(long.as_str())),
+            ("agent_1", "reset", None),
+            ("", "show", None),
+            ("--json", "show", None),
+        ] {
+            assert_eq!(
+                soul_model_args(agent, action, model).unwrap_err().code,
+                "soul-model-invalid"
+            );
+        }
+        assert!(soul_model_args("agent_1", "set", Some(&"m".repeat(120))).is_ok());
+    }
+
+    #[test]
+    fn parses_soul_models_or_their_error() {
+        let shown = parse_soul_model(
+            b"{\"agentId\":\"agent_1\",\"model\":null,\"available\":null,\"listedAt\":null,\"harness\":\"claude\"}\n",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(shown["model"], Value::Null);
+        let set = parse_soul_model(
+            b"{\"agentId\":\"agent_1\",\"model\":\"opus\",\"available\":[{\"modelId\":\"opus\",\"name\":\"Opus\"}],\"listedAt\":\"2026-10-05T00:00:00.000Z\",\"harness\":\"claude\"}\n",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(set["available"][0]["name"], "Opus");
+        assert_eq!(
+            parse_soul_model(
+                b"{\"error\":{\"code\":\"soul-model-failed\",\"message\":\"the owner did not approve\"}}\n",
+                b""
+            ),
+            Err(BridgeError::new(
+                "soul-model-failed",
+                "the owner did not approve"
+            ))
+        );
+        assert_eq!(
+            parse_soul_model(
+                b"",
+                b"agent-bot soul model: soul model settings could not be read\n"
+            ),
+            Err(BridgeError::new(
+                "soul-model-failed",
+                "soul model settings could not be read"
+            ))
+        );
+        // An older agent-bot without `soul model` prints usage or nothing.
+        assert_eq!(
+            parse_soul_model(b"{\"agentId\":\"agent_1\"}\n", b"").unwrap_err(),
+            BridgeError::new("soul-model-failed", "agent-bot gave no model setting")
+        );
+        assert_eq!(
+            parse_soul_model(b"", b"").unwrap_err().message,
+            "agent-bot gave no model setting"
+        );
+    }
+}

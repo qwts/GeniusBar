@@ -21,8 +21,8 @@ export const METHODS = {
     client.send({ to, body, key, kind, refs, correlation, replyTo }),
   inbox: (client, { after, limit }) => client.inbox({ after, limit }),
   ack: (client, { ids }) => client.ack(ids),
-  launch: (client, { account, soul, package: packagePath, harness, name, comms }) =>
-    client.launch({ account, soul, package: packagePath, harness, name, comms }),
+  launch: (client, { account, soul, package: packagePath, harness, name, comms, model }) =>
+    client.launch({ account, soul, package: packagePath, harness, name, comms, ...(model === undefined ? {} : { model }) }),
   launchStatus: (client, { requestId }) => client.launchStatus(requestId),
 };
 

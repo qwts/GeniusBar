@@ -1,8 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BridgeError, runtimeMetrics, setSoulComms, soulComms, type RuntimeMetrics, type SoulMode, type SoulPopulation } from '../bridge';
+import { BridgeError, runtimeMetrics, setSoulComms, soulComms, type RuntimeMetrics, type SoulMode, type SoulModel, type SoulPopulation } from '../bridge';
 import { buildSoulForest } from '../model/census';
 import { emptyComposer } from '../model/chat';
+import type { LaunchRequest } from '../model/launch';
 import { sampleCensus } from '../model/fixtures';
 import { CompanionDetails, CompanionSession } from './CompanionSession';
 import { SoulSourceContext, type SoulSource } from './SoulNotices';
@@ -276,6 +277,8 @@ describe('Details rows from the Lovable design (#122)', () => {
       signIn: vi.fn(async () => true),
       mode: vi.fn(async () => null),
       setMode: vi.fn(async (_id: string, mode: SoulMode) => mode),
+      model: vi.fn(async () => null),
+      setModel: vi.fn(),
       ...overrides,
     };
   }
@@ -435,5 +438,171 @@ describe('Details rows from the Lovable design (#122)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Turn off' }));
     expect(s.setMode).toHaveBeenCalledWith(luna.agentId, 'safe');
     await waitFor(() => expect(screen.queryByText('Auto-Pilot is on — luna runs tools without asking.')).toBeNull());
+  });
+});
+
+describe('the model picker (#128)', () => {
+  const listed: SoulModel = {
+    model: 'opus', listedAt: '2026-10-05T00:00:00.000Z',
+    available: [
+      { modelId: 'opus', name: 'Opus', description: 'Most capable' },
+      { modelId: 'sonnet', name: 'Sonnet', description: null },
+    ],
+  };
+  function source(overrides: Partial<SoulSource> = {}): SoulSource {
+    return {
+      population: vi.fn(async () => null),
+      coldWake: vi.fn(async () => null),
+      setColdWake: vi.fn(),
+      signedIn: vi.fn(async () => null),
+      signIn: vi.fn(async () => true),
+      mode: vi.fn(async () => null),
+      setMode: vi.fn(),
+      model: vi.fn(async () => listed),
+      setModel: vi.fn(async (_id: string, model: string | null) => ({ ...listed, model })),
+      ...overrides,
+    };
+  }
+  const withSource = (s: SoulSource, ui: React.ReactElement) => <SoulSourceContext.Provider value={s}>{ui}</SoulSourceContext.Provider>;
+  const options = (select: HTMLElement) => [...select.querySelectorAll('option')].map((o) => o.textContent);
+
+  it('adds a Model choice row: the default, the harness list and Other…, with the hint', async () => {
+    const s = source();
+    render(withSource(s, <CompanionDetails soul={luna} />));
+    const select = await screen.findByRole('combobox', { name: 'Model for luna' }) as HTMLSelectElement;
+    expect(options(select)).toEqual(['Harness default', 'Opus', 'Sonnet', 'Other…']);
+    expect(select.value).toBe('opus');
+    expect((select.querySelector('option[value="opus"]') as HTMLOptionElement).title).toBe('Most capable');
+    expect(field('Model choice')).toContain("Applies on luna's next turn.");
+    expect(s.model).toHaveBeenCalledWith(luna.agentId);
+  });
+
+  it('keeps a chosen model the list lacks, and says when the harness has listed nothing', async () => {
+    render(withSource(source({ model: vi.fn(async () => ({ model: 'my-model', available: null, listedAt: null })) }), <CompanionDetails soul={luna} />));
+    const select = await screen.findByRole('combobox', { name: 'Model for luna' }) as HTMLSelectElement;
+    expect(options(select)).toEqual(['Harness default', 'my-model', 'Other…']);
+    expect(select.value).toBe('my-model');
+    expect(field('Model choice')).toContain('The harness lists its models after the first turn.');
+  });
+
+  it('has no Model choice row when agent-bot cannot say', async () => {
+    const s = source({ model: vi.fn(async () => null) });
+    render(withSource(s, <CompanionDetails soul={luna} />));
+    await waitFor(() => expect(s.model).toHaveBeenCalled());
+    expect(screen.queryByText('Model choice', { selector: 'dt' })).toBeNull();
+    expect(screen.queryByRole('combobox', { name: 'Model for luna' })).toBeNull();
+  });
+
+  it('sets a listed model, or the default, through agent-bot', async () => {
+    const s = source();
+    render(withSource(s, <CompanionDetails soul={luna} />));
+    const select = await screen.findByRole('combobox', { name: 'Model for luna' }) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'sonnet' } });
+    expect(s.setModel).toHaveBeenCalledWith(luna.agentId, 'sonnet');
+    await waitFor(() => expect(select.value).toBe('sonnet'));
+    fireEvent.change(select, { target: { value: '__default' } });
+    expect(s.setModel).toHaveBeenLastCalledWith(luna.agentId, null);
+    await waitFor(() => expect(select.value).toBe('__default'));
+  });
+
+  it('a refused change leaves the model where it was and says why', async () => {
+    const s = source({ setModel: vi.fn(async () => { throw new BridgeError('soul-model-failed', 'the owner did not approve'); }) });
+    render(withSource(s, <CompanionDetails soul={luna} />));
+    const select = await screen.findByRole('combobox', { name: 'Model for luna' }) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'sonnet' } });
+    expect((await screen.findByRole('alert')).textContent).toBe('Model unchanged: the owner did not approve');
+    expect(select.value).toBe('opus');
+  });
+
+  it('takes any model id through Other…, on Enter or Use', async () => {
+    const s = source();
+    render(withSource(s, <CompanionDetails soul={luna} />));
+    const select = await screen.findByRole('combobox', { name: 'Model for luna' }) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: '__other' } });
+    expect(s.setModel).not.toHaveBeenCalled();
+    const input = screen.getByRole('textbox', { name: 'Model ID' }) as HTMLInputElement;
+    expect(input.maxLength).toBe(120);
+    fireEvent.change(input, { target: { value: ' my-model ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Use' }));
+    expect(s.setModel).toHaveBeenCalledWith(luna.agentId, 'my-model');
+    await waitFor(() => expect(select.value).toBe('my-model'));
+    expect(screen.queryByRole('textbox', { name: 'Model ID' })).toBeNull();
+    fireEvent.change(select, { target: { value: '__other' } });
+    const again = screen.getByRole('textbox', { name: 'Model ID' });
+    fireEvent.change(again, { target: { value: 'other-model' } });
+    fireEvent.keyDown(again, { key: 'Enter' });
+    expect(s.setModel).toHaveBeenLastCalledWith(luna.agentId, 'other-model');
+  });
+
+  it('puts the Model row in the ⓘ Details sheet, and the Details row follows it', async () => {
+    const { InfoButton } = await import('./CompanionSession');
+    const s = source();
+    render(withSource(s, <><CompanionDetails soul={luna} /><InfoButton soul={luna} /></>));
+    await screen.findByRole('combobox', { name: 'Model for luna' });
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+    const sheet = screen.getByRole('dialog', { name: 'Details · luna' });
+    expect(await within(sheet).findByText('Model')).toBeTruthy();
+    const select = within(sheet).getByRole('combobox', { name: 'Model for luna' });
+    expect(within(sheet).getByText("Applies on luna's next turn.")).toBeTruthy();
+    fireEvent.change(select, { target: { value: 'sonnet' } });
+    expect(s.setModel).toHaveBeenCalledWith(luna.agentId, 'sonnet');
+    await waitFor(() => expect(field('Model choice')).toBeTruthy());
+    const details = screen.getAllByRole('combobox', { name: 'Model for luna' }).find((el) => !sheet.contains(el)) as HTMLSelectElement;
+    await waitFor(() => expect(details.value).toBe('sonnet'));
+  });
+
+  describe('in the launch form', () => {
+    const launcher = () => ({ state: { phase: 'idle' as const }, launch: vi.fn(async (_request: LaunchRequest) => {}), reset: vi.fn() });
+    const scout = { ...luna, agentId: 'agent_s', name: 'scout' };
+    const roster = [luna, scout, { ...child, harness: 'claude' }];
+
+    it('offers the default, the lists of census souls on this harness once each, and Other…', async () => {
+      const { LaunchForm } = await import('./LaunchForm');
+      const s = source({
+        model: vi.fn(async (agentId: string) => (agentId === 'agent_s'
+          ? { ...listed, available: [{ modelId: 'sonnet', name: 'Sonnet', description: null }, { modelId: 'haiku', name: 'Haiku', description: null }] }
+          : listed)),
+      });
+      render(withSource(s, <LaunchForm launcher={launcher()} accounts={['user']} harnesses={[]} soul={luna} roster={roster} />));
+      const select = screen.getByRole('combobox', { name: 'Model' });
+      expect(options(select)).toEqual(['Harness default', 'Other…']);
+      await waitFor(() => expect(options(select)).toEqual(['Harness default', 'Opus', 'Sonnet', 'Haiku', 'Other…']));
+      expect(vi.mocked(s.model).mock.calls.map(([id]) => id).sort()).toEqual(['agent_p', 'agent_s']);
+    });
+
+    it('sends no model for the harness default, and the chosen one otherwise', async () => {
+      const { LaunchForm } = await import('./LaunchForm');
+      const l = launcher();
+      render(withSource(source(), <LaunchForm launcher={l} accounts={['user']} harnesses={[]} soul={luna} roster={roster} />));
+      fireEvent.submit(screen.getByRole('form'));
+      expect(l.launch.mock.calls[0][0]).not.toHaveProperty('model');
+      const select = screen.getByRole('combobox', { name: 'Model' });
+      await waitFor(() => expect(options(select)).toContain('Sonnet'));
+      fireEvent.change(select, { target: { value: 'sonnet' } });
+      fireEvent.submit(screen.getByRole('form'));
+      expect(l.launch).toHaveBeenLastCalledWith(expect.objectContaining({ model: 'sonnet' }));
+    });
+
+    it('takes any model through Other…, and starts over on another harness', async () => {
+      const { LaunchForm } = await import('./LaunchForm');
+      const l = launcher();
+      render(withSource(source(), <LaunchForm launcher={l} accounts={['user']} harnesses={[]} soul={luna} roster={roster} />));
+      fireEvent.change(screen.getByRole('combobox', { name: 'Model' }), { target: { value: '__other' } });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Model ID' }), { target: { value: ' my-model ' } });
+      fireEvent.submit(screen.getByRole('form'));
+      expect(l.launch).toHaveBeenLastCalledWith(expect.objectContaining({ model: 'my-model' }));
+      fireEvent.change(screen.getByRole('combobox', { name: 'Harness' }), { target: { value: 'claude' } });
+      expect((screen.getByRole('combobox', { name: 'Model' }) as HTMLSelectElement).value).toBe('__default');
+      fireEvent.submit(screen.getByRole('form'));
+      expect(l.launch.mock.calls.at(-1)?.[0]).not.toHaveProperty('model');
+    });
+
+    it('offers only the default and Other… without a roster or a listed harness', async () => {
+      const { LaunchForm } = await import('./LaunchForm');
+      const s = source({ model: vi.fn(async () => null) });
+      render(withSource(s, <LaunchForm launcher={launcher()} accounts={['user']} harnesses={[]} />));
+      expect(options(screen.getByRole('combobox', { name: 'Model' }))).toEqual(['Harness default', 'Other…']);
+      expect(s.model).not.toHaveBeenCalled();
+    });
   });
 });
