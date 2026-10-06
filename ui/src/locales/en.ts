@@ -76,6 +76,7 @@ export const en = {
   'pill.notHardened': 'Not hardened',
   back: 'Back to fleet',
   closeWindow: 'Close window',
+  sound: 'Sound cues',
   language: 'Language',
   more: 'More',
   'team.none': 'No team',

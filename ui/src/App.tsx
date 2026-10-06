@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, Volume2, VolumeX } from 'lucide-react';
 import { ApprovalCounts, ApprovalsList } from './components/ApprovalsList';
 import { ArchiveDialog, ArchivedNotice, liveArchiver, type Archiver } from './components/ArchiveDialog';
 import { inApp, liveComputerUse, soulStopSupported, stopSoul, type ComputerUseSwitch, type RemovedSoul } from './bridge';
@@ -35,6 +35,7 @@ import type { ChatApi } from './useChat';
 import type { LaunchApi } from './useLaunch';
 import type { UpdateApi } from './useUpdates';
 import { livePauser, usePause, type Pauser } from './usePause';
+import { useChimes, useSound } from './useSound';
 
 /** The tray's popup, or `--window`'s desktop; the shell picks (app_mode). */
 export type AppMode = 'tray' | 'window';
@@ -163,6 +164,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const waiting = useMemo(() => chatApprovals ? menuApprovals(chatApprovals.records, chatApprovals.local, roster) : [],
     [chatApprovals, roster]);
   const working = useMemo(() => workingCount(roster), [roster]);
+  const { sound, setSound } = useSound();
   const decide = chat?.decide;
   const empty = emptyRosterText(connection);
   const footer = footerStatus(connection);
@@ -306,6 +308,9 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
       {/* The design's footer icon row; the rest sits in the ⋯ menu (Lovable audit §4, §7). */}
       <footer className="border-t border-border">
         <div className="flex items-center gap-1.5 p-2 text-xs">
+          <button type="button" aria-label={t('sound')} aria-pressed={sound} onClick={() => setSound(!sound)} className="rounded p-1 text-muted-foreground hover:text-foreground">
+            {sound ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />}
+          </button>
           <LanguageSelect />
           {footer && <span className={`min-w-0 truncate ${footer.isError ? 'error small' : 'muted small'}`}>{footer.text}</span>}
           <span className="ml-auto flex shrink-0 items-center gap-0.5">
@@ -368,6 +373,9 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
         onLaunched={launched} />
     </LaunchModal>
   );
+
+  // Sound cues (#122): "ask" on a new approval, "done" when a turn ends.
+  useChimes({ sound, waiting: waiting.length, busy: (badges ?? liveBadges).busy });
 
   if (mode === 'tray') {
     // An open session keeps the update line above it, as the panel did before R6.
