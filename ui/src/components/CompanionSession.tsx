@@ -16,6 +16,7 @@ import { deriveDudle } from '../model/dudle';
 import { teamNodeOf } from '../model/fleet';
 import { useI18n, type Translate } from '../lib/i18n';
 import type { LaunchApi } from '../useLaunch';
+import { AuditLog } from './AuditLog';
 import { Conversation } from './Conversation';
 import { SoulDudle } from './FleetList';
 import { LaunchForm } from './LaunchForm';
@@ -39,7 +40,7 @@ export interface LaunchProps {
   defaultHarness?: string | null;
 }
 
-type Tab = 'chat' | 'tree' | 'details';
+type Tab = 'chat' | 'tree' | 'details' | 'audit';
 
 interface CompanionSessionProps {
   soul: CensusRow;
@@ -67,7 +68,7 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
   const { t } = useI18n();
   const ids = useId();
   const back = useRef<HTMLButtonElement>(null);
-  const tabs: Tab[] = chat ? ['chat', 'tree', 'details'] : ['details', 'tree'];
+  const tabs: Tab[] = chat ? ['chat', 'tree', 'details', 'audit'] : ['details', 'tree', 'audit'];
   const [tab, setTab] = useState<Tab>(tabs[0]);
   const active = tabs.includes(tab) ? tab : tabs[0];
   const name = displayName(soul);
@@ -131,6 +132,7 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
         )}
         {active === 'tree' && <DelegationTree forest={forest} focus={soulKey(soul)} paused={paused} onOpen={onOpen} />}
         {active === 'details' && <CompanionDetails soul={soul} roster={roster} launch={launch} metricsRefresh={metricsRefresh} />}
+        {active === 'audit' && <AuditLog agentId={soul.agentId} roster={roster} />}
       </div>
     </section>
   );

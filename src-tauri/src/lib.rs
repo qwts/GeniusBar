@@ -244,6 +244,7 @@ pub fn run() {
             bridge::locate_soul_package,
             bridge::soul_asides,
             bridge::approvals,
+            bridge::audit_list,
             tray::set_tray_badge,
             updates::update_status,
             updates::update_action,

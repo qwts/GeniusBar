@@ -1,5 +1,6 @@
 // The fixed fake census and health from R1's snapshot test, for tests and
 // for previewing the popup before the bridge (#7) supplies real rows.
+import type { AuditRecord } from './audit';
 import type { CensusRow } from './census';
 import type { ApprovalRecord, ChatEntry, InboxMessage } from './chat';
 import { disconnected, type ConnectionSnapshot } from './status';
@@ -93,4 +94,14 @@ export const sampleApprovals: readonly ApprovalRecord[] = [
     proposalId: 'prop_1', agentId: 'agent_p', soul: 'luna', tool: 'Bash', summary: 'git push origin main',
     createdAt: '2026-10-05T10:01:00Z', expiresAt: '2026-10-05T10:16:00Z', status: 'pending',
   },
+];
+
+/** Six audit records across luna and agent_c, newest last as `audit list --json` gives them (#122). */
+export const sampleAudit: readonly AuditRecord[] = [
+  { at: '2026-10-05T09:58:00Z', event: 'credential-mint', principalId: 'principal_1', agentId: 'agent_c', operation: 'mint', detail: 'harness token for codex' },
+  { at: '2026-10-05T10:00:12Z', event: 'permission', principalId: 'principal_1', transport: 'hook', agentId: 'agent_c', operation: 'terminal', decision: 'deny', detail: "terminal: psql -c 'VACUUM FULL ledger'" },
+  { at: '2026-10-05T10:01:00Z', event: 'credential-mint', principalId: 'principal_1', agentId: 'agent_p', operation: 'mint', detail: 'harness token for codex' },
+  { at: '2026-10-05T10:01:30Z', event: 'permission', principalId: 'principal_1', transport: 'hook', agentId: 'agent_p', operation: 'Bash', decision: 'allow', detail: 'Bash: git status' },
+  { at: '2026-10-05T10:02:05Z', event: 'approval-decision', principalId: 'principal_1', agentId: 'agent_p', operation: 'prop_1', decision: 'approve', detail: 'Bash: git push origin main' },
+  { at: '2026-10-05T10:03:40Z', event: 'permission', principalId: 'principal_1', transport: 'hook', agentId: 'agent_p', operation: 'Bash', decision: 'allow', detail: 'Bash: npm test' },
 ];

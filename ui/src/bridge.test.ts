@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BridgeError, call, decideApproval, inApp, listApprovals, normalizeRuntimeMetrics, normalizeSoulComms, setSoulComms, soulAsides, soulComms } from './bridge';
+import { BridgeError, call, decideApproval, inApp, listApprovals, listAudit, normalizeRuntimeMetrics, normalizeSoulComms, setSoulComms, soulAsides, soulComms } from './bridge';
 
 describe('bridge', () => {
   it('invokes the shell command with the method and params', async () => {
@@ -100,5 +100,26 @@ describe('agent-bot asides and approvals', () => {
     const refused = (async () => { throw { code: 'not-open', message: 'p1 is not waiting on a decision' }; }) as never;
     await expect(decideApproval('p1', 'approve', refused)).rejects.toMatchObject({ code: 'not-open' });
     await expect(decideApproval('p1', 'approve', (async () => ({})) as never)).rejects.toMatchObject({ code: 'approvals-failed' });
+  });
+});
+
+describe('audit log (#122)', () => {
+  it('reads agent-bot audit list for a soul or the fleet, dropping malformed records', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => {
+      calls.push([cmd, args]);
+      return { records: [{ at: '2026-10-05T10:00:00Z', event: 'permission', decision: 'allow' }, { at: 'x' }] };
+    }) as never;
+    await expect(listAudit('agent_1', fake)).resolves.toEqual([{ at: '2026-10-05T10:00:00Z', event: 'permission', decision: 'allow' }]);
+    await expect(listAudit(null, fake)).resolves.toHaveLength(1);
+    expect(calls).toEqual([['audit_list', { agent: 'agent_1' }], ['audit_list', { agent: null }]]);
+  });
+
+  it('is null when agent-bot cannot say', async () => {
+    // An older bundle: the shell turns its usage line into an error.
+    const older = (async () => { throw { code: 'audit-failed', message: 'agent-bot: usage: agent-bot soul' }; }) as never;
+    await expect(listAudit('agent_1', older)).resolves.toBeNull();
+    await expect(listAudit('agent_1', (async () => ({ error: {} })) as never)).resolves.toBeNull();
+    await expect(listAudit(null)).resolves.toBeNull();
   });
 });

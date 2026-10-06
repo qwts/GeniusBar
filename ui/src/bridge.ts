@@ -1,6 +1,7 @@
 // The web view's only path to agent-comms: the shell relays each call to
 // the Node bridge (#7), which holds the principal credential.
 import { invoke } from '@tauri-apps/api/core';
+import { normalizeAudit, type AuditRecord } from './model/audit';
 import { normalizeApproval, normalizeApprovals, normalizeAsides, type ApprovalRecord, type AsideRecord } from './model/chat';
 
 export type BridgeMethod = 'census' | 'send' | 'inbox' | 'ack' | 'launch' | 'launchStatus';
@@ -141,6 +142,20 @@ export async function listApprovals(invokeImpl: typeof invoke = invoke): Promise
   if (!inApp() && invokeImpl === invoke) return null;
   try {
     return normalizeApprovals(await invokeImpl<unknown>('approvals', { action: 'list' }));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The audit log (`audit list --json`, #122), newest last, for one soul or
+ * (null) the whole fleet; null when agent-bot cannot say (outside the app,
+ * an older bundle without the command, a refusal).
+ */
+export async function listAudit(agentId: string | null, invokeImpl: typeof invoke = invoke): Promise<AuditRecord[] | null> {
+  if (!inApp() && invokeImpl === invoke) return null;
+  try {
+    return normalizeAudit(await invokeImpl<unknown>('audit_list', { agent: agentId }));
   } catch {
     return null;
   }
