@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Check } from 'lucide-react';
 import { displayName, type CensusRow } from '../model/census';
 import { canLaunch, harnessOptions, MAX_HARNESS, normalPackagePath, preferredHarness, prefillHarness, suggestedName, type LaunchState } from '../model/launch';
 import { useI18n } from '../lib/i18n';
+import { radioGroupKeys } from '../lib/radioGroup';
 import { chosenTemplate, CUSTOM_SOUL, initialChoice } from '../model/templates';
 import type { LaunchApi } from '../useLaunch';
 import { useSoulTemplates, type TemplateLister } from '../useSoulTemplates';
@@ -90,21 +92,7 @@ export function LaunchStatus({ state }: { state: LaunchState }) {
 
 const OTHER = '__other';
 
-/** Arrow keys, Home and End move the selection in a radiogroup (the design's a11y helper). */
-function radioGroupKeys(e: KeyboardEvent<HTMLElement>) {
-  const keys = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'];
-  if (!keys.includes(e.key)) return;
-  const radios = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]:not([disabled])'));
-  if (!radios.length) return;
-  e.preventDefault();
-  const i = Math.max(0, radios.indexOf(document.activeElement as HTMLElement));
-  const n = radios.length;
-  const next = e.key === 'Home' ? 0 : e.key === 'End' ? n - 1
-    : e.key === 'ArrowRight' || e.key === 'ArrowDown' ? (i + 1) % n : (i - 1 + n) % n;
-  radios[next]?.focus();
-  radios[next]?.click();
-}
-const radio = 'min-h-9 rounded-md border px-2 py-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring';
+const radio = 'inline-flex min-h-9 items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring';
 const radioOn = 'border-primary bg-primary/10 text-foreground';
 const radioOff = 'border-border text-muted-foreground hover:bg-accent';
 const legend = 'mb-2 font-mono text-[11px] font-semibold uppercase tracking-wide text-muted-foreground';
@@ -214,11 +202,13 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
               <button key={tp.package} type="button" role="radio" aria-checked={selected === tp.package} tabIndex={selected === tp.package ? 0 : -1}
                 title={tp.description || undefined} onClick={() => setChoice(tp.package)}
                 className={`${radio} ${selected === tp.package ? radioOn : radioOff}`}>
+                {selected === tp.package && <Check className="size-3 shrink-0" aria-hidden />}
                 {tp.name}
               </button>
             ))}
             <button type="button" role="radio" aria-checked={custom} tabIndex={custom ? 0 : -1} onClick={() => setChoice(CUSTOM_SOUL)}
               className={`${radio} ${custom ? radioOn : radioOff}`}>
+              {custom && <Check className="size-3 shrink-0" aria-hidden />}
               {t('launch.custom')}
             </button>
           </div>
