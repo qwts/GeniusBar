@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { AlarmClock, ArrowLeft, Cpu, Github, Info, LogIn, MousePointer2, Radio, ShieldCheck, X, Zap } from 'lucide-react';
+import { AlarmClock, ArrowLeft, Cpu, Github, Info, LogIn, MousePointer2, Palette, Radio, ShieldCheck, X, Zap } from 'lucide-react';
 import { computerUseSupported, runtimeMetrics, setSoulComms, soulComms, type ComputerUseSwitch, type RuntimeMetrics, type RuntimeObservation, type SoulColdWake, type SoulComms, type SoulMode, type SoulModel, type SoulPopulation } from '../bridge';
 import {
   availabilityNote,
@@ -16,8 +16,10 @@ import { deriveDudle } from '../model/dudle';
 import { teamNodeOf } from '../model/fleet';
 import { useI18n, type Translate } from '../lib/i18n';
 import type { LaunchApi } from '../useLaunch';
+import { useSoulProfile } from '../useSoulProfile';
 import { AuditLog } from './AuditLog';
 import { Conversation } from './Conversation';
+import { CustomizeDialog } from './CustomizeDialog';
 import { SoulDudle } from './FleetList';
 import { LaunchForm } from './LaunchForm';
 import { ModelSelect } from './ModelField';
@@ -718,18 +720,23 @@ export function SoulFactRows({ soul, refresh = 0 }: { soul: CensusRow; refresh?:
  * ⓘ and the Details sheet (Lovable 19.29.22): the soul's actionable rows.
  * Wake on new messages, Agent comms, execution mode, computer use, model
  * (#128), harness sign-in and the GitHub App (read-only), each once
- * agent-bot reports it.
+ * agent-bot reports it; then Customize… (#64), once agent-bot answers
+ * `soul profile` for the soul (asked each time the sheet opens).
  */
 export function InfoButton({ soul }: { soul: CensusRow }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
+  const [customizing, setCustomizing] = useState(false);
   const close = useRef<HTMLButtonElement>(null);
+  const info = useRef<HTMLButtonElement>(null);
   const titleId = useId();
   useEffect(() => { if (open) close.current?.focus(); }, [open]);
+  const { supported: customizable } = useSoulProfile(soul.agentId, open);
   const name = displayName(soul);
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)} aria-label={t('details.title')} title={t('details.title')} aria-haspopup="dialog"
+      {customizing && <CustomizeDialog soul={soul} onClose={() => { setCustomizing(false); info.current?.focus(); }} />}
+      <button ref={info} type="button" onClick={() => setOpen(true)} aria-label={t('details.title')} title={t('details.title')} aria-haspopup="dialog"
         className="rounded p-1 text-muted-foreground hover:text-foreground">
         <Info className="size-3.5" aria-hidden />
       </button>
@@ -759,6 +766,15 @@ export function InfoButton({ soul }: { soul: CensusRow }) {
               <ModelRow soul={soul} />
               <SoulFactRows soul={soul} />
             </div>
+            {customizable && (
+              <div className="flex justify-end">
+                <button type="button" aria-haspopup="dialog" onClick={() => { setOpen(false); setCustomizing(true); }}
+                  className="inline-flex min-h-8 items-center gap-2 rounded-md border border-border px-3 text-sm font-medium hover:bg-accent">
+                  <Palette className="size-3.5" aria-hidden />
+                  {t('edit.title')}
+                </button>
+              </div>
+            )}
           </section>
         </div>,
         document.body,

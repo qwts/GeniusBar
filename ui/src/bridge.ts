@@ -863,3 +863,165 @@ export async function listSoulTemplates(invokeImpl: typeof invoke = invoke): Pro
   if (!result) throw new BridgeError('soul-templates-failed', 'agent-bot gave no soul templates');
   return result;
 }
+
+/** A file the soul's harness loads (#64), from agent-bot `soul profile`. */
+export interface SoulProfileFileEntry {
+  /** Relative to the soul directory. */
+  path: string;
+  kind: 'soul' | 'generated' | 'harness-settings' | 'context' | 'skill';
+  size: number | null;
+  modifiedAt: string | null;
+  /** Only text files can be viewed. */
+  text: boolean;
+}
+
+export interface SoulProfileSkill {
+  name: string;
+  /** `soul` for the package's own skills, `sop` for the SOP's. */
+  source: 'soul' | 'sop';
+  path: string | null;
+  commit: string | null;
+}
+
+/** A declared credential: its name and status, never a value. */
+export interface SoulProfileCredential {
+  name: string;
+  provider: string | null;
+  status: string | null;
+}
+
+/**
+ * A soul's read-only profile (#64, agent-bot-identity #375): what the
+ * Customize dialog shows. Unknown scalars are null, collections empty.
+ */
+export interface SoulProfile {
+  agentId: string;
+  profile: {
+    /** The census handle. */
+    name: string | null;
+    displayName: string | null;
+    description: string | null;
+    harness: string | null;
+    package: string | null;
+    revision: string | null;
+    template: boolean | null;
+    parentId: string | null;
+    status: string | null;
+  };
+  files: SoulProfileFileEntry[];
+  skills: SoulProfileSkill[];
+  credentials: SoulProfileCredential[];
+  sop: {
+    resolved: { source: string; commit: string | null } | null;
+    override: { path: string; workflows: string[] } | null;
+  };
+  /** Partial, unavailable or unsafe data agent-bot left out. */
+  errors: { area: string | null; message: string }[];
+}
+
+/** One file's contents, from `soul profile --file`. */
+export interface SoulProfileFile {
+  agentId: string;
+  path: string;
+  size: number | null;
+  contents: string;
+}
+
+const FILE_KINDS: readonly SoulProfileFileEntry['kind'][] = ['soul', 'generated', 'harness-settings', 'context', 'skill'];
+const text = (value: unknown): string | null => (typeof value === 'string' && value.trim() !== '' ? value : null);
+const count = (value: unknown): number | null => (typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null);
+
+/**
+ * Keeps the fields the dialog shows; null when the answer is not a profile.
+ * Credentials keep only name, provider and status, whatever else arrives.
+ */
+export function normalizeSoulProfile(raw: unknown): SoulProfile | null {
+  if (!isRecord(raw) || typeof raw.agentId !== 'string' || !isRecord(raw.profile)) return null;
+  const p = raw.profile;
+  const rows = (value: unknown): Record<string, unknown>[] => (Array.isArray(value) ? value.filter(isRecord) : []);
+  const files = rows(raw.files).flatMap((f): SoulProfileFileEntry[] => {
+    const path = text(f.path);
+    if (!path) return [];
+    return [{
+      path,
+      kind: FILE_KINDS.includes(f.kind as SoulProfileFileEntry['kind']) ? f.kind as SoulProfileFileEntry['kind'] : 'context',
+      size: count(f.size),
+      modifiedAt: text(f.modifiedAt),
+      text: f.text === true,
+    }];
+  });
+  const skills = rows(raw.skills).flatMap((s): SoulProfileSkill[] => {
+    const name = text(s.name);
+    return name ? [{ name, source: s.source === 'sop' ? 'sop' : 'soul', path: text(s.path), commit: text(s.commit) }] : [];
+  });
+  const credentials = rows(raw.credentials).flatMap((c): SoulProfileCredential[] => {
+    const name = text(c.name);
+    return name ? [{ name, provider: text(c.provider), status: text(c.status) }] : [];
+  });
+  const sop = isRecord(raw.sop) ? raw.sop : {};
+  const resolved = isRecord(sop.resolved) && text(sop.resolved.source)
+    ? { source: sop.resolved.source as string, commit: text(sop.resolved.commit) } : null;
+  const override = isRecord(sop.override) && text(sop.override.path)
+    ? { path: sop.override.path as string, workflows: Array.isArray(sop.override.workflows) ? sop.override.workflows.filter((w): w is string => typeof w === 'string' && w !== '') : [] }
+    : null;
+  const errors = rows(raw.errors).flatMap((e) => (typeof e.message === 'string' && e.message !== ''
+    ? [{ area: text(e.area), message: e.message }] : []));
+  return {
+    agentId: raw.agentId,
+    profile: {
+      name: text(p.name),
+      displayName: text(p.displayName),
+      description: text(p.description),
+      harness: text(p.harness),
+      package: text(p.package),
+      revision: text(p.revision),
+      template: typeof p.template === 'boolean' ? p.template : null,
+      parentId: text(p.parentId),
+      status: text(p.status),
+    },
+    files,
+    skills,
+    credentials,
+    sop: { resolved, override },
+    errors,
+  };
+}
+
+function profileFailure(error: unknown): BridgeError {
+  const e = error as { code?: unknown; message?: unknown };
+  return new BridgeError(typeof e?.code === 'string' ? e.code : 'soul-profile-failed',
+    typeof e?.message === 'string' ? e.message : String(error));
+}
+
+/**
+ * A soul's profile from agent-bot. Rejects with a BridgeError;
+ * `soul-profile-unsupported` means the bundled agent-bot has no `soul
+ * profile` (and is what a plain browser or a test gets).
+ */
+export async function soulProfile(agentId: string, invokeImpl: typeof invoke = invoke): Promise<SoulProfile> {
+  if (!inApp() && invokeImpl === invoke) throw new BridgeError('soul-profile-unsupported', 'not in the app');
+  let raw: unknown;
+  try {
+    raw = await invokeImpl<unknown>('soul_profile', { agent: agentId });
+  } catch (error) {
+    throw profileFailure(error);
+  }
+  const result = normalizeSoulProfile(raw);
+  if (!result) throw new BridgeError('soul-profile-failed', 'agent-bot gave no soul profile');
+  return result;
+}
+
+/** One profile file's text, read-only. Rejects with a BridgeError as soulProfile does. */
+export async function soulProfileFile(agentId: string, path: string, invokeImpl: typeof invoke = invoke): Promise<SoulProfileFile> {
+  if (!inApp() && invokeImpl === invoke) throw new BridgeError('soul-profile-unsupported', 'not in the app');
+  let raw: unknown;
+  try {
+    raw = await invokeImpl<unknown>('soul_profile_file', { agent: agentId, path });
+  } catch (error) {
+    throw profileFailure(error);
+  }
+  if (!isRecord(raw) || typeof raw.path !== 'string' || typeof raw.contents !== 'string') {
+    throw new BridgeError('soul-profile-failed', 'agent-bot gave no file contents');
+  }
+  return { agentId: typeof raw.agentId === 'string' ? raw.agentId : agentId, path: raw.path, size: count(raw.size), contents: raw.contents };
+}

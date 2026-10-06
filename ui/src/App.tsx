@@ -36,6 +36,7 @@ import type { LaunchApi } from './useLaunch';
 import type { UpdateApi } from './useUpdates';
 import { livePauser, usePause, type Pauser } from './usePause';
 import type { TemplateLister } from './useSoulTemplates';
+import { liveProfileSource, ProfileSourceContext, type ProfileSource } from './useSoulProfile';
 import { useChimes, useSound } from './useSound';
 
 /** The tray's popup, or `--window`'s desktop; the shell picks (app_mode). */
@@ -98,6 +99,8 @@ interface AppProps {
   computerUseSwitch?: ComputerUseSwitch;
   /** The launch form's soul templates (agent-bot `soul templates`, #65); the app uses agent-bot when absent. */
   templateLister?: TemplateLister;
+  /** The Customize dialog's profiles (agent-bot `soul profile`, #64); the app uses agent-bot when absent. */
+  profileSource?: ProfileSource;
 }
 
 const liveStopper: Stopper = { supported: () => soulStopSupported(), stop: (agentId) => stopSoul(agentId) };
@@ -120,10 +123,13 @@ const NO_CENSUS: readonly CensusRow[] = [];
 export function App(props: AppProps) {
   // The Details rows' computer-use switch (#122); the quick menu's comes as a prop in Shell.
   const computerUse = props.computerUseSwitch ?? (inApp() && !props.isStatic ? liveComputerUse : null);
+  const profiles = props.profileSource ?? (inApp() && !props.isStatic ? liveProfileSource : null);
   return (
     <I18nProvider>
       <ComputerUseContext.Provider value={computerUse}>
-        <Shell {...props} />
+        <ProfileSourceContext.Provider value={profiles}>
+          <Shell {...props} />
+        </ProfileSourceContext.Provider>
       </ComputerUseContext.Provider>
     </I18nProvider>
   );

@@ -4,7 +4,8 @@ import { BridgeError, runtimeMetrics, setSoulComms, soulComms, type ComputerUseS
 import { buildSoulForest } from '../model/census';
 import { emptyComposer } from '../model/chat';
 import type { LaunchRequest } from '../model/launch';
-import { sampleCensus } from '../model/fixtures';
+import { sampleCensus, sampleProfile } from '../model/fixtures';
+import { ProfileSourceContext, type ProfileSource } from '../useSoulProfile';
 import { CompanionDetails, CompanionSession, ComputerUseContext } from './CompanionSession';
 import { SoulSourceContext, type SoulSource } from './SoulNotices';
 
@@ -717,5 +718,42 @@ describe('Computer use row (#122, agent-bot soul computer-use)', () => {
     fireEvent.click(toggle);
     expect(sw.set).toHaveBeenCalledWith(luna.agentId, true);
     await waitFor(() => expect(toggle.checked).toBe(true));
+  });
+});
+
+describe('Customize… in the ⓘ sheet (#64)', () => {
+  const profiles = (profile: ProfileSource['profile']): ProfileSource => ({ profile: vi.fn(profile), file: vi.fn() });
+  const sheet = async (s: ProfileSource | null) => {
+    const { InfoButton } = await import('./CompanionSession');
+    render(<ProfileSourceContext.Provider value={s}><InfoButton soul={luna} /></ProfileSourceContext.Provider>);
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+    return screen.getByRole('dialog', { name: 'Details · luna' });
+  };
+
+  it('offers Customize… once agent-bot answers soul profile, and opens the dialog in place of the sheet', async () => {
+    const s = profiles(async () => sampleProfile);
+    const details = await sheet(s);
+    fireEvent.click(await within(details).findByRole('button', { name: 'Customize…' }));
+    expect(screen.queryByRole('dialog', { name: 'Details · luna' })).toBeNull();
+    const dialog = await screen.findByRole('dialog', { name: 'Luna' });
+    expect(within(dialog).getByRole('tab', { name: 'Profile' })).toBeTruthy();
+    // Asked when the sheet opened, and again when the dialog opened.
+    expect(s.profile).toHaveBeenCalledTimes(2);
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Details' }));
+  });
+
+  it('hides Customize… on an agent-bot without soul profile', async () => {
+    const s = profiles(async () => { throw new BridgeError('soul-profile-unsupported', 'this agent-bot has no soul profile'); });
+    const details = await sheet(s);
+    await waitFor(() => expect(s.profile).toHaveBeenCalledWith(luna.agentId));
+    await Promise.resolve();
+    expect(within(details).queryByRole('button', { name: 'Customize…' })).toBeNull();
+  });
+
+  it('hides Customize… without a profile source, asking nothing', async () => {
+    const details = await sheet(null);
+    expect(within(details).queryByRole('button', { name: 'Customize…' })).toBeNull();
   });
 });
