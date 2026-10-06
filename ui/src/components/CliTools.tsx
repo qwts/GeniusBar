@@ -89,14 +89,14 @@ export function CliTools({ api, startOpen = false, onClose }: {
       )}
       {error && <p className="text-xs text-destructive" role="alert">{error}</p>}
       <div className="flex flex-wrap justify-end gap-2">
-        <button type="button" className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-secondary px-2.5 py-1 text-xs text-secondary-foreground hover:bg-accent disabled:opacity-50" disabled={busy} onClick={() => setOpen(false)}>{t('close')}</button>
+        <button type="button" className="inline-flex min-h-7 items-center justify-center gap-1.5 rounded-md border border-border bg-secondary px-3 py-1 text-xs text-secondary-foreground hover:bg-accent disabled:opacity-50" disabled={busy} onClick={() => setOpen(false)}>{t('close')}</button>
         {ours && (
-          <button type="button" className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-secondary px-2.5 py-1 text-xs text-secondary-foreground hover:bg-accent disabled:opacity-50" disabled={busy} onClick={() => void run(api.uninstall, t('cli.uninstallFailed'))}>
+          <button type="button" className="inline-flex min-h-7 items-center justify-center gap-1.5 rounded-md border border-border bg-secondary px-3 py-1 text-xs text-secondary-foreground hover:bg-accent disabled:opacity-50" disabled={busy} onClick={() => void run(api.uninstall, t('cli.uninstallFailed'))}>
             {t('cli.uninstall')}
           </button>
         )}
         {status && !complete && (
-          <button type="button" className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-secondary px-2.5 py-1 text-xs text-secondary-foreground hover:bg-accent disabled:opacity-50" disabled={busy}
+          <button type="button" className="inline-flex min-h-7 items-center justify-center gap-1.5 rounded-md border border-border bg-secondary px-3 py-1 text-xs text-secondary-foreground hover:bg-accent disabled:opacity-50" disabled={busy}
             onClick={() => void run(() => api.install(others.map((tool) => tool.name)), t('cli.installFailed'))}>
             <span className="inline-flex items-center gap-1.5">
               {busy ? <Loader2 className="size-3.5 motion-safe:animate-spin" aria-hidden /> : <Download className="size-3.5" aria-hidden />}

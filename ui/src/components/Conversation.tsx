@@ -77,7 +77,7 @@ export function Conversation({ name, entries, composer, onDraft, onSend, dudle, 
                     {mine ? t('you') : name}
                   </span>
                   <MessageBody body={entry.body} className="chat-body selectable text-sm leading-relaxed [overflow-wrap:anywhere]" />
-                  <time className={`mt-0.5 block text-[10px] ${mine ? 'text-primary-foreground' : 'text-muted-foreground'}`} dateTime={new Date(entry.at).toISOString()}>
+                  <time className={`mt-0.5 block text-[11px] ${mine ? 'text-primary-foreground' : 'text-muted-foreground'}`} dateTime={new Date(entry.at).toISOString()}>
                     {new Date(entry.at).toLocaleTimeString()}
                   </time>
                 </div>

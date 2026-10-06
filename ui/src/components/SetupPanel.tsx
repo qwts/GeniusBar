@@ -35,14 +35,14 @@ export function SetupPanel({ setup, onSetup, existing }: {
       {setup.error && <p className="text-xs text-destructive" role="alert">{setup.error}</p>}
       {found ? (
         <div className="flex flex-wrap justify-end gap-2">
-          <button type="button" className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-secondary px-2.5 py-1 text-xs text-secondary-foreground hover:bg-accent disabled:opacity-50" onClick={() => onSetup(false)} disabled={setup.running}>{t('setup.keep')}</button>
-          <button type="button" className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-secondary px-2.5 py-1 text-xs text-secondary-foreground hover:bg-accent disabled:opacity-50" onClick={() => onSetup(true)} disabled={setup.running}>
+          <button type="button" className="inline-flex min-h-7 items-center justify-center gap-1.5 rounded-md border border-border bg-secondary px-3 py-1 text-xs text-secondary-foreground hover:bg-accent disabled:opacity-50" onClick={() => onSetup(false)} disabled={setup.running}>{t('setup.keep')}</button>
+          <button type="button" className="inline-flex min-h-7 items-center justify-center gap-1.5 rounded-md border border-border bg-secondary px-3 py-1 text-xs text-secondary-foreground hover:bg-accent disabled:opacity-50" onClick={() => onSetup(true)} disabled={setup.running}>
             <ArrowRightLeft className="size-3.5" aria-hidden />
             {setup.running ? t('setup.settingUp') : t('setup.move')}
           </button>
         </div>
       ) : (
-        <button type="button" className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-secondary px-2.5 py-1 text-xs text-secondary-foreground hover:bg-accent disabled:opacity-50" onClick={() => onSetup()} disabled={setup.running}>
+        <button type="button" className="inline-flex min-h-7 items-center justify-center gap-1.5 rounded-md border border-border bg-secondary px-3 py-1 text-xs text-secondary-foreground hover:bg-accent disabled:opacity-50" onClick={() => onSetup()} disabled={setup.running}>
           {setup.running ? t('setup.settingUp') : setup.error ? t('setup.retry') : t('setup.go')}
         </button>
       )}

@@ -98,7 +98,7 @@ export function FloatingDudle({ lead, state, paused = false, computerUser, compu
             {stop.offered ? t('computerActiveStop', { name: computerUser }) : t('computerActive', { name: computerUser })}
             {stop.offered && (
               <button type="button" onClick={() => { void stop.halt(); }} disabled={stop.phase.phase === 'stopping'}
-                className="pointer-events-auto flex items-center gap-1 rounded-full bg-warning-foreground px-2.5 py-0.5 text-warning outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-70">
+                className="pointer-events-auto flex min-h-7 items-center gap-1 rounded-full bg-warning-foreground px-3 py-0.5 text-warning outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-70">
                 <OctagonX className="size-3.5" aria-hidden /> {stop.phase.phase === 'stopping' ? t('stopping') : t('stop')}
               </button>
             )}

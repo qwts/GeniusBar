@@ -96,14 +96,14 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
       {attention && !open && (
         <div role={attention.isError ? 'alert' : 'status'} className="min-w-0">
           <button type="button" onClick={() => onOpenChange(true)} title={attention.text}
-            className={`max-w-[20rem] truncate rounded px-1.5 py-0.5 text-xs hover:bg-accent ${attention.isError ? 'text-destructive' : 'text-muted-foreground'}`}>
+            className={`min-h-7 max-w-[20rem] truncate rounded px-3 py-0.5 text-xs hover:bg-accent ${attention.isError ? 'text-destructive' : 'text-muted-foreground'}`}>
             {attention.text}
           </button>
         </div>
       )}
       <div className="ml-auto flex items-center gap-3 pr-1">
         {fleetPaused && onResume && (
-          <button type="button" onClick={onResume} className="flex items-center gap-1 rounded bg-secondary px-2 py-0.5 text-secondary-foreground">
+          <button type="button" onClick={onResume} className="flex min-h-7 items-center gap-1 rounded bg-secondary px-3 py-0.5 text-secondary-foreground">
             <Pause className="size-3" aria-hidden /> {t('paused')}
           </button>
         )}

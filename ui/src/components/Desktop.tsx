@@ -150,7 +150,7 @@ function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unread
             </span>
             <div className="min-w-0 flex-1 select-none">
               <p className="m-0 truncate text-sm font-semibold">{t('team.placeholder')}</p>
-              <p className="m-0 truncate font-mono text-[10px] text-muted-foreground">
+              <p className="m-0 truncate font-mono text-[11px] text-muted-foreground">
                 {[subagents, hidden].filter((part): part is string => part !== null).join(' · ')}
               </p>
             </div>
@@ -162,7 +162,7 @@ function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unread
               badges={badges} onArchive={onArchive} />
             <div className="min-w-0 flex-1 select-none">
               <p className="m-0 truncate text-sm font-semibold">{displayName(team.lead)}</p>
-              <p className="m-0 truncate font-mono text-[10px] text-muted-foreground">
+              <p className="m-0 truncate font-mono text-[11px] text-muted-foreground">
                 {displayHarness(team.lead)}{subagents && <> · {subagents}</>}
               </p>
             </div>
@@ -242,7 +242,7 @@ function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = 
           )}
         </span>
         {!bare && (
-          <span className={`max-w-full truncate text-[10px] ${soul.presence === 'left' ? 'text-muted-foreground' : 'text-foreground'}`}>
+          <span className={`max-w-full truncate text-[11px] ${soul.presence === 'left' ? 'text-muted-foreground' : 'text-foreground'}`}>
             {displayName(soul)}
           </span>
         )}

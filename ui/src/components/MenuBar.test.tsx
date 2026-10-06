@@ -76,7 +76,7 @@ describe('the "Companions paused" chip (#122, agent-bot soul pause)', () => {
     const onResume = vi.fn();
     render(chip(true, onResume));
     const button = screen.getByRole('button', { name: 'Companions paused' });
-    expect(button.className).toBe('flex items-center gap-1 rounded bg-secondary px-2 py-0.5 text-secondary-foreground');
+    expect(button.className).toBe('flex min-h-7 items-center gap-1 rounded bg-secondary px-3 py-0.5 text-secondary-foreground');
     const item = screen.getByRole('button', { name: 'GeniusBar menu' });
     expect(button.compareDocumentPosition(item) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(button);
