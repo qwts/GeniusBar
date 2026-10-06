@@ -7,8 +7,8 @@ import type { CensusRow } from '../model/census';
 import { sampleCensus, sampleConnection } from '../model/fixtures';
 import { layoutActions } from '../state/layout';
 import type { ChatApi } from '../useChat';
-import { BridgeError } from '../bridge';
-import { HALT_HOLD_MS, STOP_SETTLE_MS } from '../model/floating';
+import { BridgeError, type ComputerUseSwitch } from '../bridge';
+import { COMPUTER_USE_ERROR_MS, HALT_HOLD_MS, STOP_SETTLE_MS } from '../model/floating';
 import { FloatingDudle, type Stopper } from './FloatingDudle';
 
 afterEach(() => { cleanup(); globalThis.localStorage?.clear(); layoutActions.forget(); });
@@ -322,5 +322,107 @@ describe('FloatingDudle Stop (agent-bot soul stop)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
     await settle();
     expect(stopper.stop).toHaveBeenCalledWith('agent_p');
+  });
+});
+
+describe('FloatingDudle Toggle computer use (agent-bot soul computer-use)', () => {
+  function switchWith(on: boolean | null, overrides: Partial<ComputerUseSwitch> = {}) {
+    const state = { on };
+    const sw = {
+      supported: vi.fn(async () => true),
+      read: vi.fn(async () => state.on),
+      set: vi.fn(async (agentId: string, next: boolean) => { state.on = next; return { agentId, computerUse: next }; }),
+      ...overrides,
+    };
+    return { sw, state };
+  }
+  const flush = () => act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  const openMenu = (button: HTMLElement | null) => fireEvent.keyDown(button!, { key: 'Enter' });
+  const labels = () => within(screen.getByRole('list')).getAllByRole('button').map((b) => b.getAttribute('aria-label'));
+
+  it('offers the design\'s item between Pause all and history, probing agent-bot once', async () => {
+    const { sw } = switchWith(true);
+    const { button } = floating({ onTogglePause: vi.fn(), computerUseSwitch: sw });
+    await flush();
+    openMenu(button);
+    expect(labels()).toEqual(['Write a prompt', 'Pause all', 'Toggle computer use', 'Open history']);
+    expect(sw.supported).toHaveBeenCalledTimes(1);
+  });
+
+  it('turns the lead\'s computer use off while on, and back on while off', async () => {
+    const { sw, state } = switchWith(true);
+    const { button } = floating({ computerUseSwitch: sw });
+    await flush();
+    openMenu(button);
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle computer use' }));
+    expect(screen.queryByRole('list')).toBeNull();
+    await flush();
+    expect(sw.read).toHaveBeenCalledWith(luna.agentId);
+    expect(sw.set).toHaveBeenCalledWith(luna.agentId, false);
+    expect(state.on).toBe(false);
+    openMenu(button);
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle computer use' }));
+    await flush();
+    expect(sw.set).toHaveBeenLastCalledWith(luna.agentId, true);
+    expect(state.on).toBe(true);
+  });
+
+  it('shows a refusal in the error style for a while, the switch unchanged', async () => {
+    vi.useFakeTimers();
+    try {
+      const { sw } = switchWith(true, { set: vi.fn(async () => { throw new BridgeError('soul-computer-use-failed', 'the owner did not approve'); }) });
+      const { button } = floating({ computerUseSwitch: sw });
+      await flush();
+      openMenu(button);
+      fireEvent.click(screen.getByRole('button', { name: 'Toggle computer use' }));
+      await flush();
+      const alert = screen.getByRole('alert');
+      expect(alert.textContent).toBe('Computer use unchanged: the owner did not approve');
+      expect(alert.className).toContain('text-destructive');
+      act(() => { vi.advanceTimersByTime(COMPUTER_USE_ERROR_MS); });
+      expect(screen.queryByRole('alert')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('changes nothing when agent-bot cannot say what the switch is', async () => {
+    const { sw } = switchWith(null);
+    const { button } = floating({ computerUseSwitch: sw });
+    await flush();
+    openMenu(button);
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle computer use' }));
+    await flush();
+    expect(sw.set).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toBe('Computer use unchanged: agent-bot gave no computer-use setting');
+  });
+
+  it('is hidden on an agent-bot without soul computer-use, or once a switch says so', async () => {
+    const { sw } = switchWith(true, { supported: vi.fn(async () => false) });
+    const { button } = floating({ computerUseSwitch: sw });
+    await flush();
+    openMenu(button);
+    expect(labels()).toEqual(['Write a prompt', 'Open history']);
+    cleanup();
+    const older = switchWith(true, { set: vi.fn(async () => { throw new BridgeError('soul-computer-use-unsupported', 'this agent-bot has no soul computer-use'); }) });
+    const again = floating({ computerUseSwitch: older.sw });
+    await flush();
+    openMenu(again.button);
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle computer use' }));
+    await flush();
+    expect(screen.queryByRole('alert')).toBeNull();
+    openMenu(again.button);
+    expect(labels()).toEqual(['Write a prompt', 'Open history']);
+  });
+
+  it('in the desktop, acts on the lead the floating Dudle shows', async () => {
+    const { sw } = switchWith(true);
+    const chat: ChatApi = { chat: emptyChat, composers: {}, open: vi.fn(), setDraft: vi.fn(), send: vi.fn() };
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic chat={chat} floatingButton computerUseSwitch={sw} />);
+    await flush();
+    openMenu(screen.getByRole('button', { name: 'Companion quick actions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle computer use' }));
+    await flush();
+    expect(sw.set).toHaveBeenCalledWith('agent_p', false);
   });
 });

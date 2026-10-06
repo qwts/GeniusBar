@@ -1,16 +1,19 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BridgeError, runtimeMetrics, setSoulComms, soulComms, type RuntimeMetrics, type SoulMode, type SoulModel, type SoulPopulation } from '../bridge';
+import { BridgeError, runtimeMetrics, setSoulComms, soulComms, type ComputerUseSwitch, type RuntimeMetrics, type SoulMode, type SoulModel, type SoulPopulation } from '../bridge';
 import { buildSoulForest } from '../model/census';
 import { emptyComposer } from '../model/chat';
 import type { LaunchRequest } from '../model/launch';
 import { sampleCensus } from '../model/fixtures';
-import { CompanionDetails, CompanionSession } from './CompanionSession';
+import { CompanionDetails, CompanionSession, ComputerUseContext } from './CompanionSession';
 import { SoulSourceContext, type SoulSource } from './SoulNotices';
 
 afterEach(cleanup);
-vi.mock('../bridge', async (original) => ({ BridgeError: (await original<typeof import('../bridge')>()).BridgeError,
-  runtimeMetrics: vi.fn(), soulComms: vi.fn(), setSoulComms: vi.fn() }));
+vi.mock('../bridge', async (original) => {
+  const real = await original<typeof import('../bridge')>();
+  return { BridgeError: real.BridgeError, computerUseSupported: real.computerUseSupported,
+    runtimeMetrics: vi.fn(), soulComms: vi.fn(), setSoulComms: vi.fn() };
+});
 beforeEach(() => {
   vi.mocked(runtimeMetrics).mockReset().mockResolvedValue({ unavailable: true });
   vi.mocked(soulComms).mockReset().mockResolvedValue(null);
@@ -604,5 +607,115 @@ describe('the model picker (#128)', () => {
       expect(options(screen.getByRole('combobox', { name: 'Model' }))).toEqual(['Harness default', 'Other…']);
       expect(s.model).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('Computer use row (#122, agent-bot soul computer-use)', () => {
+  function source(computerUse: boolean | undefined): SoulSource & { record: SoulPopulation } {
+    const holder = { record: { agentId: luna.agentId, appSlug: null, harnessAuth: null, ...(computerUse === undefined ? {} : { computerUse }) } as SoulPopulation };
+    return {
+      get record() { return holder.record; },
+      set record(r: SoulPopulation) { holder.record = r; },
+      population: vi.fn(async () => holder.record),
+      coldWake: vi.fn(async () => null),
+      setColdWake: vi.fn(),
+      signedIn: vi.fn(async () => null),
+      signIn: vi.fn(),
+      mode: vi.fn(async () => 'safe' as const),
+      setMode: vi.fn(async (_id: string, mode: SoulMode) => mode),
+      model: vi.fn(async () => null),
+      setModel: vi.fn(),
+    };
+  }
+  function switchFor(s: { record: SoulPopulation }, overrides: Partial<ComputerUseSwitch> = {}): ComputerUseSwitch {
+    return {
+      supported: vi.fn(async () => true),
+      read: vi.fn(async () => s.record.computerUse ?? null),
+      set: vi.fn(async (agentId: string, on: boolean) => {
+        s.record = { ...s.record, computerUse: on };
+        return on ? { agentId, computerUse: on } : { agentId, computerUse: on, stopped: true };
+      }),
+      ...overrides,
+    };
+  }
+  const withBoth = (s: SoulSource, sw: ComputerUseSwitch, ui: React.ReactElement) => (
+    <SoulSourceContext.Provider value={s}><ComputerUseContext.Provider value={sw}>{ui}</ComputerUseContext.Provider></SoulSourceContext.Provider>
+  );
+
+  it('sits beside Execution mode, read from the census record, and switches off and on through agent-bot', async () => {
+    const s = source(true);
+    const sw = switchFor(s);
+    render(withBoth(s, sw, <CompanionDetails soul={luna} />));
+    const toggle = await screen.findByRole('switch', { name: 'Computer use for luna' }) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    expect(field('Computer use')).toBe('On');
+    const terms = [...document.querySelectorAll('dt')].map((dt) => dt.textContent);
+    expect(terms.indexOf('Computer use')).toBe(terms.indexOf('Execution mode') + 1);
+    fireEvent.click(toggle);
+    expect(sw.set).toHaveBeenCalledWith(luna.agentId, false);
+    await waitFor(() => expect(toggle.checked).toBe(false));
+    expect(field('Computer use')).toBe('OffOff: its requests to control the screen are denied.Its screen session was stopped.');
+    await waitFor(() => expect(vi.mocked(s.population).mock.calls.length).toBeGreaterThan(1));
+    fireEvent.click(toggle);
+    expect(sw.set).toHaveBeenLastCalledWith(luna.agentId, true);
+    await waitFor(() => expect(toggle.checked).toBe(true));
+    expect(field('Computer use')).toBe('On');
+  });
+
+  it('a refused change leaves the switch where it was and says why', async () => {
+    const s = source(true);
+    const sw = switchFor(s, { set: vi.fn(async () => { throw new BridgeError('soul-computer-use-failed', 'the owner did not approve'); }) });
+    render(withBoth(s, sw, <CompanionDetails soul={luna} />));
+    const toggle = await screen.findByRole('switch', { name: 'Computer use for luna' }) as HTMLInputElement;
+    fireEvent.click(toggle);
+    expect((await screen.findByRole('alert')).textContent).toBe('Computer use unchanged: the owner did not approve');
+    expect(toggle.checked).toBe(true);
+  });
+
+  it('is hidden when the bundled agent-bot has no soul computer-use', async () => {
+    const s = source(true);
+    const sw = switchFor(s, { supported: vi.fn(async () => false) });
+    render(withBoth(s, sw, <CompanionDetails soul={luna} />));
+    await screen.findByText('Execution mode', { selector: 'dt' });
+    await waitFor(() => expect(sw.supported).toHaveBeenCalled());
+    expect(screen.queryByText('Computer use', { selector: 'dt' })).toBeNull();
+    expect(screen.queryByRole('switch', { name: 'Computer use for luna' })).toBeNull();
+  });
+
+  it('is hidden when the census record does not say, and without a switch', async () => {
+    const s = source(undefined);
+    render(withBoth(s, switchFor(s), <CompanionDetails soul={luna} />));
+    await screen.findByText('Execution mode', { selector: 'dt' });
+    await waitFor(() => expect(s.population).toHaveBeenCalled());
+    expect(screen.queryByText('Computer use', { selector: 'dt' })).toBeNull();
+    cleanup();
+    const t = source(true);
+    render(<SoulSourceContext.Provider value={t}><CompanionDetails soul={luna} /></SoulSourceContext.Provider>);
+    await screen.findByText('Execution mode', { selector: 'dt' });
+    expect(screen.queryByText('Computer use', { selector: 'dt' })).toBeNull();
+  });
+
+  it('a bundle that turns out to lack the command hides the row instead of failing', async () => {
+    const s = source(true);
+    const sw = switchFor(s, { set: vi.fn(async () => { throw new BridgeError('soul-computer-use-unsupported', 'this agent-bot has no soul computer-use'); }) });
+    render(withBoth(s, sw, <CompanionDetails soul={luna} />));
+    fireEvent.click(await screen.findByRole('switch', { name: 'Computer use for luna' }));
+    await waitFor(() => expect(screen.queryByRole('switch', { name: 'Computer use for luna' })).toBeNull());
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('puts the switch in the ⓘ Details sheet after Execution mode', async () => {
+    const { InfoButton } = await import('./CompanionSession');
+    const s = source(false);
+    const sw = switchFor(s);
+    render(withBoth(s, sw, <InfoButton soul={luna} />));
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+    const sheet = screen.getByRole('dialog', { name: 'Details · luna' });
+    const toggle = await within(sheet).findByRole('switch', { name: 'Computer use for luna' }) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    expect(within(sheet).getByText('Off: its requests to control the screen are denied.')).toBeTruthy();
+    fireEvent.click(toggle);
+    expect(sw.set).toHaveBeenCalledWith(luna.agentId, true);
+    await waitFor(() => expect(toggle.checked).toBe(true));
   });
 });

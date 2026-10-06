@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { History, MessageSquare, OctagonX, Pause, Play } from 'lucide-react';
-import type { SoulStopResult } from '../bridge';
+import { History, MessageSquare, MousePointer2, OctagonX, Pause, Play } from 'lucide-react';
+import { computerUseSupported, type ComputerUseSwitch, type SoulStopResult } from '../bridge';
 import { useI18n } from '../lib/i18n';
 import { displayName, type CensusRow } from '../model/census';
 import { deriveDudle } from '../model/dudle';
-import { HALT_HOLD_MS, menuStep, pauseQuickAction, settleStop, STOP_SETTLE_MS, stopTargets, type FloatingState, type StopPhase } from '../model/floating';
+import { COMPUTER_USE_ERROR_MS, computerUseToggle, HALT_HOLD_MS, menuStep, pauseQuickAction, settleStop, STOP_SETTLE_MS, stopTargets, type FloatingState, type StopPhase } from '../model/floating';
 import { Dudle } from './Dudle';
 
 /**
@@ -41,6 +41,12 @@ interface FloatingDudleProps {
    */
   onTogglePause?: () => void;
   /**
+   * The owner's per-soul computer-use switch (agent-bot `soul computer-use`,
+   * agent-bot-identity #482) behind "Toggle computer use"; absent, or an
+   * agent-bot without the command, offers no such item.
+   */
+  computerUseSwitch?: ComputerUseSwitch;
+  /**
    * Shows the floating button and its quick menu. Off by default, matching
    * the Lovable export where it is disabled; the perimeter shows either way.
    */
@@ -56,12 +62,16 @@ interface FloatingDudleProps {
  * the screen through agent-bot `soul stop`; it shows "stopping…" until the
  * daemon drops them. The menu's Pause all / Resume item (when
  * `onTogglePause` is given) acts on the whole fleet through agent-bot
- * `soul pause` / `soul resume`. Toggling computer use is not offered:
- * agent-bot has no command for it yet.
+ * `soul pause` / `soul resume`. Its "Toggle computer use" item (when
+ * `computerUseSwitch` is given and agent-bot has the command) turns the
+ * lead's computer use off (agent-bot then denies its computer-use proposals
+ * and stops its screen session) or back on, through agent-bot
+ * `soul computer-use`, which asks the owner.
  */
-export function FloatingDudle({ lead, state, paused = false, computerUser, computerUse, stopper, onPrompt, onHistory, fleetPaused = false, onTogglePause, showButton = false }: FloatingDudleProps) {
+export function FloatingDudle({ lead, state, paused = false, computerUser, computerUse, stopper, onPrompt, onHistory, fleetPaused = false, onTogglePause, computerUseSwitch, showButton = false }: FloatingDudleProps) {
   const { t } = useI18n();
   const stop = useStop(stopper, computerUse);
+  const leadComputerUse = useLeadComputerUse(computerUseSwitch);
   const driven = computerUser !== null;
   useHoldEscape(driven && stop.offered, stop.halt);
   const [pos, setPos] = useState({ x: 24, y: 104 }); // from bottom-right
@@ -75,6 +85,7 @@ export function FloatingDudle({ lead, state, paused = false, computerUser, compu
   const actions = lead ? [
     { icon: MessageSquare, label: t('quick.prompt'), run: () => onPrompt(lead) },
     ...(onTogglePause ? [{ icon: pause.icon === 'play' ? Play : Pause, label: t(pause.label), run: onTogglePause }] : []),
+    ...(leadComputerUse.offered ? [{ icon: MousePointer2, label: t('quick.computer'), run: () => { void leadComputerUse.toggle(lead.agentId); } }] : []),
     { icon: History, label: t('quick.history'), run: () => onHistory(lead) },
   ] : [];
 
@@ -101,6 +112,11 @@ export function FloatingDudle({ lead, state, paused = false, computerUser, compu
       )}
       {showButton && lead && (
         <div className="fixed z-50" style={{ right: pos.x, bottom: pos.y }} data-floating-state={state}>
+          {leadComputerUse.failure && (
+            <p role="alert" className="pointer-events-none absolute bottom-full right-0 m-0 mb-2 w-max max-w-xs rounded-md bg-card px-3 py-1 text-xs text-destructive shadow-lg">
+              {t('computerUse.failed', { message: leadComputerUse.failure })}
+            </p>
+          )}
           {open && (
             <ul aria-label={t('dudleMenu')} className="absolute bottom-1/2 right-1/2 m-0 list-none p-0"
               onKeyDown={(e) => {
@@ -223,6 +239,51 @@ function useStop(stopper: Stopper | undefined, computerUse: ReadonlySet<string> 
   }, []);
 
   return { offered: supported && stopper !== undefined, phase, halt };
+}
+
+/**
+ * "Toggle computer use": probes `sw` once, then reads the lead's switch
+ * fresh from agent-bot and flips it. A failure shows its message for
+ * COMPUTER_USE_ERROR_MS; one that says the bundle has no `soul
+ * computer-use` hides the item instead.
+ */
+function useLeadComputerUse(sw: ComputerUseSwitch | undefined) {
+  const [supported, setSupported] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  const busy = useRef(false);
+
+  useEffect(() => {
+    setSupported(false);
+    if (!sw) return;
+    let current = true;
+    computerUseSupported(sw).then((ok) => { if (current) setSupported(ok); }, () => {});
+    return () => { current = false; };
+  }, [sw]);
+
+  useEffect(() => {
+    if (!failure) return;
+    const timer = setTimeout(() => setFailure(null), COMPUTER_USE_ERROR_MS);
+    return () => clearTimeout(timer);
+  }, [failure]);
+
+  const toggle = useCallback(async (agentId: string) => {
+    if (!sw || busy.current) return;
+    busy.current = true;
+    setFailure(null);
+    try {
+      const action = computerUseToggle(await sw.read(agentId));
+      if (!action) throw new Error('agent-bot gave no computer-use setting');
+      await sw.set(agentId, action === 'on');
+    } catch (error) {
+      const e = error as { code?: unknown; message?: unknown };
+      if (e?.code === 'soul-computer-use-unsupported') setSupported(false);
+      else setFailure(typeof e?.message === 'string' ? e.message : String(error));
+    } finally {
+      busy.current = false;
+    }
+  }, [sw]);
+
+  return { offered: supported && sw !== undefined, failure, toggle };
 }
 
 /**
