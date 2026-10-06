@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, Volume2, VolumeX } from 'lucide-react';
 import { ApprovalCounts, ApprovalsList } from './components/ApprovalsList';
 import { ArchiveDialog, ArchivedNotice, liveArchiver, type Archiver } from './components/ArchiveDialog';
-import { inApp, liveComputerUse, soulStopSupported, stopSoul, type ComputerUseSwitch, type RemovedSoul } from './bridge';
+import { inApp, listSoulTemplates, liveComputerUse, soulStopSupported, stopSoul, type ComputerUseSwitch, type RemovedSoul } from './bridge';
 import { FooterMenu } from './components/FooterMenu';
 import { CompanionSession, ComputerUseContext, InfoButton, type SessionTab } from './components/CompanionSession';
 import { CompanionWindow, Desktop } from './components/Desktop';
@@ -35,6 +35,7 @@ import type { ChatApi } from './useChat';
 import type { LaunchApi } from './useLaunch';
 import type { UpdateApi } from './useUpdates';
 import { livePauser, usePause, type Pauser } from './usePause';
+import type { TemplateLister } from './useSoulTemplates';
 import { useChimes, useSound } from './useSound';
 
 /** The tray's popup, or `--window`'s desktop; the shell picks (app_mode). */
@@ -95,6 +96,8 @@ interface AppProps {
   pauser?: Pauser;
   /** The quick menu's "Toggle computer use" (agent-bot `soul computer-use`); the app uses agent-bot when absent. */
   computerUseSwitch?: ComputerUseSwitch;
+  /** The launch form's soul templates (agent-bot `soul templates`, #65); the app uses agent-bot when absent. */
+  templateLister?: TemplateLister;
 }
 
 const liveStopper: Stopper = { supported: () => soulStopSupported(), stop: (agentId) => stopSoul(agentId) };
@@ -140,7 +143,7 @@ function LanguageSelect() {
 
 // The GeniusBar menu (the tray popup's content, and the toolbar popover in
 // window mode) and, from it, one companion's session.
-function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onOpenDesktop, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, floatingButton = false, archiver, stopper, pauser, computerUseSwitch }: AppProps) {
+function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onOpenDesktop, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, floatingButton = false, archiver, stopper, pauser, computerUseSwitch, templateLister }: AppProps) {
   const { t } = useI18n();
   const forest = useMemo(() => buildSoulForest(census), [census]);
   const roster = useMemo(() => allSouls(forest), [forest]);
@@ -375,7 +378,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
         checkingPackage={activePackage?.checking}
         packageError={activePackage?.error}
         onCancel={closeLaunch}
-        onLaunched={launched} />
+        onLaunched={launched}
+        listTemplates={templateLister ?? (inApp() && !isStatic ? listSoulTemplates : undefined)} />
     </LaunchModal>
   );
 

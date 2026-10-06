@@ -2909,3 +2909,119 @@ mod population_list_tests {
         );
     }
 }
+
+/// The soul templates the launch form offers (#65, Lovable launch dialog
+/// "1 · Soul"), from agent-bot's `soul templates --json`
+/// (agent-bot-identity #374): `{templates: [{name, description,
+/// preferredHarnesses, defaultHarness, package, revision, source}],
+/// soulsRoot, errors: [{package, message}]}`, sorted by name. agent-bot
+/// reads local packages only and exits 0 with unreadable packages listed in
+/// `errors`. An older bundle without the command answers with its `soul`
+/// usage line, which maps to `soul-templates-unsupported`, and the form
+/// keeps its package path field alone.
+#[tauri::command]
+pub async fn list_soul_templates<R: Runtime>(app: AppHandle<R>) -> Result<Value, BridgeError> {
+    let args = vec!["soul".into(), "templates".into(), "--json".into()];
+    let output = run_agent_bot(&app, args, "soul-templates-unavailable").await?;
+    parse_soul_templates(&output.stdout, &output.stderr)
+}
+
+/// True when stderr is an older agent-bot's `soul` usage line, which does
+/// not list `soul templates`.
+fn soul_templates_missing(stdout: &[u8], stderr: &[u8]) -> bool {
+    let message = last_line(stderr);
+    serde_json::from_str::<Value>(&last_line(stdout)).is_err()
+        && message.contains("usage: agent-bot soul ")
+        && !message.contains("soul templates")
+}
+
+fn parse_soul_templates(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    if soul_templates_missing(stdout, stderr) {
+        return Err(BridgeError::new(
+            "soul-templates-unsupported",
+            "this agent-bot has no soul templates",
+        ));
+    }
+    parse_agent_bot_json(
+        stdout,
+        stderr,
+        "soul-templates-failed",
+        "agent-bot soul templates: ",
+        "agent-bot gave no soul templates",
+        |value| value.get("templates").and_then(Value::as_array).is_some(),
+    )
+}
+
+#[cfg(test)]
+mod soul_templates_tests {
+    use super::*;
+
+    /// agent-bot 0.10.21's `soul` usage line: it has `soul spawn` and
+    /// `soul locate`, but no `soul templates`.
+    const OLD_USAGE: &[u8] =
+        b"agent-bot: usage: agent-bot soul cold-wake <agentId> [on|off|show] | soul pause|resume <agentId|name> [--json] | soul dir AGENT_ID | soul locate PATH | soul spawn TEMPLATE_PATH --name NAME [--harness H] | soul confinement AGENT_ID off|warn|deny\n";
+
+    #[test]
+    fn parses_the_template_listing() {
+        let listed = parse_soul_templates(
+            b"{\"templates\":[{\"name\":\"Starter\",\"description\":\"A first companion.\",\"preferredHarnesses\":[\"claude\"],\"defaultHarness\":\"claude\",\"package\":\"/Users/u/Souls/Starter.soul\",\"revision\":null,\"source\":\"bundled\"}],\"soulsRoot\":\"/Users/u/Souls\",\"errors\":[{\"package\":\"/Users/u/Souls/Bad.soul\",\"message\":\"soul.json is missing\"}]}\n",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(listed["templates"][0]["name"], "Starter");
+        assert_eq!(
+            listed["templates"][0]["package"],
+            "/Users/u/Souls/Starter.soul"
+        );
+        assert_eq!(listed["errors"][0]["message"], "soul.json is missing");
+        let empty = parse_soul_templates(
+            b"{\"templates\":[],\"soulsRoot\":\"/r\",\"errors\":[]}\n",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(empty["templates"], json!([]));
+    }
+
+    #[test]
+    fn reports_a_failed_listing() {
+        assert_eq!(
+            parse_soul_templates(
+                b"",
+                b"agent-bot soul templates: EACCES: permission denied\n"
+            ),
+            Err(BridgeError::new(
+                "soul-templates-failed",
+                "EACCES: permission denied"
+            ))
+        );
+        assert_eq!(
+            parse_soul_templates(b"{\"soulsRoot\":\"/r\"}\n", b"").unwrap_err(),
+            BridgeError::new("soul-templates-failed", "agent-bot gave no soul templates")
+        );
+        assert_eq!(
+            parse_soul_templates(b"", b"").unwrap_err().message,
+            "agent-bot gave no soul templates"
+        );
+    }
+
+    #[test]
+    fn an_older_bundle_is_unsupported_not_failed() {
+        assert_eq!(
+            parse_soul_templates(b"", OLD_USAGE).unwrap_err(),
+            BridgeError::new(
+                "soul-templates-unsupported",
+                "this agent-bot has no soul templates"
+            )
+        );
+        // A bundle that has the command but refuses its arguments still has it.
+        assert_eq!(
+            parse_soul_templates(
+                b"",
+                b"agent-bot soul templates: usage: agent-bot soul templates [--json]\n"
+            )
+            .unwrap_err()
+            .code,
+            "soul-templates-failed"
+        );
+    }
+}
