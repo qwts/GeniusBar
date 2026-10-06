@@ -3025,3 +3025,208 @@ mod soul_templates_tests {
         );
     }
 }
+
+/// A soul's read-only profile for the Customize dialog (#64), from
+/// agent-bot's `soul profile <agentId> --json` (agent-bot-identity #375):
+/// `{agentId, profile: {...}, files, skills, credentials, sop: {resolved,
+/// override}, errors}`. Credentials carry names and status, never values.
+/// An unknown soul answers `{error: {code: "soul-not-found"}}`. An older
+/// bundle without the command answers with its `soul` usage line, which
+/// maps to `soul-profile-unsupported`, and the dialog stays hidden.
+#[tauri::command]
+pub async fn soul_profile<R: Runtime>(
+    app: AppHandle<R>,
+    agent: String,
+) -> Result<Value, BridgeError> {
+    let agent = profile_argument(agent, "agent")?;
+    let args = vec![
+        "soul".into(),
+        "profile".into(),
+        agent.into(),
+        "--json".into(),
+    ];
+    let output = run_agent_bot(&app, args, "soul-profile-unavailable").await?;
+    parse_soul_profile(&output.stdout, &output.stderr)
+}
+
+/// One file of a soul's profile (#64), from `soul profile <agentId> --file
+/// RELATIVE_PATH --json`: `{agentId, path, size, contents}`. agent-bot
+/// accepts only an exact inventory path of a text file up to 256 KiB
+/// (`soul-profile-file-denied`, `soul-profile-file-too-large`).
+#[tauri::command]
+pub async fn soul_profile_file<R: Runtime>(
+    app: AppHandle<R>,
+    agent: String,
+    path: String,
+) -> Result<Value, BridgeError> {
+    let agent = profile_argument(agent, "agent")?;
+    let path = profile_argument(path, "path")?;
+    let args = vec![
+        "soul".into(),
+        "profile".into(),
+        agent.into(),
+        "--file".into(),
+        path.into(),
+        "--json".into(),
+    ];
+    let output = run_agent_bot(&app, args, "soul-profile-unavailable").await?;
+    parse_soul_profile_file(&output.stdout, &output.stderr)
+}
+
+/// A non-empty argument that agent-bot cannot read as a flag.
+fn profile_argument(value: String, what: &str) -> Result<String, BridgeError> {
+    if value.trim().is_empty() || value.starts_with('-') {
+        return Err(BridgeError::new(
+            "soul-profile-failed",
+            &format!("not a soul profile {what}: {value}"),
+        ));
+    }
+    Ok(value)
+}
+
+/// True when stderr is an older agent-bot's `soul` usage line, which does
+/// not list `soul profile`.
+fn soul_profile_missing(stdout: &[u8], stderr: &[u8]) -> bool {
+    let message = last_line(stderr);
+    serde_json::from_str::<Value>(&last_line(stdout)).is_err()
+        && message.contains("usage: agent-bot soul ")
+        && !message.contains("soul profile")
+}
+
+fn soul_profile_unsupported() -> BridgeError {
+    BridgeError::new(
+        "soul-profile-unsupported",
+        "this agent-bot has no soul profile",
+    )
+}
+
+fn parse_soul_profile(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    if soul_profile_missing(stdout, stderr) {
+        return Err(soul_profile_unsupported());
+    }
+    parse_agent_bot_json(
+        stdout,
+        stderr,
+        "soul-profile-failed",
+        "agent-bot soul profile: ",
+        "agent-bot gave no soul profile",
+        |value| {
+            value.get("agentId").and_then(Value::as_str).is_some()
+                && value.get("profile").is_some_and(Value::is_object)
+        },
+    )
+}
+
+fn parse_soul_profile_file(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    if soul_profile_missing(stdout, stderr) {
+        return Err(soul_profile_unsupported());
+    }
+    parse_agent_bot_json(
+        stdout,
+        stderr,
+        "soul-profile-failed",
+        "agent-bot soul profile: ",
+        "agent-bot gave no file contents",
+        |value| {
+            value.get("path").and_then(Value::as_str).is_some()
+                && value.get("contents").and_then(Value::as_str).is_some()
+        },
+    )
+}
+
+#[cfg(test)]
+mod soul_profile_tests {
+    use super::*;
+
+    /// agent-bot 0.10.22's `soul` usage line: it has `soul templates`, but
+    /// no `soul profile`.
+    const OLD_USAGE: &[u8] =
+        b"agent-bot: usage: agent-bot soul cold-wake <agentId> [on|off|show] | soul show <agentId|name> [--json] | soul asides <agentId|name> [--after ASIDE_ID] [--json] | soul dir AGENT_ID | soul locate PATH | soul templates [--json] | soul spawn TEMPLATE_PATH --name NAME [--harness H]\n";
+
+    #[test]
+    fn parses_the_profile() {
+        let profile = parse_soul_profile(
+            b"{\"agentId\":\"agent_p\",\"profile\":{\"name\":\"luna\",\"displayName\":\"Luna\",\"description\":\"Leads.\",\"harness\":\"claude\",\"package\":\"/s/Luna.soul\",\"revision\":\"r1\",\"template\":false,\"parentId\":null,\"status\":\"active\"},\"files\":[{\"path\":\"soul.md\",\"kind\":\"soul\",\"size\":12,\"modifiedAt\":\"2026-10-01T00:00:00.000Z\",\"text\":true}],\"skills\":[{\"name\":\"review\",\"source\":\"sop\",\"path\":\"sop/skills/review/SKILL.md\",\"commit\":\"abc123\"}],\"credentials\":[{\"name\":\"luna-app\",\"provider\":\"github\",\"status\":\"declared\"}],\"sop\":{\"resolved\":{\"source\":\"qwts/sop\",\"commit\":\"abc123\"},\"override\":null},\"errors\":[]}\n",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(profile["agentId"], "agent_p");
+        assert_eq!(profile["profile"]["displayName"], "Luna");
+        assert_eq!(profile["files"][0]["path"], "soul.md");
+        assert_eq!(profile["credentials"][0]["status"], "declared");
+        assert_eq!(profile["sop"]["resolved"]["commit"], "abc123");
+    }
+
+    #[test]
+    fn parses_a_file() {
+        let file = parse_soul_profile_file(
+            b"{\"agentId\":\"agent_p\",\"path\":\"soul.md\",\"size\":7,\"contents\":\"# Luna\\n\"}\n",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(file["contents"], "# Luna\n");
+    }
+
+    #[test]
+    fn keeps_agent_bot_error_codes() {
+        assert_eq!(
+            parse_soul_profile(
+                b"{\"error\":{\"code\":\"soul-not-found\",\"message\":\"No soul named nobody.\"}}\n",
+                b"",
+            )
+            .unwrap_err(),
+            BridgeError::new("soul-not-found", "No soul named nobody.")
+        );
+        assert_eq!(
+            parse_soul_profile_file(
+                b"{\"error\":{\"code\":\"soul-profile-file-too-large\",\"message\":\"Profile file is larger than 262144 bytes.\"}}\n",
+                b"",
+            )
+            .unwrap_err()
+            .code,
+            "soul-profile-file-too-large"
+        );
+        assert_eq!(
+            parse_soul_profile(b"", b"agent-bot soul profile: EACCES\n").unwrap_err(),
+            BridgeError::new("soul-profile-failed", "EACCES")
+        );
+        assert_eq!(
+            parse_soul_profile(b"{\"agentId\":\"agent_p\"}\n", b"")
+                .unwrap_err()
+                .message,
+            "agent-bot gave no soul profile"
+        );
+    }
+
+    #[test]
+    fn an_older_bundle_is_unsupported_not_failed() {
+        assert_eq!(
+            parse_soul_profile(b"", OLD_USAGE).unwrap_err(),
+            soul_profile_unsupported()
+        );
+        assert_eq!(
+            parse_soul_profile_file(b"", OLD_USAGE).unwrap_err().code,
+            "soul-profile-unsupported"
+        );
+        // A bundle that has the command but refuses its arguments still has it.
+        assert_eq!(
+            parse_soul_profile(
+                b"{\"error\":{\"code\":\"soul-profile-failed\",\"message\":\"usage: agent-bot soul profile <agentId|name> [--json] [--file RELATIVE_PATH]\"}}\n",
+                OLD_USAGE,
+            )
+            .unwrap_err()
+            .code,
+            "soul-profile-failed"
+        );
+    }
+
+    #[test]
+    fn refuses_flag_like_arguments() {
+        assert!(profile_argument("--file".into(), "agent").is_err());
+        assert!(profile_argument(" ".into(), "path").is_err());
+        assert_eq!(
+            profile_argument("agent_p".into(), "agent").unwrap(),
+            "agent_p"
+        );
+    }
+}

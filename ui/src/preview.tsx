@@ -20,7 +20,10 @@
 // is off), and with &dudle=… the quick menu's "Toggle computer use" flips
 // the lead's (luna's), as agent-bot `soul computer-use` would; Launch… shows
 // the soul picker with sampleTemplates' three templates and "Custom soul"
-// (&templates=0 shows the form an agent-bot without `soul templates` gives):
+// (&templates=0 shows the form an agent-bot without `soul templates` gives);
+// ⓘ offers Customize…, showing sampleProfile read-only for any companion
+// (&customize=1 opens it on load for the selected one, &customize=0 hides it
+// as an agent-bot without `soul profile` would):
 // the app on the fixed fixtures, without Tauri. Not part of the build.
 import { StrictMode, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -32,9 +35,13 @@ import { AuditSourceContext, type AuditSource } from './components/AuditLog';
 import { SoulSourceContext, type SoulSource } from './components/SoulNotices';
 import type { CensusRow } from './model/census';
 import { emptyChat, emptyComposer, mergeIncoming, type ChatState } from './model/chat';
-import { inboxMessage, sampleApprovals, sampleAudit, sampleBadges, sampleCensus, sampleColdWake, sampleConnection, sampleFloating, sampleModels, sampleModes, sampleOpenedPackages, samplePaused, samplePopulation, sampleSessionEntries, sampleTemplates } from './model/fixtures';
+import { inboxMessage, sampleApprovals, sampleAudit, sampleBadges, sampleCensus, sampleColdWake, sampleConnection, sampleFloating, sampleModels, sampleModes, sampleOpenedPackages, samplePaused, samplePopulation, sampleSessionEntries, sampleProfile, sampleProfileFiles, sampleTemplates } from './model/fixtures';
 import type { Pauser } from './usePause';
 import type { TemplateLister } from './useSoulTemplates';
+import { BridgeError } from './bridge';
+import { ProfileSourceContext, type ProfileSource } from './useSoulProfile';
+import { CustomizeDialog } from './components/CustomizeDialog';
+import { I18nProvider } from './lib/i18n';
 import type { ChatApi } from './useChat';
 import '@fontsource/ibm-plex-sans/latin-400.css';
 import '@fontsource/ibm-plex-sans/latin-500.css';
@@ -104,6 +111,19 @@ const computerUseSwitch: ComputerUseSwitch = {
   },
 };
 
+// The Customize dialog (#64): sampleProfile for whichever companion asks.
+const profileSource: ProfileSource = {
+  profile: async (agentId) => {
+    if (new URLSearchParams(location.search).get('customize') === '0') throw new BridgeError('soul-profile-unsupported', 'no soul profile');
+    return { ...sampleProfile, agentId };
+  },
+  file: async (agentId, path) => {
+    const contents = sampleProfileFiles[path];
+    if (contents === undefined) throw new BridgeError('soul-profile-file-denied', 'Profile file is not in the inventory.');
+    return { agentId, path, size: contents.length, contents };
+  },
+};
+
 function Preview() {
   const params = new URLSearchParams(location.search);
   const mode = (params.get('mode') === 'window' ? 'window' : 'tray') as AppMode;
@@ -168,11 +188,19 @@ function Preview() {
   const opened = params.get('open');
   const fixture = opened === 'copy' || opened === 'described' ? sampleOpenedPackages[opened] : null;
   const openedPackage = opened ? { id: 1, checking: false, error: null, path: opened, ...fixture } : undefined;
-  const app = <App mode={mode} select={params.get('select')} openedPackage={openedPackage} census={souls} badges={floating ? { ...sampleBadges, computerUse: driving ?? floating.computerUse, busy: floating.busy } : sampleBadges} stopper={stopper} pauser={pauser} computerUseSwitch={computerUseSwitch} templateLister={templateLister} floatingButton={floating !== null} archiver={archiver} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}
+  const app = <App mode={mode} select={params.get('select')} openedPackage={openedPackage} census={souls} badges={floating ? { ...sampleBadges, computerUse: driving ?? floating.computerUse, busy: floating.busy } : sampleBadges} stopper={stopper} pauser={pauser} computerUseSwitch={computerUseSwitch} templateLister={templateLister} profileSource={profileSource} floatingButton={floating !== null} archiver={archiver} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}
     onRefresh={() => {}} onRemoveServices={async () => {}} updates={{ status: { state: 'idle', version: null }, act: () => {} }}
     launcher={{ state: { phase: 'idle' }, launch: async () => {}, reset: () => {} }} />;
+  // &customize=1: the Customize dialog open on load, for the selected companion (or luna).
+  const [customizing, setCustomizing] = useState(params.get('customize') === '1');
+  const customized = souls.find((s) => s.agentId === (params.get('select') ?? 'agent_p')) ?? souls[0];
+  const dialog = customizing && customized && (
+    <I18nProvider><ProfileSourceContext.Provider value={profileSource}>
+      <CustomizeDialog soul={customized} onClose={() => setCustomizing(false)} />
+    </ProfileSourceContext.Provider></I18nProvider>
+  );
   // The tray popup is a fixed 384×560 window (tauri.conf.json).
-  return mode === 'tray' ? <div style={{ width: 384, height: 560, margin: 16, outline: '1px solid #444' }}>{app}</div> : app;
+  return <>{mode === 'tray' ? <div style={{ width: 384, height: 560, margin: 16, outline: '1px solid #444' }}>{app}</div> : app}{dialog}</>;
 }
 
 createRoot(document.getElementById('root')!).render(<StrictMode><AuditSourceContext.Provider value={audit}><SoulSourceContext.Provider value={soulSource}><Preview /></SoulSourceContext.Provider></AuditSourceContext.Provider></StrictMode>);

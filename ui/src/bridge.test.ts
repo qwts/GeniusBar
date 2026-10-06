@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BridgeError, call, openDesktop, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported, normalizeSoulComputerUse, soulComputerUse, soulComputerUseSupported, liveComputerUse, listSoulTemplates, normalizeSoulTemplates } from './bridge';
+import { BridgeError, call, openDesktop, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported, normalizeSoulComputerUse, soulComputerUse, soulComputerUseSupported, liveComputerUse, listSoulTemplates, normalizeSoulTemplates, normalizeSoulProfile, soulProfile, soulProfileFile } from './bridge';
 
 describe('bridge', () => {
   it('invokes the shell command with the method and params', async () => {
@@ -587,5 +587,62 @@ describe('soul templates (#65)', () => {
 
   it('is unsupported outside the app', async () => {
     await expect(listSoulTemplates()).rejects.toMatchObject({ code: 'soul-templates-unsupported' });
+  });
+});
+
+describe('soul profile (#64)', () => {
+  const raw = {
+    agentId: 'agent_p',
+    profile: { name: 'luna', displayName: 'Luna', description: 'Leads.', harness: 'claude', package: '/s/Luna.soul', revision: 'r1', template: false, parentId: null, status: 'active' },
+    files: [{ path: 'soul.md', kind: 'soul', size: 12, modifiedAt: '2026-10-01T00:00:00.000Z', text: true }, { path: '', kind: 'soul' }, { path: 'x.bin', kind: 'odd', text: 'yes' }],
+    skills: [{ name: 'review', source: 'sop', path: 'sop/skills/review/SKILL.md', commit: 'abc123' }, { name: 'notes', source: 'soul', path: 'skills/notes/SKILL.md', commit: null }, { source: 'sop' }],
+    credentials: [{ name: 'luna-app', provider: 'github', status: 'declared', value: 'ghs_secret', path: '/keys/luna.pem' }],
+    sop: { resolved: { source: 'qwts/sop', commit: 'abc123' }, override: { path: 'agent-sop.toml', workflows: ['workflows/ship.toml', 4] } },
+    errors: [{ area: 'sop', message: 'pins need the network' }, { area: 'x' }],
+  };
+
+  it('normalizes agent-bot\'s profile, keeping only credential names and status', () => {
+    const profile = normalizeSoulProfile(raw);
+    expect(profile).toEqual({
+      agentId: 'agent_p',
+      profile: { name: 'luna', displayName: 'Luna', description: 'Leads.', harness: 'claude', package: '/s/Luna.soul', revision: 'r1', template: false, parentId: null, status: 'active' },
+      files: [
+        { path: 'soul.md', kind: 'soul', size: 12, modifiedAt: '2026-10-01T00:00:00.000Z', text: true },
+        { path: 'x.bin', kind: 'context', size: null, modifiedAt: null, text: false },
+      ],
+      skills: [
+        { name: 'review', source: 'sop', path: 'sop/skills/review/SKILL.md', commit: 'abc123' },
+        { name: 'notes', source: 'soul', path: 'skills/notes/SKILL.md', commit: null },
+      ],
+      credentials: [{ name: 'luna-app', provider: 'github', status: 'declared' }],
+      sop: { resolved: { source: 'qwts/sop', commit: 'abc123' }, override: { path: 'agent-sop.toml', workflows: ['workflows/ship.toml'] } },
+      errors: [{ area: 'sop', message: 'pins need the network' }],
+    });
+    expect(JSON.stringify(profile)).not.toContain('ghs_secret');
+    expect(normalizeSoulProfile({ agentId: 'a', profile: {} })).toMatchObject({ files: [], skills: [], credentials: [], sop: { resolved: null, override: null }, errors: [] });
+    expect(normalizeSoulProfile({ agentId: 'a' })).toBeNull();
+    expect(normalizeSoulProfile(null)).toBeNull();
+  });
+
+  it('reads through the shell, keeping its error code', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => {
+      calls.push([cmd, args]);
+      return cmd === 'soul_profile' ? raw : { agentId: 'agent_p', path: 'soul.md', size: 7, contents: '# Luna\n' };
+    }) as never;
+    await expect(soulProfile('agent_p', fake)).resolves.toMatchObject({ profile: { displayName: 'Luna' } });
+    await expect(soulProfileFile('agent_p', 'soul.md', fake)).resolves.toEqual({ agentId: 'agent_p', path: 'soul.md', size: 7, contents: '# Luna\n' });
+    expect(calls).toEqual([['soul_profile', { agent: 'agent_p' }], ['soul_profile_file', { agent: 'agent_p', path: 'soul.md' }]]);
+    const old = (async () => { throw { code: 'soul-profile-unsupported', message: 'this agent-bot has no soul profile' }; }) as never;
+    await expect(soulProfile('agent_p', old)).rejects.toMatchObject({ code: 'soul-profile-unsupported' });
+    const big = (async () => { throw { code: 'soul-profile-file-too-large', message: 'too large' }; }) as never;
+    await expect(soulProfileFile('agent_p', 'big.md', big)).rejects.toMatchObject({ code: 'soul-profile-file-too-large' });
+    await expect(soulProfile('agent_p', (async () => ({ nope: true })) as never)).rejects.toMatchObject({ code: 'soul-profile-failed' });
+    await expect(soulProfileFile('agent_p', 'soul.md', (async () => ({ path: 'soul.md' })) as never)).rejects.toMatchObject({ code: 'soul-profile-failed' });
+  });
+
+  it('is unsupported outside the app', async () => {
+    await expect(soulProfile('agent_p')).rejects.toMatchObject({ code: 'soul-profile-unsupported' });
+    await expect(soulProfileFile('agent_p', 'soul.md')).rejects.toMatchObject({ code: 'soul-profile-unsupported' });
   });
 });
