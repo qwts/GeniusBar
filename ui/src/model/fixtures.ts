@@ -163,6 +163,20 @@ export const sampleModels: Readonly<Record<string, SoulModel>> = {
 export const sampleBadges: SoulBadges = { comms: new Set(['agent_p']), computerUse: new Set(['agent_c']) };
 
 /**
+ * The floating Dudle's states for preview (`&dudle=`, #122): idle (nothing
+ * pending), working (luna mid-turn), awaiting (the pending approvals) and
+ * computer (agent_c drives the screen, so the perimeter shows).
+ */
+export const sampleFloating: Readonly<Record<'idle' | 'working' | 'awaiting' | 'computer', {
+  approvals: boolean; busy: ReadonlySet<string>; computerUse: ReadonlySet<string>;
+}>> = {
+  idle: { approvals: false, busy: new Set(), computerUse: new Set() },
+  working: { approvals: false, busy: new Set(['agent_p']), computerUse: new Set() },
+  awaiting: { approvals: true, busy: new Set(), computerUse: new Set() },
+  computer: { approvals: false, busy: new Set(), computerUse: new Set(['agent_c']) },
+};
+
+/**
  * Finder-opened packages as `soul locate` describes them, for the launch
  * form (preview `&open=copy` or `&open=described`): a copy of luna's folder,
  * which must be named to fork (#110), and a package whose soul.json gives a

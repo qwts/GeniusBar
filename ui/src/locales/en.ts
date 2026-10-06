@@ -259,6 +259,11 @@ export const en = {
   yes: 'yes',
   no: 'no',
   unknown: 'unknown',
+  // The desktop's floating Dudle (#122).
+  dudleMenu: 'Companion quick actions',
+  'quick.prompt': 'Write a prompt',
+  'quick.history': 'Open history',
+  computerActive: '{name} is using the computer',
 } as const;
 
 export type MessageKey = keyof typeof en;

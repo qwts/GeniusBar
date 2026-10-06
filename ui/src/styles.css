@@ -191,3 +191,9 @@
     transition-duration: 0.001ms !important;
   }
 }
+
+/* The floating Dudle's awaiting dot and the computer-use perimeter (Lovable). */
+@keyframes ping-soft { 0% { transform: scale(1); opacity: .8; } 100% { transform: scale(2.2); opacity: 0; } }
+@keyframes perimeter { 0%,100% { opacity: .65; } 50% { opacity: 1; } }
+.ping-soft { animation: ping-soft 1.4s cubic-bezier(0,0,.2,1) infinite; }
+.perimeter { animation: perimeter 1.6s ease-in-out infinite; box-shadow: inset 0 0 0 3px var(--warning), inset 0 0 40px color-mix(in oklab, var(--warning) 35%, transparent); }
