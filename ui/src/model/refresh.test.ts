@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyCensus, commsOf, computerUseOf, sameSet } from './refresh';
+import { applyCensus, commsAmong, commsOf, computerUseOf, sameSet } from './refresh';
 import { disconnected, STARTING_WINDOW_MS, unpairedMessage } from './status';
 import { needsSetup } from './setup';
 
@@ -97,5 +97,11 @@ describe('desktop badges (#122)', () => {
     expect([...commsOf([state('a', true), null, state('b', false)])]).toEqual(['a']);
     expect(sameSet(new Set(['a', 'b']), new Set(['b', 'a']))).toBe(true);
     expect(sameSet(new Set(['a']), new Set(['b']))).toBe(false);
+  });
+
+  it('narrows the one-call population list to the visible souls (#137)', () => {
+    const list = [{ agentId: 'a', comms: true }, { agentId: 'b', comms: false }, { agentId: 'hidden', comms: true }];
+    expect([...commsAmong(list, ['a', 'b', 'missing'])]).toEqual(['a']);
+    expect(commsAmong(list, []).size).toBe(0);
   });
 });

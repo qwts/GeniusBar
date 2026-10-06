@@ -1995,3 +1995,116 @@ mod services_installed_tests {
         );
     }
 }
+
+/// Every soul's agent-comms and managed state in one agent-bot run (#137),
+/// from `population list --json` (agent-bot 0.10.15+: a pretty-printed array
+/// of census records). The desktop's comms badges read this once a minute
+/// instead of one `soul comms show` per soul. Only `agentId`, `status`,
+/// `managed` and `comms` come back, so paths and transcript locators never
+/// reach the web view.
+#[tauri::command]
+pub async fn population_list<R: Runtime>(app: AppHandle<R>) -> Result<Value, BridgeError> {
+    let args = population_list_args().into_iter().map(Into::into).collect();
+    let output = run_agent_bot(&app, args, "population-unavailable").await?;
+    parse_population_list(&output.stdout, &output.stderr)
+}
+
+fn population_list_args() -> Vec<&'static str> {
+    vec!["population", "list", "--json"]
+}
+
+fn parse_population_list(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    if let Ok(Value::Array(records)) = serde_json::from_slice::<Value>(stdout) {
+        let souls: Vec<Value> = records
+            .iter()
+            .filter_map(|record| {
+                let id = record.get("id").and_then(Value::as_str)?;
+                let field = |name: &str| record.get(name).cloned().unwrap_or(Value::Null);
+                Some(json!({
+                    "agentId": id,
+                    "status": field("status"),
+                    "managed": field("managed"),
+                    "comms": field("comms"),
+                }))
+            })
+            .collect();
+        return Ok(Value::Array(souls));
+    }
+    let message = last_line(stderr);
+    let message = message
+        .strip_prefix("agent-population: ")
+        .unwrap_or(&message);
+    Err(BridgeError::new(
+        "population-failed",
+        if message.is_empty() {
+            "agent-bot gave no census list"
+        } else {
+            message
+        },
+    ))
+}
+
+#[cfg(test)]
+mod population_list_tests {
+    use super::*;
+
+    #[test]
+    fn builds_population_list_arguments() {
+        assert_eq!(population_list_args(), vec!["population", "list", "--json"]);
+    }
+
+    #[test]
+    fn keeps_only_the_badge_fields_of_each_census_record() {
+        let list = parse_population_list(
+            br#"[
+  {
+    "id": "agent_1",
+    "name": "luna",
+    "displayName": "Luna",
+    "status": "active",
+    "spacePath": "/Users/x/.agent-space",
+    "transcriptLocator": {"provider": "claude", "id": "t1"},
+    "managed": true,
+    "comms": true,
+    "mode": "safe",
+    "model": null,
+    "parentId": null
+  },
+  {"id": "agent_2", "status": "retired", "managed": false, "comms": false},
+  {"name": "no id"}
+]
+"#,
+            b"",
+        )
+        .unwrap();
+        let souls = list.as_array().unwrap();
+        assert_eq!(souls.len(), 2);
+        assert_eq!(souls[0]["agentId"], "agent_1");
+        assert_eq!(souls[0]["comms"], true);
+        assert_eq!(souls[0]["managed"], true);
+        assert!(souls[0].get("spacePath").is_none());
+        assert!(souls[0].get("transcriptLocator").is_none());
+        assert_eq!(souls[1]["comms"], false);
+        assert_eq!(souls[1]["status"], "retired");
+        assert_eq!(parse_population_list(b"[]\n", b"").unwrap(), json!([]));
+    }
+
+    #[test]
+    fn reports_a_failed_or_unreadable_list() {
+        assert_eq!(
+            parse_population_list(b"", b"agent-population: population store is unreadable\n"),
+            Err(BridgeError::new(
+                "population-failed",
+                "population store is unreadable"
+            ))
+        );
+        // Not an array (an older agent-bot printing the text table).
+        assert_eq!(
+            parse_population_list(b"NAME\tID\tAPP\n", b""),
+            Err(BridgeError::new(
+                "population-failed",
+                "agent-bot gave no census list"
+            ))
+        );
+    }
+}

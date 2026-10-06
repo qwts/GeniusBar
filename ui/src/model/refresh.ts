@@ -60,8 +60,17 @@ export function computerUseOf(status: DaemonStatus | null): ReadonlySet<string> 
 }
 
 /** Souls whose agent comms agent-bot reports on; a soul it cannot answer for has no badge. */
-export function commsOf(states: readonly (SoulComms | null)[]): ReadonlySet<string> {
+export function commsOf(states: readonly (Pick<SoulComms, 'agentId' | 'comms'> | null)[]): ReadonlySet<string> {
   return new Set(states.flatMap((s) => (s?.comms ? [s.agentId] : [])));
+}
+
+/**
+ * The visible souls with comms on, from one `population_list` read (#137).
+ * The list covers every soul agent-bot knows, so it is narrowed to `agentIds`.
+ */
+export function commsAmong(entries: readonly Pick<SoulComms, 'agentId' | 'comms'>[], agentIds: readonly string[]): ReadonlySet<string> {
+  const visible = new Set(agentIds);
+  return commsOf(entries.filter((e) => visible.has(e.agentId)));
 }
 
 /** Same members, so a poll that changed nothing keeps the old set and skips a render. */

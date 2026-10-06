@@ -1,19 +1,29 @@
 // The desktop's avatar badges (#122): which souls have agent comms on and
-// which drive the screen. Read from agent-bot, the computer-use list on the
-// census cadence and comms (one agent-bot run per soul) less often.
+// which drive the screen. Read from agent-bot: comms for every soul in one
+// `population list` run each minute (#137), falling back to one run per soul
+// on an older bundle; the computer-use list every 15 s, or on the census
+// cadence while a soul drives the screen so the badge clears promptly.
 import { useEffect, useRef, useState } from 'react';
-import { daemonStatus, soulComms, type DaemonStatus, type SoulComms } from './bridge';
-import { commsOf, computerUseOf, noBadges, sameSet, type SoulBadges } from './model/refresh';
+import { daemonStatus, populationList, soulComms, type DaemonStatus, type PopulationEntry, type SoulComms } from './bridge';
+import { commsAmong, commsOf, computerUseOf, noBadges, sameSet, type SoulBadges } from './model/refresh';
 import { CENSUS_INTERVAL_MS } from './useCensus';
 
 export const COMMS_INTERVAL_MS = 60_000;
+/** Daemon status cadence while no soul is known to drive the screen. */
+export const STATUS_INTERVAL_MS = 15_000;
 
 export interface BadgeSources {
   status: () => Promise<DaemonStatus | null>;
+  /** Every soul's comms in one call; null on an older bundle. */
+  population: () => Promise<PopulationEntry[] | null>;
   comms: (agentId: string) => Promise<SoulComms | null>;
 }
 
-const live: BadgeSources = { status: () => daemonStatus(), comms: (agentId) => soulComms(agentId) };
+const live: BadgeSources = {
+  status: () => daemonStatus(),
+  population: () => populationList(),
+  comms: (agentId) => soulComms(agentId),
+};
 
 /**
  * Badges for `agentIds` while `enabled`. Outside Tauri, or with an older
@@ -28,18 +38,17 @@ export function useBadges(agentIds: readonly string[], enabled: boolean, sources
   useEffect(() => {
     if (!enabled) { setBadges(noBadges); return; }
     let active = true;
-    let busy = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Each read schedules the next, so reads never overlap and the delay
+    // follows what the last one saw.
     const read = async () => {
-      if (busy) return;
-      busy = true;
-      try {
-        const next = computerUseOf(await source.current.status().catch(() => null));
-        if (active) setBadges((b) => (sameSet(b.computerUse, next) ? b : { ...b, computerUse: next }));
-      } finally { busy = false; }
+      const next = computerUseOf(await source.current.status().catch(() => null));
+      if (!active) return;
+      setBadges((b) => (sameSet(b.computerUse, next) ? b : { ...b, computerUse: next }));
+      timer = setTimeout(() => { void read(); }, next.size > 0 ? CENSUS_INTERVAL_MS : STATUS_INTERVAL_MS);
     };
     void read();
-    const timer = setInterval(() => { void read(); }, CENSUS_INTERVAL_MS);
-    return () => { active = false; clearInterval(timer); };
+    return () => { active = false; clearTimeout(timer); };
   }, [enabled]);
 
   useEffect(() => {
@@ -51,13 +60,23 @@ export function useBadges(agentIds: readonly string[], enabled: boolean, sources
       if (busy) return;
       busy = true;
       try {
-        // One soul at a time: each is its own agent-bot run.
-        const states: (SoulComms | null)[] = [];
-        for (const agentId of list) {
-          if (!active) return;
-          states.push(await source.current.comms(agentId).catch(() => null));
+        let next: ReadonlySet<string>;
+        if (list.length === 0) {
+          next = new Set();
+        } else {
+          const all = await source.current.population().catch(() => null);
+          if (all) {
+            next = commsAmong(all, list);
+          } else {
+            // Older bundle: one agent-bot run per soul, one at a time.
+            const states: (SoulComms | null)[] = [];
+            for (const agentId of list) {
+              if (!active) return;
+              states.push(await source.current.comms(agentId).catch(() => null));
+            }
+            next = commsOf(states);
+          }
         }
-        const next = commsOf(states);
         if (active) setBadges((b) => (sameSet(b.comms, next) ? b : { ...b, comms: next }));
       } finally { busy = false; }
     };

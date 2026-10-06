@@ -516,3 +516,38 @@ export async function call<T>(method: BridgeMethod, params: Record<string, unkno
       typeof e?.message === 'string' ? e.message : String(error));
   }
 }
+
+/** One soul's row of `population_list` (#137): its agent-comms and managed state. */
+export interface PopulationEntry {
+  agentId: string;
+  comms: boolean;
+  managed: boolean;
+}
+
+/**
+ * Normalizes `population_list`. Records without an agent id are dropped; a
+ * record without a boolean `comms` (an agent-bot from before the field) is
+ * dropped too, so it shows no badge, and `managed` defaults to false as
+ * agent-bot reads such rows. Null when the reply is not a list.
+ */
+export function normalizePopulationList(raw: unknown): PopulationEntry[] | null {
+  if (!Array.isArray(raw)) return null;
+  return raw.flatMap((r): PopulationEntry[] => (isRecord(r) && typeof r.agentId === 'string' && r.agentId !== ''
+    && typeof r.comms === 'boolean'
+    ? [{ agentId: r.agentId, comms: r.comms, managed: r.managed === true }]
+    : []));
+}
+
+/**
+ * Every soul's comms and managed state in one agent-bot run (#137). Null
+ * outside the app, with an older bundle that has no `population_list`, or
+ * when agent-bot cannot say, so callers can fall back to `soulComms`.
+ */
+export async function populationList(invokeImpl: typeof invoke = invoke): Promise<PopulationEntry[] | null> {
+  if (!inApp() && invokeImpl === invoke) return null;
+  try {
+    return normalizePopulationList(await invokeImpl<unknown>('population_list'));
+  } catch {
+    return null;
+  }
+}
