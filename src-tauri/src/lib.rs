@@ -412,6 +412,7 @@ pub fn run() {
             bridge::list_soul_templates,
             bridge::soul_profile,
             bridge::soul_profile_file,
+            bridge::soul_revision_edit,
             bridge::soul_remove,
             bridge::daemon_status,
             bridge::services_installed,

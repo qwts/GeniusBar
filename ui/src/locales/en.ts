@@ -395,6 +395,17 @@ export const en = {
   'identity.waiting': 'Waiting for your approval…',
   'identity.failed': 'GitHub identity unchanged: {message}',
   'identity.disabled': 'The github-identity add-on is off. Turn it on in agent-bot’s config first.',
+  'edit.save': 'Save',
+  'edit.reason': 'Why',
+  'edit.reasonHint': 'One line, kept in the revision history',
+  'edit.reasonDefault': 'Edited in GeniusBar',
+  'edit.edited': 'edited',
+  'edit.saving': 'Saving… agent-bot asks for your approval (Touch ID or your login password).',
+  'edit.saved': 'Saved as revision {revision}.',
+  'edit.stale': 'This companion changed since the dialog opened. Reload to start from the current version; your edits here are dropped.',
+  'edit.reload': 'Reload',
+  'edit.ownerRequired': 'Not saved: only you can approve this change, and agent-bot could not confirm it was you ({message}).',
+  'edit.saveFailed': 'Not saved: {message}',
 } as const;
 
 export type MessageKey = keyof typeof en;

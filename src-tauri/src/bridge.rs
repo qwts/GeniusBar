@@ -3574,6 +3574,685 @@ mod soul_profile_tests {
     }
 }
 
+/// The owner's edits from the Customize dialog's Save (#64): the soul's
+/// manifest name and description, and the text of its editable Context
+/// files, keyed by their path in the package.
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SoulRevisionEdit {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    files: std::collections::BTreeMap<String, String>,
+}
+
+/// soul-builder's mark on the files it writes (agent-bot
+/// `soul-harness-contract.mjs`); such a file is rebuilt, never edited.
+const GENERATED_MARKER: &str = "<!-- agent-bot soul-builder: generated -->";
+/// agent-bot's generated harness paths (same contract); a trailing `/`
+/// covers a whole directory.
+const GENERATED_PATHS: [&str; 11] = [
+    ".claude/",
+    ".codex/",
+    ".cursor/",
+    ".opencode/",
+    ".devin/",
+    ".gemini/",
+    ".github/copilot-instructions.md",
+    ".mcp.json",
+    "CLAUDE.md",
+    "GEMINI.md",
+    "opencode.json",
+];
+/// Working state beside the package (format 2's ignore list): never copied.
+const WORKING_STATE: [&str; 2] = ["worktrees", ".soul-state"];
+/// `soul profile --file`'s limit, kept for what Save writes back.
+const MAX_EDIT_BYTES: usize = 256 * 1024;
+const MAX_NAME_CHARS: usize = 80;
+const MAX_DESCRIPTION_CHARS: usize = 2000;
+const MAX_REASON_CHARS: usize = 200;
+
+/// Records the owner's Customize edits as a new revision of the soul's
+/// package (#64, agent-bot-identity #293, `docs/soul-revisions.md`). Reads
+/// `soul profile` for the package and its inventory, refuses when the
+/// revision moved since the dialog read it (`soul-revision-stale`), copies
+/// the package into a private temporary directory (no symlink is followed;
+/// working state is left out), applies the edits there, and runs `soul
+/// revision edit <agentId> <copy> <reason>`, which owner-gates the change
+/// itself (as `soul remove` does; GeniusBar presents no principal). The copy
+/// is removed afterwards. Answers the revision record (`revision`,
+/// `parentRevision`, `author`, `reason`, `authorization`, ...).
+#[tauri::command]
+pub async fn soul_revision_edit<R: Runtime>(
+    app: AppHandle<R>,
+    agent: String,
+    expected_revision: Option<String>,
+    reason: String,
+    edit: SoulRevisionEdit,
+) -> Result<Value, BridgeError> {
+    let agent = profile_argument(agent, "agent")?;
+    let reason = revision_reason(&reason)?;
+    if edit.name.is_none() && edit.description.is_none() && edit.files.is_empty() {
+        return Err(revision_invalid("nothing changed"));
+    }
+    let args = vec![
+        "soul".into(),
+        "profile".into(),
+        agent.into(),
+        "--json".into(),
+    ];
+    let output = run_agent_bot(&app, args, "soul-revision-unavailable").await?;
+    let profile = parse_soul_profile(&output.stdout, &output.stderr)?;
+    let copy = RevisionCopy::new()?;
+    let (agent_id, package) =
+        prepare_revision_edit(&profile, expected_revision.as_deref(), &edit, copy.path())?;
+    let args = soul_revision_edit_args(&agent_id, &package, &reason)?;
+    let output = run_agent_bot(&app, args, "soul-revision-unavailable").await?;
+    drop(copy);
+    parse_soul_revision_edit(&output.stdout, &output.stderr)
+}
+
+fn revision_invalid(message: &str) -> BridgeError {
+    BridgeError::new("soul-revision-invalid", message)
+}
+
+/// A one-line reason agent-bot cannot read as a flag.
+fn revision_reason(reason: &str) -> Result<String, BridgeError> {
+    let reason = reason.trim();
+    if reason.is_empty()
+        || reason.starts_with('-')
+        || reason.chars().any(char::is_control)
+        || reason.chars().count() > MAX_REASON_CHARS
+    {
+        return Err(revision_invalid(
+            "the reason must be one line of at most 200 characters",
+        ));
+    }
+    Ok(reason.to_string())
+}
+
+/// A private directory (0700) for the edited copy, removed when dropped.
+struct RevisionCopy(std::path::PathBuf);
+
+impl RevisionCopy {
+    fn new() -> Result<Self, BridgeError> {
+        Self::under(&std::env::temp_dir())
+    }
+
+    fn under(parent: &std::path::Path) -> Result<Self, BridgeError> {
+        use std::os::unix::fs::DirBuilderExt;
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default();
+        let dir = parent.join(format!("geniusbar-revision-{}-{nanos}", std::process::id()));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&dir)
+            .map_err(|e| BridgeError::new("soul-revision-failed", &e.to_string()))?;
+        Ok(Self(dir))
+    }
+
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl Drop for RevisionCopy {
+    fn drop(&mut self) {
+        // remove_dir_all never follows a symlink out of the copy.
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// A package-relative path without traversal, absolute roots, backslashes
+/// or control characters (agent-bot's `safeRelative`).
+fn safe_relative(path: &str) -> bool {
+    !path.is_empty()
+        && path.len() <= 4096
+        && !path.contains('\\')
+        && !path.chars().any(char::is_control)
+        && path
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != "..")
+}
+
+fn generated_path(path: &str) -> bool {
+    GENERATED_PATHS.iter().any(|candidate| {
+        if candidate.ends_with('/') {
+            path.starts_with(candidate)
+        } else {
+            path == *candidate
+        }
+    })
+}
+
+/// True when the profile lists `path` as a text file the owner may edit:
+/// the soul's own instructions, AGENTS.md and its skills. Never soul.json
+/// (its fields go through the manifest edit), working state, harness
+/// settings or a generated file.
+fn editable_path(profile: &Value, path: &str) -> bool {
+    safe_relative(path)
+        && path != "soul.json"
+        && !path.starts_with(".soul-state/")
+        && !generated_path(path)
+        && profile
+            .get("files")
+            .and_then(Value::as_array)
+            .is_some_and(|files| {
+                files.iter().any(|file| {
+                    file.get("path").and_then(Value::as_str) == Some(path)
+                        && file.get("text").and_then(Value::as_bool) == Some(true)
+                        && matches!(
+                            file.get("kind").and_then(Value::as_str),
+                            Some("soul" | "context" | "skill")
+                        )
+                })
+            })
+}
+
+/// Copies the package at `from` into `to` without following a symlink:
+/// a symlink or special file anywhere refuses the copy; working state at
+/// the top is left out. Execute bits survive (`fs::copy` keeps them).
+fn copy_package(
+    from: &std::path::Path,
+    to: &std::path::Path,
+    top: bool,
+) -> Result<(), BridgeError> {
+    let failed = |e: std::io::Error| BridgeError::new("soul-revision-failed", &e.to_string());
+    std::fs::create_dir_all(to).map_err(failed)?;
+    for entry in std::fs::read_dir(from).map_err(failed)? {
+        let entry = entry.map_err(failed)?;
+        let name = entry.file_name();
+        if top && WORKING_STATE.iter().any(|skip| name == *skip) {
+            continue;
+        }
+        let source = entry.path();
+        let target = to.join(&name);
+        let kind = std::fs::symlink_metadata(&source)
+            .map_err(failed)?
+            .file_type();
+        if kind.is_dir() {
+            copy_package(&source, &target, false)?;
+        } else if kind.is_file() {
+            std::fs::copy(&source, &target).map_err(failed)?;
+        } else {
+            return Err(revision_invalid(&format!(
+                "the package has a link or special file: {}",
+                name.to_string_lossy()
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// The copy's regular file at `path`, every component checked without
+/// following a symlink.
+fn copied_file(root: &std::path::Path, path: &str) -> Result<std::path::PathBuf, BridgeError> {
+    let mut current = root.to_path_buf();
+    for part in path.split('/') {
+        current.push(part);
+        let meta = std::fs::symlink_metadata(&current)
+            .map_err(|_| revision_invalid(&format!("{path} is not in the package")))?;
+        if meta.file_type().is_symlink() {
+            return Err(revision_invalid(&format!("{path} is a link")));
+        }
+    }
+    if !std::fs::symlink_metadata(&current).is_ok_and(|m| m.is_file()) {
+        return Err(revision_invalid(&format!("{path} is not a file")));
+    }
+    Ok(current)
+}
+
+/// A manifest field: trimmed, nonempty, one line, at most `max` characters.
+fn manifest_text(
+    value: &str,
+    what: &str,
+    max: usize,
+    multiline: bool,
+) -> Result<String, BridgeError> {
+    let value = value.trim();
+    let bad = |c: char| c.is_control() && !(multiline && (c == '\n' || c == '\t'));
+    if value.is_empty() || value.chars().count() > max || value.chars().any(bad) {
+        return Err(revision_invalid(&format!(
+            "the {what} must be nonempty text of at most {max} characters"
+        )));
+    }
+    Ok(value.to_string())
+}
+
+/// Checks the edit against `profile` (`soul profile --json`), copies the
+/// package into `temp` and applies the edit there. Answers the soul's Agent
+/// ID and the edited copy.
+fn prepare_revision_edit(
+    profile: &Value,
+    expected_revision: Option<&str>,
+    edit: &SoulRevisionEdit,
+    temp: &std::path::Path,
+) -> Result<(String, std::path::PathBuf), BridgeError> {
+    let agent_id = profile
+        .get("agentId")
+        .and_then(Value::as_str)
+        .filter(|id| id.starts_with("agent_"))
+        .ok_or_else(|| revision_invalid("agent-bot gave no Agent ID"))?;
+    let facts = &profile["profile"];
+    let revision = facts.get("revision").and_then(Value::as_str);
+    if let Some(expected) = expected_revision {
+        if revision != Some(expected) {
+            return Err(BridgeError::new(
+                "soul-revision-stale",
+                "the package changed since the dialog read it",
+            ));
+        }
+    }
+    let package = facts
+        .get("package")
+        .and_then(Value::as_str)
+        .filter(|p| p.starts_with('/'))
+        .ok_or_else(|| revision_invalid("agent-bot gave no package folder"))?;
+    for (path, contents) in &edit.files {
+        if !editable_path(profile, path) {
+            return Err(revision_invalid(&format!("{path} cannot be edited here")));
+        }
+        if contents.len() > MAX_EDIT_BYTES || contents.contains('\0') {
+            return Err(revision_invalid(&format!(
+                "{path} must be text of at most 256 KiB"
+            )));
+        }
+    }
+    let name = edit
+        .name
+        .as_deref()
+        .map(|n| manifest_text(n, "name", MAX_NAME_CHARS, false))
+        .transpose()?;
+    let description = edit
+        .description
+        .as_deref()
+        .map(|d| manifest_text(d, "description", MAX_DESCRIPTION_CHARS, true))
+        .transpose()?;
+
+    let copy = temp.join("edit.soul");
+    if !std::fs::symlink_metadata(package).is_ok_and(|m| m.is_dir()) {
+        return Err(revision_invalid("the package folder is not a folder"));
+    }
+    copy_package(std::path::Path::new(package), &copy, true)?;
+    let failed = |e: std::io::Error| BridgeError::new("soul-revision-failed", &e.to_string());
+    for (path, contents) in &edit.files {
+        let file = copied_file(&copy, path)?;
+        let before = std::fs::read(&file).map_err(failed)?;
+        if String::from_utf8_lossy(&before).contains(GENERATED_MARKER) {
+            return Err(revision_invalid(&format!(
+                "{path} is generated; edit its source instead"
+            )));
+        }
+        std::fs::write(&file, contents).map_err(failed)?;
+    }
+    if name.is_some() || description.is_some() {
+        let file = copied_file(&copy, "soul.json")?;
+        let text = std::fs::read_to_string(&file).map_err(failed)?;
+        let mut manifest: serde_json::Map<String, Value> = serde_json::from_str(&text)
+            .map_err(|_| revision_invalid("the package's soul.json is not a JSON object"))?;
+        if let Some(name) = name {
+            manifest.insert("name".into(), Value::String(name));
+        }
+        if let Some(description) = description {
+            manifest.insert("description".into(), Value::String(description));
+        }
+        // agent-bot sets parentRevision and recomputes revision when it
+        // records the edit; the copy keeps the package's.
+        let mut out = serde_json::to_string_pretty(&manifest)
+            .map_err(|e| BridgeError::new("soul-revision-failed", &e.to_string()))?;
+        out.push('\n');
+        std::fs::write(&file, out).map_err(failed)?;
+    }
+    Ok((agent_id.to_string(), copy))
+}
+
+fn soul_revision_edit_args(
+    agent_id: &str,
+    package: &std::path::Path,
+    reason: &str,
+) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    if !agent_id.starts_with("agent_") || !package.is_absolute() {
+        return Err(revision_invalid("not a soul revision edit"));
+    }
+    Ok(vec![
+        "soul".into(),
+        "revision".into(),
+        "edit".into(),
+        agent_id.into(),
+        package.as_os_str().to_owned(),
+        reason.into(),
+    ])
+}
+
+/// The revision record agent-bot printed, or its refusal: `agent-bot soul
+/// revision: [code: ]message` on stderr. A stale parent maps to
+/// `soul-revision-stale`; anything without a code to `soul-revision-failed`.
+fn parse_soul_revision_edit(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    if let Ok(record) = serde_json::from_str::<Value>(&last_line(stdout)) {
+        if record.get("revision").and_then(Value::as_str).is_some() {
+            return Ok(record);
+        }
+    }
+    let line = last_line(stderr);
+    let message = line
+        .strip_prefix("agent-bot soul revision: ")
+        .unwrap_or(&line);
+    if message.contains("stale proposal or edit") {
+        return Err(BridgeError::new("soul-revision-stale", message));
+    }
+    if let Some((code, rest)) = message.split_once(": ") {
+        let coded = code.contains('-')
+            && code
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+        if coded {
+            return Err(BridgeError::new(code, rest));
+        }
+    }
+    Err(BridgeError::new(
+        "soul-revision-failed",
+        if message.is_empty() {
+            "agent-bot recorded no revision"
+        } else {
+            message
+        },
+    ))
+}
+
+#[cfg(test)]
+mod soul_revision_edit_tests {
+    use super::*;
+
+    /// A scratch package with soul.json, AGENTS.md, soul.md, a skill, a
+    /// generated CLAUDE.md and working state; removed when dropped.
+    struct Fixture {
+        root: RevisionCopy,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let root = RevisionCopy::new().unwrap();
+            let package = root.path().join("Luna.soul");
+            let write = |path: &str, text: &str| {
+                let file = package.join(path);
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(file, text).unwrap();
+            };
+            write(
+                "soul.json",
+                "{\"formatVersion\":2,\"name\":\"Luna\",\"description\":\"Leads.\",\"revision\":\"sha256:aa\",\"parentRevision\":null,\"x-unknown\":1}\n",
+            );
+            write("AGENTS.md", "# Agents\n");
+            write("soul.md", "# Luna\n");
+            write("skills/triage/SKILL.md", "---\nname: triage\n---\n");
+            write("CLAUDE.md", "# generated\n");
+            write("notes.md", &format!("{GENERATED_MARKER}\nbuilt\n"));
+            write(".soul-state/home/token", "secret");
+            write("worktrees/w/file", "work");
+            Self { root }
+        }
+
+        fn package(&self) -> String {
+            self.root.path().join("Luna.soul").display().to_string()
+        }
+
+        fn profile(&self) -> Value {
+            json!({
+                "agentId": "agent_p",
+                "profile": {"name": "luna", "package": self.package(), "revision": "sha256:aa"},
+                "files": [
+                    {"path": "AGENTS.md", "kind": "context", "text": true},
+                    {"path": "CLAUDE.md", "kind": "generated", "text": true},
+                    {"path": ".claude/settings.json", "kind": "harness-settings", "text": true},
+                    {"path": "notes.md", "kind": "context", "text": true},
+                    {"path": "soul.json", "kind": "soul", "text": true},
+                    {"path": "soul.md", "kind": "soul", "text": true},
+                    {"path": "skills/triage/SKILL.md", "kind": "skill", "text": true},
+                    {"path": "skills/triage/diagram.png", "kind": "skill", "text": false},
+                    {"path": ".soul-state/home/AGENTS.md", "kind": "context", "text": true},
+                ],
+            })
+        }
+    }
+
+    fn edit(files: &[(&str, &str)]) -> SoulRevisionEdit {
+        SoulRevisionEdit {
+            files: files
+                .iter()
+                .map(|(p, c)| (p.to_string(), c.to_string()))
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn edits_a_private_copy_and_leaves_the_package_alone() {
+        let fixture = Fixture::new();
+        let temp = RevisionCopy::new().unwrap();
+        let mut request = edit(&[("AGENTS.md", "# New\n"), ("skills/triage/SKILL.md", "x")]);
+        request.name = Some(" Nova ".into());
+        request.description = Some("Reviews.\nCarefully.".into());
+        let (agent, copy) =
+            prepare_revision_edit(&fixture.profile(), Some("sha256:aa"), &request, temp.path())
+                .unwrap();
+        assert_eq!(agent, "agent_p");
+        assert!(copy.starts_with(temp.path()));
+        assert_eq!(
+            std::fs::read_to_string(copy.join("AGENTS.md")).unwrap(),
+            "# New\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(copy.join("skills/triage/SKILL.md")).unwrap(),
+            "x"
+        );
+        assert_eq!(
+            std::fs::read_to_string(copy.join("soul.md")).unwrap(),
+            "# Luna\n"
+        );
+        let manifest: Value =
+            serde_json::from_str(&std::fs::read_to_string(copy.join("soul.json")).unwrap())
+                .unwrap();
+        assert_eq!(manifest["name"], "Nova");
+        assert_eq!(manifest["description"], "Reviews.\nCarefully.");
+        assert_eq!(manifest["revision"], "sha256:aa");
+        assert_eq!(manifest["x-unknown"], 1);
+        // Working state never reaches the copy.
+        assert!(!copy.join(".soul-state").exists());
+        assert!(!copy.join("worktrees").exists());
+        // The soul's own package is untouched.
+        let package = std::path::PathBuf::from(fixture.package());
+        assert_eq!(
+            std::fs::read_to_string(package.join("AGENTS.md")).unwrap(),
+            "# Agents\n"
+        );
+        assert!(std::fs::read_to_string(package.join("soul.json"))
+            .unwrap()
+            .contains("\"Luna\""));
+        let path = temp.path().to_path_buf();
+        drop(temp);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn refuses_traversal_and_paths_outside_the_editable_inventory() {
+        let fixture = Fixture::new();
+        let temp = RevisionCopy::new().unwrap();
+        for path in [
+            "../AGENTS.md",
+            "/etc/passwd",
+            "skills/../soul.json",
+            "./AGENTS.md",
+            "skills\\triage",
+            "soul.json",
+            "CLAUDE.md",
+            ".claude/settings.json",
+            ".soul-state/home/AGENTS.md",
+            "skills/triage/diagram.png",
+            "policy.json",
+            "",
+        ] {
+            assert_eq!(
+                prepare_revision_edit(&fixture.profile(), None, &edit(&[(path, "x")]), temp.path())
+                    .unwrap_err()
+                    .code,
+                "soul-revision-invalid",
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn refuses_a_generated_marker_file() {
+        let fixture = Fixture::new();
+        let temp = RevisionCopy::new().unwrap();
+        let error = prepare_revision_edit(
+            &fixture.profile(),
+            None,
+            &edit(&[("notes.md", "x")]),
+            temp.path(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "soul-revision-invalid");
+        assert!(error.message.contains("generated"));
+    }
+
+    #[test]
+    fn refuses_a_symlink_in_the_package() {
+        let fixture = Fixture::new();
+        let package = std::path::PathBuf::from(fixture.package());
+        std::os::unix::fs::symlink("/etc/hosts", package.join("skills/hosts")).unwrap();
+        let temp = RevisionCopy::new().unwrap();
+        let error = prepare_revision_edit(
+            &fixture.profile(),
+            None,
+            &edit(&[("AGENTS.md", "x")]),
+            temp.path(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "soul-revision-invalid");
+        assert!(error.message.contains("link"));
+    }
+
+    #[test]
+    fn refuses_a_moved_revision_and_bad_fields() {
+        let fixture = Fixture::new();
+        let temp = RevisionCopy::new().unwrap();
+        assert_eq!(
+            prepare_revision_edit(
+                &fixture.profile(),
+                Some("sha256:bb"),
+                &edit(&[("AGENTS.md", "x")]),
+                temp.path()
+            )
+            .unwrap_err()
+            .code,
+            "soul-revision-stale"
+        );
+        let mut blank = edit(&[]);
+        blank.name = Some("  ".into());
+        assert_eq!(
+            prepare_revision_edit(&fixture.profile(), None, &blank, temp.path())
+                .unwrap_err()
+                .code,
+            "soul-revision-invalid"
+        );
+        let mut multiline = edit(&[]);
+        multiline.name = Some("a\nb".into());
+        assert!(prepare_revision_edit(&fixture.profile(), None, &multiline, temp.path()).is_err());
+        let big = "x".repeat(MAX_EDIT_BYTES + 1);
+        assert!(prepare_revision_edit(
+            &fixture.profile(),
+            None,
+            &edit(&[("AGENTS.md", &big)]),
+            temp.path()
+        )
+        .is_err());
+        let mut no_package = fixture.profile();
+        no_package["profile"]["package"] = Value::Null;
+        assert!(prepare_revision_edit(
+            &no_package,
+            None,
+            &edit(&[("AGENTS.md", "x")]),
+            temp.path()
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn builds_revision_edit_arguments() {
+        let package = std::path::Path::new("/tmp/geniusbar-revision-1/edit.soul");
+        assert_eq!(
+            soul_revision_edit_args("agent_p", package, "Edited in GeniusBar").unwrap(),
+            vec![
+                "soul",
+                "revision",
+                "edit",
+                "agent_p",
+                "/tmp/geniusbar-revision-1/edit.soul",
+                "Edited in GeniusBar"
+            ]
+        );
+        assert!(soul_revision_edit_args("luna", package, "r").is_err());
+        assert!(
+            soul_revision_edit_args("agent_p", std::path::Path::new("edit.soul"), "r").is_err()
+        );
+        assert_eq!(revision_reason("  Tidy up  ").unwrap(), "Tidy up");
+        for reason in ["", " ", "--principal-stdin", "a\nb", &"r".repeat(201)] {
+            assert_eq!(
+                revision_reason(reason).unwrap_err().code,
+                "soul-revision-invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_the_record_or_the_refusal() {
+        let record = parse_soul_revision_edit(
+            b"{\"schemaVersion\":1,\"kind\":\"revision\",\"revision\":\"sha256:bb\",\"parentRevision\":\"sha256:aa\",\"author\":\"user\",\"reason\":\"r\",\"authorization\":{\"method\":\"presence\",\"via\":\"agent-bot-keyd\"}}\n",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(record["revision"], "sha256:bb");
+        assert_eq!(
+            parse_soul_revision_edit(
+                b"",
+                b"agent-bot soul revision: owner-credential-required: owner consent requires an interactive terminal; --yes cannot approve\n"
+            ),
+            Err(BridgeError::new(
+                "owner-credential-required",
+                "owner consent requires an interactive terminal; --yes cannot approve"
+            ))
+        );
+        assert_eq!(
+            parse_soul_revision_edit(
+                b"",
+                b"agent-bot soul revision: stale proposal or edit: create a new revision from the current head\n"
+            )
+            .unwrap_err()
+            .code,
+            "soul-revision-stale"
+        );
+        assert_eq!(
+            parse_soul_revision_edit(
+                b"",
+                b"agent-bot soul revision: adopt a starting package before editing or proposing\n"
+            ),
+            Err(BridgeError::new(
+                "soul-revision-failed",
+                "adopt a starting package before editing or proposing"
+            ))
+        );
+        assert_eq!(
+            parse_soul_revision_edit(b"{}\n", b"").unwrap_err().message,
+            "agent-bot recorded no revision"
+        );
+    }
+}
+
 /// GitHub identities (#67), from agent-bot's managed Apps
 /// (agent-bot-identity #373, `docs/identity-apps.md`): `identity apps list
 /// --json` is offline and secret-free, `{schemaVersion: 1, apps: [...]}`.
