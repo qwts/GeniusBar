@@ -9,6 +9,7 @@ import {
   launchErrorText,
   launchParams,
   launchProblem,
+  normalPackagePath,
   MAX_HARNESS,
   MAX_MODEL,
   MAX_NAME,
@@ -100,5 +101,21 @@ describe('opened package prefill (#120)', () => {
     expect(preferredHarness(['codex'], ['codex'])).toBe('codex');
     expect(preferredHarness(['codex'], [])).toBeNull();
     expect(preferredHarness(undefined, ['claude'])).toBeNull();
+  });
+});
+
+describe('normalPackagePath (#116)', () => {
+  it('drops trailing slashes but keeps the root', () => {
+    expect(normalPackagePath('/Users/admin/Desktop/VMShare.soul/')).toBe('/Users/admin/Desktop/VMShare.soul');
+    expect(normalPackagePath('/souls/a.soul///')).toBe('/souls/a.soul');
+    expect(normalPackagePath('/souls/a.soul')).toBe('/souls/a.soul');
+    expect(normalPackagePath('/')).toBe('/');
+    expect(normalPackagePath('')).toBe('');
+  });
+
+  it('validates and sends the path without its trailing slash', () => {
+    const request: LaunchRequest = { account: 'user', target: { package: '/souls/a.soul/' }, harness: 'claude', name: '' };
+    expect(launchProblem(request)).toBeNull();
+    expect(launchParams(request).package).toBe('/souls/a.soul');
   });
 });

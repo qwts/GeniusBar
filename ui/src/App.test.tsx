@@ -539,6 +539,58 @@ describe('App window mode', () => {
     expect(screen.queryByRole('dialog', { name: 'Launch a new companion' })).toBeNull();
   });
 
+  it('closes the launch dialog on Escape, but not while a launch is in progress (#116)', () => {
+    const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    const { rerender } = render(<App mode="window" census={sampleCensus} connection={sampleConnection} launcher={launcher} isStatic />);
+    fireEvent.click(within(desktop()).getByRole('button', { name: 'Launch companion' }));
+    const pending: LaunchApi = { ...launcher, state: { phase: 'pending', requestId: 'r1', note: null } };
+    rerender(<App mode="window" census={sampleCensus} connection={sampleConnection} launcher={pending} isStatic />);
+    fireEvent.keyDown(screen.getByLabelText('Package'), { key: 'Escape' });
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(screen.getByRole('dialog', { name: 'Launch a new companion' })).toBeTruthy();
+    rerender(<App mode="window" census={sampleCensus} connection={sampleConnection} launcher={launcher} isStatic />);
+    fireEvent.keyDown(screen.getByLabelText('Package'), { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Launch a new companion' })).toBeNull();
+  });
+
+  it('closes the launch dialog when its launch succeeds and opens the new companion (#116)', () => {
+    const onRefresh = vi.fn();
+    const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    const census = sampleCensus.filter((soul) => soul.agentId !== 'agent_c');
+    const { rerender } = render(<App mode="window" census={census} connection={sampleConnection} launcher={launcher} onRefresh={onRefresh} isStatic />);
+    fireEvent.click(within(desktop()).getByRole('button', { name: 'Launch companion' }));
+    const dialog = screen.getByRole('dialog', { name: 'Launch a new companion' });
+    fireEvent.change(within(dialog).getByLabelText('Package'), { target: { value: '/souls/helper.soul/' } });
+    fireEvent.submit(within(dialog).getByRole('form'));
+    expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ target: { package: '/souls/helper.soul' } }));
+    const launched: LaunchApi = { ...launcher, state: { phase: 'launched', requestId: 'r1', agentId: 'agent_c' } };
+    rerender(<App mode="window" census={census} connection={sampleConnection} launcher={launched} onRefresh={onRefresh} isStatic />);
+    expect(screen.queryByRole('dialog', { name: 'Launch a new companion' })).toBeNull();
+    expect(launcher.reset).toHaveBeenCalled();
+    expect(onRefresh).toHaveBeenCalled();
+    // The new companion opens once the census lists it.
+    rerender(<App mode="window" census={sampleCensus} connection={sampleConnection} launcher={launcher} onRefresh={onRefresh} isStatic />);
+    expect(screen.getByRole('region', { name: 'agent_c, agent_c' })).toBeTruthy();
+    // The next launch starts clean.
+    fireEvent.click(within(desktop()).getByRole('button', { name: 'Launch companion' }));
+    expect((screen.getByLabelText('Package') as HTMLInputElement).value).toBe('');
+    expect((screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('never shows a finished launch dialog after the popup is hidden (#116)', () => {
+    const launched: LaunchApi = { state: { phase: 'launched', requestId: 'r1', agentId: 'agent_x' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    render(<App census={sampleCensus} connection={sampleConnection} launcher={launched} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'Launch soul…' }));
+    expect(screen.getByRole('dialog', { name: 'Launch a new companion' })).toBeTruthy();
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    try {
+      fireEvent(document, new Event('visibilitychange'));
+      expect(screen.queryByRole('dialog', { name: 'Launch a new companion' })).toBeNull();
+    } finally {
+      hidden.mockRestore();
+    }
+  });
+
   it('picks an account from the census, or takes another (Lovable 20.03.51)', () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     const census = [...sampleCensus, { ...sampleCensus[0], agentId: 'agent_z', account: 'zed' }];

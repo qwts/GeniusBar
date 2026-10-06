@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { displayName, type CensusRow } from '../model/census';
-import { canLaunch, harnessOptions, MAX_HARNESS, preferredHarness, suggestedName, type LaunchState } from '../model/launch';
+import { canLaunch, harnessOptions, MAX_HARNESS, normalPackagePath, preferredHarness, suggestedName, type LaunchState } from '../model/launch';
 import { useI18n } from '../lib/i18n';
 import type { LaunchApi } from '../useLaunch';
 import { ModelField } from './ModelField';
@@ -30,6 +30,11 @@ interface LaunchFormProps {
   initialComms?: boolean;
   /** Shown as Cancel beside Launch, when the form sits in a dialog. */
   onCancel?: () => void;
+  /**
+   * Called once when this form's launch reports `launched` (#116), with the
+   * new soul's agent id when the daemon gave one; the dialog closes on it.
+   */
+  onLaunched?: (agentId: string | null) => void;
   /**
    * The census, whose souls' harness model lists (#128) the Model field
    * offers; without it the field offers the default and "Other…" only.
@@ -80,11 +85,11 @@ const field = 'h-9 w-full rounded-md border border-input bg-transparent px-3 tex
  * One launch at a time; the result stays on screen and is never retried.
  */
 export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness = null, initialPackagePath = '', packageName, preferredHarnesses,
-  checkingPackage = false, packageError: initialPackageError = null, initialComms, onCancel, roster = [] }: LaunchFormProps) {
+  checkingPackage = false, packageError: initialPackageError = null, initialComms, onCancel, onLaunched, roster = [] }: LaunchFormProps) {
   const { t } = useI18n();
   const [account, setAccount] = useState(soul?.account ?? (accounts.length === 1 ? accounts[0] : ''));
   const [otherAccount, setOtherAccount] = useState(!soul && accounts.length === 0);
-  const [packagePath, setPackagePath] = useState(initialPackagePath);
+  const [packagePath, setPackagePath] = useState(() => normalPackagePath(initialPackagePath));
   const [packageError, setPackageError] = useState(initialPackageError);
   const packageHarness = soul ? null : preferredHarness(preferredHarnesses, harnesses);
   const [harness, setHarness] = useState(soul?.harness ?? defaultHarness ?? packageHarness ?? '');
@@ -107,7 +112,17 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
   const comms = chosenComms ?? initialComms ?? (soul ? undefined : true);
   // The launcher is shared: show its result only in the form that started it.
   const [started, setStarted] = useState(false);
-  const ready = canLaunch(launcher.state);
+  // A dialog's launch that succeeded is finished (#116): Launch never arms
+  // again in the same dialog, so a second click cannot start a duplicate.
+  const launched = started && launcher.state.phase === 'launched';
+  const ready = canLaunch(launcher.state) && !(launched && onCancel);
+  const reported = useRef(false);
+  const launchedAgent = launcher.state.phase === 'launched' ? launcher.state.agentId : null;
+  useEffect(() => {
+    if (!launched || reported.current || !onLaunched) return;
+    reported.current = true;
+    onLaunched(launchedAgent);
+  }, [launched, launchedAgent, onLaunched]);
   const what = soul ? displayName(soul) : t('launch.aPackage');
   const options = harnessOptions(harnesses, soul?.harness, defaultHarness);
 
@@ -121,9 +136,11 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
         e.preventDefault();
         if (!ready || checkingPackage || packageError) return;
         setStarted(true);
+        const path = normalPackagePath(packagePath);
+        if (!soul) setPackagePath(path);
         void launcher.launch({
           account,
-          target: soul ? { soul: soul.agentId } : { package: packagePath },
+          target: soul ? { soul: soul.agentId } : { package: path },
           harness,
           name,
           ...(comms === undefined ? {} : { comms }),
@@ -141,7 +158,8 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
             onChange={(e) => {
               setPackagePath(e.target.value);
               setPackageError(null);
-            }} />
+            }}
+            onBlur={(e) => setPackagePath(normalPackagePath(e.target.value))} />
         )}
         <label className="grid gap-1">
           <span className="text-sm font-medium">{t('launch.name')}</span>

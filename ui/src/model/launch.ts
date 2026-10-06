@@ -60,6 +60,16 @@ export function suggestedName(packageName: string | null | undefined): string {
   return first.slice(0, MAX_NAME);
 }
 
+/**
+ * A package path without its trailing slashes (#116): Finder hands an
+ * opened `.soul` bundle over as a folder ("…/VMShare.soul/"), and a pasted
+ * path may end in one too. The root stays "/".
+ */
+export function normalPackagePath(path: string): string {
+  const trimmed = path.replace(/\/+$/, '');
+  return trimmed === '' && path.startsWith('/') ? '/' : trimmed;
+}
+
 /** The first harness a package prefers that this app can offer, if any. */
 export function preferredHarness(preferred: readonly string[] | null | undefined, seen: readonly string[]): string | null {
   const offered = harnessOptions(seen).map((h) => h.id);
@@ -78,7 +88,7 @@ const CONTROL = /[\u0000-\u001f\u007f]/;
 export function launchProblem(request: LaunchRequest): string | null {
   if (request.account.trim() === '') return 'Choose an account.';
   if ('package' in request.target) {
-    const path = request.target.package;
+    const path = normalPackagePath(request.target.package);
     if (path.trim() === '') return 'Enter the companion package path.';
     if (path.length > MAX_PACKAGE) return `The package path is longer than ${MAX_PACKAGE} characters.`;
   }
@@ -95,7 +105,7 @@ export function launchProblem(request: LaunchRequest): string | null {
 /** Bridge params for `launch`, with the name and the model omitted when blank. */
 export function launchParams(request: LaunchRequest): Record<string, string | boolean> {
   const params: Record<string, string | boolean> = { account: request.account, harness: request.harness.trim() };
-  if ('package' in request.target) params.package = request.target.package;
+  if ('package' in request.target) params.package = normalPackagePath(request.target.package);
   else params.soul = request.target.soul;
   if (request.name.trim() !== '') params.name = request.name.trim();
   if (typeof request.comms === 'boolean') params.comms = request.comms;
