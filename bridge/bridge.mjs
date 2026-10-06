@@ -21,8 +21,10 @@ export const METHODS = {
     client.send({ to, body, key, kind, refs, correlation, replyTo }),
   inbox: (client, { after, limit }) => client.inbox({ after, limit }),
   ack: (client, { ids }) => client.ack(ids),
-  launch: (client, { account, soul, package: packagePath, harness, name, comms, model }) =>
-    client.launch({ account, soul, package: packagePath, harness, name, comms, ...(model === undefined ? {} : { model }) }),
+  // `brief` (#120) goes through only as a string; older agent-comms ignore it.
+  launch: (client, { account, soul, package: packagePath, harness, name, comms, model, brief }) =>
+    client.launch({ account, soul, package: packagePath, harness, name, comms, ...(model === undefined ? {} : { model }),
+      ...(typeof brief === 'string' ? { brief } : {}) }),
   launchStatus: (client, { requestId }) => client.launchStatus(requestId),
 };
 

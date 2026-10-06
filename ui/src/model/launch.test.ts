@@ -11,6 +11,7 @@ import {
   launchParams,
   launchProblem,
   normalPackagePath,
+  MAX_BRIEF,
   MAX_HARNESS,
   MAX_MODEL,
   MAX_NAME,
@@ -43,6 +44,23 @@ describe('launch requests', () => {
     expect(launchProblem({ ...soul, model: 'm'.repeat(MAX_MODEL) })).toBeNull();
     expect(launchProblem({ ...soul, model: 'm'.repeat(MAX_MODEL + 1) })).toMatch(/model is longer/);
     expect(launchProblem({ ...soul, model: 'a\tb' })).toMatch(/control/);
+  });
+
+  it('sends a brief trimmed, keeps its lines, and no brief key when blank (#120)', () => {
+    const base: LaunchRequest = { account: 'u', target: { package: '/p.soul' }, harness: 'claude', name: '' };
+    expect(launchParams({ ...base, brief: '  Keep notes.\r\nFlag gaps.  ' }).brief).toBe('Keep notes.\nFlag gaps.');
+    expect('brief' in launchParams({ ...base, brief: ' \n ' })).toBe(false);
+    expect('brief' in launchParams(base)).toBe(false);
+    expect(launchParams({ ...base, target: { soul: 'agent_1' }, brief: 'Relaunch brief' }).brief).toBe('Relaunch brief');
+  });
+
+  it('refuses a brief over MAX_BRIEF or with control characters other than lines and tabs (#120)', () => {
+    const base: LaunchRequest = { account: 'u', target: { package: '/p.soul' }, harness: 'claude', name: '' };
+    expect(launchProblem({ ...base, brief: 'x'.repeat(MAX_BRIEF) })).toBeNull();
+    expect(launchProblem({ ...base, brief: `  ${'x'.repeat(MAX_BRIEF)}  ` })).toBeNull();
+    expect(launchProblem({ ...base, brief: 'x'.repeat(MAX_BRIEF + 1) })).toBe(`The brief is longer than ${MAX_BRIEF} characters.`);
+    expect(launchProblem({ ...base, brief: 'one\n\ttwo' })).toBeNull();
+    expect(launchProblem({ ...base, brief: 'bell\u0007' })).toMatch(/control characters from the brief/);
   });
 
   it('enforces the wire contract limits', () => {

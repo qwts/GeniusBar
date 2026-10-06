@@ -30,6 +30,12 @@ export interface LaunchRequest {
    * no `model` at all, which older agent-comms and agent-bot expect.
    */
   model?: string;
+  /**
+   * What this companion is here to do (#120): agent-bot shows it on the
+   * soul's first turn after its identity, keeps it, and carries it forward
+   * on relaunch. Blank sends no `brief`, which leaves a saved one as it is.
+   */
+  brief?: string;
 }
 
 /**
@@ -84,8 +90,12 @@ export const MAX_PACKAGE = 4096;
 export const MAX_HARNESS = 64;
 export const MAX_NAME = 128;
 export const MAX_MODEL = 120;
+export const MAX_BRIEF = 4000;
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f]/;
+// A brief may span lines and hold tabs; agent-bot refuses any other control.
+// eslint-disable-next-line no-control-regex
+const BRIEF_CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/;
 
 /** Why the request cannot be sent, or null when it is well-formed. */
 export function launchProblem(request: LaunchRequest): string | null {
@@ -99,6 +109,8 @@ export function launchProblem(request: LaunchRequest): string | null {
   if (request.harness.length > MAX_HARNESS) return `The harness name is longer than ${MAX_HARNESS} characters.`;
   if (request.name.length > MAX_NAME) return `The name is longer than ${MAX_NAME} characters.`;
   if ((request.model ?? '').trim().length > MAX_MODEL) return `The model is longer than ${MAX_MODEL} characters.`;
+  if (briefText(request.brief).length > MAX_BRIEF) return `The brief is longer than ${MAX_BRIEF} characters.`;
+  if (BRIEF_CONTROL.test(briefText(request.brief))) return 'Remove control characters from the brief (lines and tabs are fine).';
   const fields = [request.account, request.harness, request.name, request.model ?? '',
     'package' in request.target ? request.target.package : request.target.soul];
   if (fields.some((f) => CONTROL.test(f))) return 'Remove control characters (such as newlines or tabs).';
@@ -114,8 +126,13 @@ export function prefillHarness(soulHarness: string | null | undefined, packageHa
   return soulHarness || packageHarness || defaultHarness || '';
 }
 
+/** The brief as sent: trimmed, with Windows line ends made plain. */
+function briefText(brief: string | undefined): string {
+  return (brief ?? '').replace(/\r\n?/g, '\n').trim();
+}
+
 /**
- * Bridge params for `launch`, with the name and the model omitted when blank.
+ * Bridge params for `launch`, with the name, the model and the brief omitted when blank.
  * A `{soul}` launch never carries a name: relaunching a companion must not
  * rename it (#79), so the form's name is dropped there as a second guard.
  */
@@ -127,6 +144,8 @@ export function launchParams(request: LaunchRequest): Record<string, string | bo
   if (typeof request.comms === 'boolean') params.comms = request.comms;
   const model = request.model?.trim();
   if (model) params.model = model;
+  const brief = briefText(request.brief);
+  if (brief) params.brief = brief;
   return params;
 }
 
