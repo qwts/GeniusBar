@@ -88,3 +88,16 @@ describe('FleetList', () => {
     expect(screen.queryByRole('searchbox')).toBeNull();
   });
 });
+
+describe('FleetList archive (#94)', () => {
+  it('shows an Archive button on every row only when given, and asks for that soul', () => {
+    const onArchive = vi.fn();
+    const { rerender } = render(<FleetList forest={forest} paused onOpen={() => {}} />);
+    expect(screen.queryByRole('button', { name: /^Archive:/ })).toBeNull();
+    rerender(<FleetList forest={forest} paused onOpen={() => {}} onArchive={onArchive} />);
+    expect(screen.getAllByRole('button', { name: /^Archive:/ }).map((b) => b.getAttribute('aria-label')))
+      .toEqual(['Archive: luna', 'Archive: agent_c', 'Archive: old']);
+    fireEvent.click(screen.getByRole('button', { name: 'Archive: agent_c' }));
+    expect(onArchive).toHaveBeenCalledWith(child);
+  });
+});

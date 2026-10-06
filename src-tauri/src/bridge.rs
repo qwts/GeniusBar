@@ -1804,3 +1804,136 @@ mod soul_model_tests {
         );
     }
 }
+
+/// Archives a soul (GeniusBar #94), from agent-bot's `soul remove <agentId>
+/// --json`: `{agentId, name, handle, wake, comms, retired, archived}`.
+/// Nothing is deleted: the soul stops waking, leaves agent-comms, is retired
+/// and its folder moves to the souls folder's `.archive`. agent-bot refuses
+/// while the soul runs (`soul-running`) and owner-gates the rest (its
+/// consent dialog, Touch ID); GeniusBar never asks itself.
+#[tauri::command]
+pub async fn soul_remove<R: Runtime>(
+    app: AppHandle<R>,
+    agent: String,
+) -> Result<Value, BridgeError> {
+    let args = soul_remove_args(&agent)?;
+    let output = run_agent_bot(&app, args, "soul-remove-unavailable").await?;
+    parse_soul_remove(&output.stdout, &output.stderr)
+}
+
+fn soul_remove_args(agent: &str) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    if agent.trim().is_empty() || agent.starts_with('-') || agent.chars().any(char::is_control) {
+        return Err(BridgeError::new(
+            "soul-remove-invalid",
+            "agent must be an agent id",
+        ));
+    }
+    Ok(vec![
+        "soul".into(),
+        "remove".into(),
+        agent.into(),
+        "--json".into(),
+    ])
+}
+
+fn parse_soul_remove(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    parse_agent_bot_json(
+        stdout,
+        stderr,
+        "soul-remove-failed",
+        "agent-bot soul remove: ",
+        "agent-bot did not archive the companion",
+        |value| {
+            value.get("agentId").and_then(Value::as_str).is_some()
+                && value.get("retired").and_then(Value::as_bool) == Some(true)
+        },
+    )
+}
+
+/// The daemon's status (#122 computer-use badge), from agent-bot's `daemon
+/// status --json`: `{running, computerUse: [{agentId, since}], ...}`. Null
+/// when agent-bot cannot answer (an older bundle, a failed run), so the
+/// desktop simply shows no badge.
+#[tauri::command]
+pub async fn daemon_status<R: Runtime>(app: AppHandle<R>) -> Result<Value, BridgeError> {
+    let args = vec!["daemon".into(), "status".into(), "--json".into()];
+    match run_agent_bot(&app, args, "daemon-status-unavailable").await {
+        Ok(output) => Ok(parse_daemon_status(&output.stdout)),
+        Err(_) => Ok(Value::Null),
+    }
+}
+
+fn parse_daemon_status(stdout: &[u8]) -> Value {
+    match serde_json::from_str::<Value>(&last_line(stdout)) {
+        Ok(value) if value.get("running").and_then(Value::as_bool).is_some() => value,
+        _ => Value::Null,
+    }
+}
+
+#[cfg(test)]
+mod soul_remove_tests {
+    use super::*;
+
+    #[test]
+    fn builds_soul_remove_arguments() {
+        assert_eq!(
+            soul_remove_args("agent_1").unwrap(),
+            vec!["soul", "remove", "agent_1", "--json"]
+        );
+        for agent in ["", "  ", "--json", "-x", "a\nb"] {
+            assert_eq!(
+                soul_remove_args(agent).unwrap_err().code,
+                "soul-remove-invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_removed_souls_or_their_error() {
+        let removed = parse_soul_remove(
+            b"{\"agentId\":\"agent_1\",\"name\":\"luna\",\"handle\":\"luna\",\"wake\":\"off\",\"comms\":\"left\",\"retired\":true,\"archived\":[{\"from\":\"/a\",\"to\":\"/b\"}]}\n",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(removed["archived"][0]["to"], "/b");
+        assert_eq!(
+            parse_soul_remove(
+                b"{\"error\":{\"code\":\"soul-running\",\"message\":\"agent_1 is running; stop it before removing it\"}}\n",
+                b"agent-bot soul remove: agent_1 is running; stop it before removing it\n"
+            ),
+            Err(BridgeError::new(
+                "soul-running",
+                "agent_1 is running; stop it before removing it"
+            ))
+        );
+        assert_eq!(
+            parse_soul_remove(b"", b"agent-bot soul remove: the owner did not approve\n"),
+            Err(BridgeError::new(
+                "soul-remove-failed",
+                "the owner did not approve"
+            ))
+        );
+        // An older agent-bot without `soul remove`.
+        assert_eq!(
+            parse_soul_remove(b"{\"agentId\":\"agent_1\"}\n", b"").unwrap_err(),
+            BridgeError::new(
+                "soul-remove-failed",
+                "agent-bot did not archive the companion"
+            )
+        );
+    }
+
+    #[test]
+    fn parses_daemon_status_or_null() {
+        let status = parse_daemon_status(
+            b"{\"running\":true,\"computerUse\":[{\"agentId\":\"agent_1\",\"since\":\"2026-10-05T00:00:00.000Z\"}]}\n",
+        );
+        assert_eq!(status["computerUse"][0]["agentId"], "agent_1");
+        assert_eq!(
+            parse_daemon_status(b"{\"running\":false,\"computerUse\":[]}\n")["running"],
+            false
+        );
+        assert_eq!(parse_daemon_status(b""), Value::Null);
+        assert_eq!(parse_daemon_status(b"usage: agent-bot ...\n"), Value::Null);
+    }
+}

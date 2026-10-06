@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyCensus } from './refresh';
+import { applyCensus, commsOf, computerUseOf, sameSet } from './refresh';
 import { disconnected, unpairedMessage } from './status';
 
 const now = new Date('2026-10-02T01:00:00Z');
@@ -31,5 +31,21 @@ describe('applyCensus', () => {
   it('other errors are reported without claiming an outage', () => {
     const s = applyCensus(disconnected, { ok: false, code: 'rate-limited', message: 'slow down' }, now);
     expect(s).toMatchObject({ bridgeConnected: true, brokerUnreachable: false, lastError: 'slow down' });
+  });
+});
+
+describe('desktop badges (#122)', () => {
+  it('lists computer-use souls only while the daemon runs', () => {
+    const using = { running: true, computerUse: [{ agentId: 'agent_1', since: null }] };
+    expect([...computerUseOf(using)]).toEqual(['agent_1']);
+    expect(computerUseOf({ ...using, running: false }).size).toBe(0);
+    expect(computerUseOf(null).size).toBe(0);
+  });
+
+  it('lists souls with comms on, skipping ones agent-bot could not answer for', () => {
+    const state = (agentId: string, comms: boolean) => ({ agentId, comms, managed: true, running: false });
+    expect([...commsOf([state('a', true), null, state('b', false)])]).toEqual(['a']);
+    expect(sameSet(new Set(['a', 'b']), new Set(['b', 'a']))).toBe(true);
+    expect(sameSet(new Set(['a']), new Set(['b']))).toBe(false);
   });
 });

@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Eye, EyeOff, Search, Users } from 'lucide-react';
+import { Archive, Eye, EyeOff, Search, Users } from 'lucide-react';
 import { availabilityNote, displayHarness, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
 import { deriveDudle } from '../model/dudle';
 import { companionLabel, searchTeams, teamKeys, teamsOf } from '../model/fleet';
@@ -28,6 +28,8 @@ interface FleetListProps {
   hiding?: Hiding;
   /** Shown in the region while the fleet is empty. */
   empty?: ReactNode;
+  /** Asks to archive a soul (#94); without it rows have no Archive button. */
+  onArchive?: (soul: CensusRow) => void;
 }
 
 /**
@@ -35,7 +37,7 @@ interface FleetListProps {
  * subagents indented beneath, with a search over name, ID and harness.
  * Every companion opens, 'left' ones included.
  */
-export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty }: FleetListProps) {
+export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty, onArchive }: FleetListProps) {
   const { t } = useI18n();
   const [query, setQuery] = useState('');
   const teams = useMemo(() => teamsOf(forest), [forest]);
@@ -107,6 +109,17 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty }: F
             </button>
           );
         })()}
+        {onArchive && (
+          <button
+            type="button"
+            className="rounded p-1 text-muted-foreground hover:text-destructive"
+            aria-label={`${t('bar.archive')}: ${name}`}
+            title={t('bar.archive')}
+            onClick={() => onArchive(soul)}
+          >
+            <Archive className="size-3.5 opacity-40 group-hover:opacity-100" aria-hidden />
+          </button>
+        )}
       </li>
     );
   };

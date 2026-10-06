@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { ApprovalCounts, ApprovalsList } from './components/ApprovalsList';
+import { ArchiveDialog, ArchivedNotice, liveArchiver, type Archiver } from './components/ArchiveDialog';
+import { inApp, type RemovedSoul } from './bridge';
 import { FooterMenu } from './components/FooterMenu';
 import { CompanionSession, InfoButton } from './components/CompanionSession';
 import { CompanionWindow, Desktop } from './components/Desktop';
@@ -17,7 +19,9 @@ import { UpdateNotice } from './components/UpdateNotice';
 import { I18nProvider, LANGS, useI18n, type Lang } from './lib/i18n';
 import { menuApprovals, workingCount } from './model/approvals';
 import { conversationOf, emptyComposer, unreadOf } from './model/chat';
-import { allSouls, buildSoulForest, findSoul, soulKey, type CensusRow } from './model/census';
+import { allSouls, buildSoulForest, displayName, findSoul, soulKey, type CensusRow } from './model/census';
+import type { SoulBadges } from './model/refresh';
+import { useBadges } from './useBadges';
 import { needsSetup, type ExistingServices, type SetupState } from './model/setup';
 import { disconnected, emptyRosterText, footerStatus, healthHeader, type ConnectionSnapshot } from './model/status';
 import { updateNotice } from './model/updates';
@@ -70,6 +74,10 @@ interface AppProps {
   devTools?: DevTools;
   /** Update status and action (#34); without it the popup stays quiet. */
   updates?: UpdateApi;
+  /** Desktop avatar badges (#122); the app reads agent-bot when absent. */
+  badges?: SoulBadges;
+  /** Archiving souls (#94); the app uses agent-bot when absent. */
+  archiver?: Archiver;
 }
 
 // Dudles stop blinking while the popup is hidden, as R1's did while the
@@ -109,7 +117,7 @@ function LanguageSelect() {
 
 // The GeniusBar menu (the tray popup's content, and the toolbar popover in
 // window mode) and, from it, one companion's session.
-function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools }: AppProps) {
+function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, archiver }: AppProps) {
   const { t } = useI18n();
   const forest = useMemo(() => buildSoulForest(census), [census]);
   const roster = useMemo(() => allSouls(forest), [forest]);
@@ -183,6 +191,28 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     roster,
   }, [launcher, roster, defaultHarness]);
   const layout = useLayout();
+  // Archive (#94) and the desktop's comms / computer-use badges (#122).
+  const archiveWith = archiver ?? (inApp() && !isStatic ? liveArchiver : undefined);
+  const [archiving, setArchiving] = useState<CensusRow | null>(null);
+  const [archivedText, setArchivedText] = useState<string | null>(null);
+  const clearArchived = useCallback(() => setArchivedText(null), []);
+  const badgeIds = useMemo(() => roster.filter((s) => s.presence !== 'left').map((s) => s.agentId), [roster]);
+  const liveBadges = useBadges(badgeIds, !badges && mode === 'window' && inApp() && !isStatic);
+  const onArchived = (soul: CensusRow, result: RemovedSoul) => {
+    const name = displayName(soul);
+    layoutActions.setHidden(soulKey(soul), false);
+    setArchiving(null);
+    if (selectedKey === soulKey(soul)) setSelectedKey(null);
+    setArchivedText(result.comms === 'left' ? t('bar.archived', { name })
+      : t('bar.archivedPending', { name, reason: result.comms.replace(/^not left: /, '') }));
+    onRefresh?.();
+  };
+  const archiveUi = (
+    <>
+      {archiving && archiveWith && <ArchiveDialog soul={archiving} archiver={archiveWith} onCancel={() => setArchiving(null)} onArchived={onArchived} />}
+      {archivedText && <ArchivedNotice text={archivedText} onDone={clearArchived} />}
+    </>
+  );
 
   const open = (soul: CensusRow) => {
     setSelectedKey(soulKey(soul));
@@ -230,7 +260,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
       {showSetup && setup && onSetup ? (
         <SetupPanel setup={setup} onSetup={onSetup} existing={existingServices} />
       ) : (
-        <FleetList forest={forest} paused={paused} unreadOf={unread} onOpen={open} hiding={hiding}
+        <FleetList forest={forest} paused={paused} unreadOf={unread} onOpen={open} hiding={hiding} onArchive={archiveWith && setArchiving}
           empty={!showStarter && empty && <p className="muted empty">{empty}</p>} />
       )}
       {launch && !showSetup && <DefaultHarness harnesses={launch.harnesses} />}
@@ -290,6 +320,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
       <main className="gb flex h-full flex-col bg-popover">
         {session ? <>{updates && <UpdateNotice status={updates.status} onAction={updates.act} />}{session}</> : menu()}
         {launchModal}
+        {archiveUi}
       </main>
     );
   }
@@ -312,12 +343,14 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
         {menu({ hidden: layout.hidden, onToggle: layoutActions.setHidden, onToggleTeam: layoutActions.setTeamHidden, onShowAll: layoutActions.showAll })}
       </MenuBar>
       <Desktop forest={forest} layout={layout} paused={paused} unreadOf={unread} selectedKey={openKey} onOpen={open}
+        badges={badges ?? liveBadges} onArchive={archiveWith && setArchiving}
         notice={notice} onLaunch={launch && !showSetup ? () => { setSelectedKey(null); setLaunchingPackage(true); } : undefined}>
         {selected && session && (
           <CompanionWindow soul={selected} paused={paused} onClose={() => setSelectedKey(null)} actions={<InfoButton soul={selected} />}>{session}</CompanionWindow>
         )}
       </Desktop>
       {launchModal}
+      {archiveUi}
     </div>
   );
 }

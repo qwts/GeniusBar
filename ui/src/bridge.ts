@@ -411,6 +411,79 @@ export async function decideApproval(proposalId: string, decision: 'approve' | '
   return decided;
 }
 
+/**
+ * What `agent-bot soul remove <agentId> --json` reports (GeniusBar #94):
+ * the soul stopped waking, left agent-comms (or says why not), is retired,
+ * and its folders moved to the souls folder's `.archive`. Nothing is deleted.
+ */
+export interface RemovedSoul {
+  agentId: string;
+  name: string | null;
+  /** 'left', or 'not left: <reason>' when the hub could not be told yet. */
+  comms: string;
+  archived: { from: string; to: string }[];
+}
+
+export function normalizeRemovedSoul(raw: unknown): RemovedSoul | null {
+  if (!isRecord(raw) || typeof raw.agentId !== 'string' || raw.retired !== true) return null;
+  return {
+    agentId: raw.agentId,
+    name: typeof raw.name === 'string' && raw.name !== '' ? raw.name : null,
+    comms: typeof raw.comms === 'string' ? raw.comms : 'left',
+    archived: Array.isArray(raw.archived)
+      ? raw.archived.filter((a): a is { from: string; to: string } => isRecord(a) && typeof a.from === 'string' && typeof a.to === 'string')
+        .map(({ from, to }) => ({ from, to }))
+      : [],
+  };
+}
+
+/**
+ * Archives a soul. agent-bot refuses while it runs (`soul-running`) and asks
+ * the owner (its consent dialog, Touch ID); a refusal rejects with its
+ * reason, and the soul stays.
+ */
+export async function removeSoul(agentId: string, invokeImpl: typeof invoke = invoke): Promise<RemovedSoul> {
+  let raw: unknown;
+  try {
+    raw = await invokeImpl<unknown>('soul_remove', { agent: agentId });
+  } catch (error) {
+    const e = error as { code?: unknown; message?: unknown };
+    throw new BridgeError(typeof e?.code === 'string' ? e.code : 'soul-remove-failed',
+      typeof e?.message === 'string' ? e.message : String(error));
+  }
+  const removed = normalizeRemovedSoul(raw);
+  if (!removed) throw new BridgeError('soul-remove-failed', 'agent-bot did not archive the companion');
+  return removed;
+}
+
+/** The daemon as `agent-bot daemon status --json` reports it, for the desktop's badges (#122). */
+export interface DaemonStatus {
+  running: boolean;
+  /** Souls driving the screen right now. */
+  computerUse: { agentId: string; since: string | null }[];
+}
+
+export function normalizeDaemonStatus(raw: unknown): DaemonStatus | null {
+  if (!isRecord(raw) || typeof raw.running !== 'boolean') return null;
+  return {
+    running: raw.running,
+    computerUse: Array.isArray(raw.computerUse)
+      ? raw.computerUse.filter((c): c is Record<string, unknown> & { agentId: string } => isRecord(c) && typeof c.agentId === 'string' && c.agentId !== '')
+        .map((c) => ({ agentId: c.agentId, since: typeof c.since === 'string' ? c.since : null }))
+      : [],
+  };
+}
+
+/** The daemon's status, or null when agent-bot cannot say (outside the app, an older bundle). */
+export async function daemonStatus(invokeImpl: typeof invoke = invoke): Promise<DaemonStatus | null> {
+  if (!inApp() && invokeImpl === invoke) return null;
+  try {
+    return normalizeDaemonStatus(await invokeImpl<unknown>('daemon_status'));
+  } catch {
+    return null;
+  }
+}
+
 export async function call<T>(method: BridgeMethod, params: Record<string, unknown> = {},
   invokeImpl: typeof invoke = invoke): Promise<T> {
   try {

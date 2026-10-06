@@ -4,6 +4,7 @@ import type { SoulColdWake, SoulMode, SoulModel, SoulPopulation } from '../bridg
 import type { AuditRecord } from './audit';
 import type { CensusRow } from './census';
 import type { ApprovalRecord, ChatEntry, InboxMessage } from './chat';
+import type { SoulBadges } from './refresh';
 import { disconnected, type ConnectionSnapshot } from './status';
 
 export const sampleCensus: readonly CensusRow[] = [
@@ -157,3 +158,6 @@ export const sampleModels: Readonly<Record<string, SoulModel>> = {
   },
   agent_c: { model: null, available: null, listedAt: null },
 };
+
+/** Desktop badges for preview (#122): luna has agent comms on, agent_c drives the screen. */
+export const sampleBadges: SoulBadges = { comms: new Set(['agent_p']), computerUse: new Set(['agent_c']) };
