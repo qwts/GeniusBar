@@ -1,13 +1,15 @@
 // Dev-only preview (`npm run dev`, then /preview.html?mode=tray|window,
-// plus &select=<agent id> to open a companion, or &open=<path> to open a
+// plus &select=<agent id> to open a companion (its Audit log tab shows
+// sampleAudit), or &open=<path> to open a
 // package as Finder would):
 // the app on the fixed fixtures, without Tauri. Not part of the build.
 import { StrictMode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App, type AppMode } from './App';
+import { AuditSourceContext, type AuditSource } from './components/AuditLog';
 import type { CensusRow } from './model/census';
 import { emptyChat, emptyComposer, mergeIncoming, type ChatState } from './model/chat';
-import { inboxMessage, sampleApprovals, sampleCensus, sampleConnection, sampleSessionEntries } from './model/fixtures';
+import { inboxMessage, sampleApprovals, sampleAudit, sampleCensus, sampleConnection, sampleSessionEntries } from './model/fixtures';
 import type { ChatApi } from './useChat';
 import '@fontsource/ibm-plex-sans/latin-400.css';
 import '@fontsource/ibm-plex-sans/latin-500.css';
@@ -41,6 +43,9 @@ const state: ChatState = {
   ids: new Set([...inbox.ids, ...sampleSessionEntries.map((e) => e.id)]),
 };
 
+// The Audit log tab (#122) reads the fixture rather than agent-bot.
+const audit: AuditSource = async (agentId) => sampleAudit.filter((r) => agentId === null || r.agentId === agentId);
+
 function Preview() {
   const params = new URLSearchParams(location.search);
   const mode = (params.get('mode') === 'window' ? 'window' : 'tray') as AppMode;
@@ -72,4 +77,4 @@ function Preview() {
   return mode === 'tray' ? <div style={{ width: 384, height: 560, margin: 16, outline: '1px solid #444' }}>{app}</div> : app;
 }
 
-createRoot(document.getElementById('root')!).render(<StrictMode><Preview /></StrictMode>);
+createRoot(document.getElementById('root')!).render(<StrictMode><AuditSourceContext.Provider value={audit}><Preview /></AuditSourceContext.Provider></StrictMode>);

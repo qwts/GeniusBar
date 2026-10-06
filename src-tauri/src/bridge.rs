@@ -1131,6 +1131,105 @@ fn parse_approvals(action: &str, stdout: &[u8], stderr: &[u8]) -> Result<Value, 
     )
 }
 
+/// The audit log (#122), from agent-bot's `audit list --json [--agent ID]`:
+/// `{records: [...]}`, newest last, each field already sanitized and bounded
+/// by agent-bot. Read-only; without an agent it is the whole fleet's.
+#[tauri::command]
+pub async fn audit_list<R: Runtime>(
+    app: AppHandle<R>,
+    agent: Option<String>,
+) -> Result<Value, BridgeError> {
+    let args = audit_list_args(agent)?;
+    let output = run_agent_bot(&app, args, "audit-unavailable").await?;
+    parse_audit_list(&output.stdout, &output.stderr)
+}
+
+fn audit_list_args(agent: Option<String>) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    let mut args: Vec<std::ffi::OsString> = vec!["audit".into(), "list".into(), "--json".into()];
+    match agent {
+        None => {}
+        Some(id) if !id.is_empty() && !id.starts_with('-') => {
+            args.push("--agent".into());
+            args.push(id.into());
+        }
+        Some(_) => {
+            return Err(BridgeError::new(
+                "audit-invalid",
+                "agent must be an agent id",
+            ))
+        }
+    }
+    Ok(args)
+}
+
+fn parse_audit_list(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    parse_agent_bot_json(
+        stdout,
+        stderr,
+        "audit-failed",
+        "agent-bot audit: ",
+        "agent-bot gave no audit log",
+        |value| value.get("records").is_some_and(Value::is_array),
+    )
+}
+
+#[cfg(test)]
+mod audit_tests {
+    use super::*;
+
+    #[test]
+    fn builds_audit_list_arguments() {
+        assert_eq!(
+            audit_list_args(None).unwrap(),
+            vec!["audit", "list", "--json"]
+        );
+        assert_eq!(
+            audit_list_args(Some("agent_1".into())).unwrap(),
+            vec!["audit", "list", "--json", "--agent", "agent_1"]
+        );
+        assert_eq!(
+            audit_list_args(Some("--limit".into())).unwrap_err().code,
+            "audit-invalid"
+        );
+        assert_eq!(
+            audit_list_args(Some(String::new())).unwrap_err().code,
+            "audit-invalid"
+        );
+    }
+
+    #[test]
+    fn parses_audit_lists_or_their_error() {
+        let list = parse_audit_list(
+            b"{\"records\":[{\"at\":\"2026-10-05T10:00:00Z\",\"event\":\"permission\"}]}\n",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(list["records"][0]["event"], "permission");
+        assert_eq!(
+            parse_audit_list(
+                b"{\"error\":{\"code\":\"audit-failed\",\"message\":\"--limit must be an integer\"}}\n",
+                b"agent-bot audit: --limit must be an integer\n"
+            ),
+            Err(BridgeError::new("audit-failed", "--limit must be an integer"))
+        );
+        // An older bundle without the command: its usage line comes back.
+        assert_eq!(
+            parse_audit_list(b"", b"agent-bot: usage: agent-bot soul cold-wake\n"),
+            Err(BridgeError::new(
+                "audit-failed",
+                "agent-bot: usage: agent-bot soul cold-wake"
+            ))
+        );
+        assert_eq!(
+            parse_audit_list(b"", b""),
+            Err(BridgeError::new(
+                "audit-failed",
+                "agent-bot gave no audit log"
+            ))
+        );
+    }
+}
+
 #[cfg(test)]
 mod chat_feed_tests {
     use super::*;
