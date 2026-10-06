@@ -17,7 +17,7 @@ use std::{
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    App, Emitter, Manager, RunEvent, WebviewWindow, WindowEvent,
+    App, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_positioner::{Position, WindowExt};
 
@@ -97,10 +97,84 @@ impl Mode {
     }
 }
 
-/// Which layout the web view draws; the mode itself stays the shell's choice.
+/// The label of the companion desktop window opened from the tray (#69).
+const DESKTOP_LABEL: &str = "desktop";
+
+/// The tray menu's "Open Desktop" item.
+const OPEN_DESKTOP_MENU_ID: &str = "open-desktop";
+
+/// The tray menu's Quit item.
+const QUIT_MENU_ID: &str = "quit";
+
+/// The layout a window draws (#69): the desktop window always draws the
+/// desktop; `main` draws what the launch chose, so `--window` keeps working.
+fn mode_for_label(label: &str, process: &Mode) -> &'static str {
+    if label == DESKTOP_LABEL {
+        Mode::Window.as_str()
+    } else {
+        process.as_str()
+    }
+}
+
+/// Which layout the calling web view draws; the mode stays the shell's choice.
 #[tauri::command]
-fn app_mode(mode: tauri::State<'_, Mode>) -> &'static str {
-    mode.as_str()
+fn app_mode(window: WebviewWindow, mode: tauri::State<'_, Mode>) -> &'static str {
+    mode_for_label(window.label(), &mode)
+}
+
+/// Opens the companion desktop beside the tray popup, or focuses it (#69).
+/// Async so the window is not built on the IPC thread (a Windows deadlock).
+#[tauri::command]
+async fn open_desktop(app: tauri::AppHandle) -> Result<(), String> {
+    open_desktop_window(&app).map_err(|error| error.to_string())
+}
+
+/// Opens the `desktop` window, or brings back the one already open. Under
+/// `--window` the main window is the desktop already, so it shows that.
+fn open_desktop_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
+    if *app.state::<Mode>() != Mode::Tray {
+        reveal_main_window(app);
+        return Ok(());
+    }
+    if let Some(popup) = app.get_webview_window("main") {
+        let _ = popup.hide();
+    }
+    if let Some(window) = app.get_webview_window(DESKTOP_LABEL) {
+        let _ = window.unminimize();
+        window.show()?;
+        return window.set_focus();
+    }
+    // A window needs the regular policy for a Dock icon and keyboard focus;
+    // the tray app goes back to an accessory when the window closes.
+    #[cfg(target_os = "macos")]
+    app.set_activation_policy(tauri::ActivationPolicy::Regular)?;
+    let window = WebviewWindowBuilder::new(app, DESKTOP_LABEL, WebviewUrl::default())
+        .title("GeniusBar")
+        .inner_size(WINDOW_SIZE.0, WINDOW_SIZE.1)
+        .min_inner_size(640.0, 480.0)
+        .resizable(true)
+        .center()
+        .focused(true)
+        .build();
+    let window = match window {
+        Ok(window) => window,
+        Err(error) => {
+            #[cfg(target_os = "macos")]
+            let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            return Err(error);
+        }
+    };
+    let handle = app.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::Destroyed = event {
+            // Closing the desktop leaves the tray app running (see the
+            // ExitRequested handler) and takes its Dock icon away.
+            #[cfg(target_os = "macos")]
+            let _ = handle.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            let _ = &handle;
+        }
+    });
+    window.set_focus()
 }
 
 /// The desktop's size in window mode; the popup keeps tauri.conf.json's.
@@ -158,15 +232,18 @@ fn reveal_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 }
 
 /// Queues the `.soul` packages among `urls` for the web view and shows
-/// the window that will offer them. Other files are ignored.
-fn open_soul_packages<R: tauri::Runtime>(app: &tauri::AppHandle<R>, urls: &[tauri::Url]) {
+/// the window that will offer them. Other files are ignored. True when
+/// there was a package to offer.
+fn open_soul_packages<R: tauri::Runtime>(app: &tauri::AppHandle<R>, urls: &[tauri::Url]) -> bool {
     let opened = app
         .state::<soul_package::PendingSoulPackages>()
         .enqueue_urls(urls);
-    if !opened.is_empty() {
-        let _ = app.emit("soul-package-opened", ());
-        reveal_main_window(app);
+    if opened.is_empty() {
+        return false;
     }
+    let _ = app.emit("soul-package-opened", ());
+    reveal_main_window(app);
+    true
 }
 
 /// A second launch of the tray app or `--window` (#61): the running copy
@@ -178,8 +255,16 @@ fn on_second_instance<R: tauri::Runtime>(
     cwd: String,
 ) {
     let urls = soul_package::argv_urls(argv.iter().skip(1), std::path::Path::new(&cwd));
-    open_soul_packages(app, &urls);
-    reveal_main_window(app);
+    // A package goes to the popup; otherwise a relaunch while the desktop
+    // is open brings that window back, and the popup shows as before.
+    if open_soul_packages(app, &urls) {
+        return;
+    }
+    if app.get_webview_window(DESKTOP_LABEL).is_some() {
+        let _ = open_desktop_window(app);
+    } else {
+        reveal_main_window(app);
+    }
 }
 
 fn show_window_mode(app: &mut App, window: &WebviewWindow) -> tauri::Result<()> {
@@ -201,9 +286,16 @@ fn show_window_mode(app: &mut App, window: &WebviewWindow) -> tauri::Result<()> 
 fn install_tray(app: &mut App, window: &WebviewWindow) -> tauri::Result<()> {
     #[cfg(target_os = "macos")]
     app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    let desktop = MenuItem::with_id(
+        app,
+        OPEN_DESKTOP_MENU_ID,
+        "Open Desktop",
+        true,
+        None::<&str>,
+    )?;
     let check = updates::menu_item(app.handle())?;
-    let quit = MenuItem::with_id(app, "quit", "Quit GeniusBar", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&check, &quit])?;
+    let quit = MenuItem::with_id(app, QUIT_MENU_ID, "Quit GeniusBar", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&desktop, &check, &quit])?;
     TrayIconBuilder::with_id(tray::TRAY_ID)
         .icon(tauri::include_image!("icons/tray.png"))
         .icon_as_template(true)
@@ -211,8 +303,10 @@ fn install_tray(app: &mut App, window: &WebviewWindow) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| {
-            if event.id() == "quit" {
+            if event.id() == QUIT_MENU_ID {
                 app.exit(0);
+            } else if event.id() == OPEN_DESKTOP_MENU_ID {
+                let _ = open_desktop_window(app);
             } else if event.id() == updates::MENU_ID {
                 updates::on_click(app);
             }
@@ -258,6 +352,7 @@ fn start_snapshot(app: &mut App, window: &WebviewWindow) {
 pub fn run() {
     let mode = parse_mode(std::env::args().skip(1));
     let snapshot_mode = matches!(mode, Mode::Snapshot(_));
+    let tray_mode = mode == Mode::Tray;
     let snapshot = match &mode {
         Mode::Snapshot(request) => Some(request.clone()),
         _ => None,
@@ -281,6 +376,7 @@ pub fn run() {
         .manage(snapshot::Snapshot::new(snapshot))
         .invoke_handler(tauri::generate_handler![
             app_mode,
+            open_desktop,
             bridge::bridge,
             bridge::setup,
             bridge::remove_services,
@@ -344,6 +440,23 @@ pub fn run() {
             if let (false, RunEvent::Opened { urls }) = (snapshot_mode, &event) {
                 open_soul_packages(app, urls);
             }
+            // The Dock icon (shown while the desktop is open) or a relaunch
+            // from Finder opens or focuses the desktop (#69).
+            #[cfg(target_os = "macos")]
+            if let (true, RunEvent::Reopen { .. }) = (tray_mode, &event) {
+                let _ = open_desktop_window(app);
+            }
+            // Closing the desktop window is not quitting: the tray stays.
+            // Quit (app.exit) carries a code and still exits.
+            if let (
+                true,
+                RunEvent::ExitRequested {
+                    code: None, api, ..
+                },
+            ) = (tray_mode, &event)
+            {
+                api.prevent_exit();
+            }
             if let RunEvent::Exit = event {
                 bridge::stop(app);
             }
@@ -353,6 +466,24 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_desktop_window_draws_the_desktop_and_main_follows_the_launch() {
+        assert_eq!(mode_for_label(DESKTOP_LABEL, &Mode::Tray), "window");
+        assert_eq!(mode_for_label("main", &Mode::Tray), "tray");
+        assert_eq!(mode_for_label("main", &Mode::Window), "window");
+        assert_eq!(mode_for_label("main", &snapshot("a.png", None)), "tray");
+    }
+
+    #[test]
+    fn tray_menu_ids_are_distinct() {
+        let ids = [OPEN_DESKTOP_MENU_ID, updates::MENU_ID, QUIT_MENU_ID];
+        for (i, a) in ids.iter().enumerate() {
+            for b in &ids[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
+    }
 
     #[test]
     fn tray_is_the_default() {

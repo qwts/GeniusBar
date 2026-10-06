@@ -71,6 +71,8 @@ interface AppProps {
     /** A copy of this companion's folder (#110): launched under a new name, it forks. */
     copyOf?: { name: string | null; agentId: string };
   };
+  /** Opens the companion desktop window (#69); the popup's ⋯ menu offers it when given. */
+  onOpenDesktop?: () => void;
   /** Removes GeniusBar's login services (#9); without it there is no action. */
   onRemoveServices?: () => Promise<void>;
   /** The bundled starter soul (R4), offered while the roster is empty. */
@@ -138,7 +140,7 @@ function LanguageSelect() {
 
 // The GeniusBar menu (the tray popup's content, and the toolbar popover in
 // window mode) and, from it, one companion's session.
-function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, floatingButton = false, archiver, stopper, pauser, computerUseSwitch }: AppProps) {
+function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onOpenDesktop, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, floatingButton = false, archiver, stopper, pauser, computerUseSwitch }: AppProps) {
   const { t } = useI18n();
   const forest = useMemo(() => buildSoulForest(census), [census]);
   const roster = useMemo(() => allSouls(forest), [forest]);
@@ -202,6 +204,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const canCheckUpdates = Boolean(updates && !updateNotice(updates.status) && updates.status.state !== 'disabled');
   const showStarter = canOfferStarter && (starterOpen || forest.length === 0);
   const canLaunchPackage = Boolean(launcher && !showSetup && !launchingPackage);
+  // Only the tray popup opens the desktop; the desktop is already open.
+  const openDesktop = mode === 'tray' ? onOpenDesktop : undefined;
   const launchPackage = () => { setSelectedKey(null); setLaunchingPackage(true); setMenuOpen(false); };
   useEffect(() => { if (showSetup || showStarter) setMenuOpen(true); }, [showSetup, showStarter]);
   const { defaultHarness } = usePreferences();
@@ -319,8 +323,9 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
                 <Plus className="size-3.5" aria-hidden />
               </button>
             )}
-            {(canCheckUpdates || canLaunchPackage || cliTools || onRemoveServices || onRefresh) && (
+            {(openDesktop || canCheckUpdates || canLaunchPackage || cliTools || onRemoveServices || onRefresh) && (
               <FooterMenu items={[
+                openDesktop && { label: t('openDesktop'), run: openDesktop },
                 canCheckUpdates && { label: t('checkUpdates'), run: () => updates?.act() },
                 canLaunchPackage && { label: t('launchPackage'), run: launchPackage },
                 cliTools && { label: t('cli.action'), run: () => setPanel('cli') },

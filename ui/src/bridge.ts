@@ -522,6 +522,11 @@ export async function servicesInstalled(invokeImpl: typeof invoke = invoke): Pro
   }
 }
 
+/** Opens the companion desktop window beside the tray popup, or focuses it (#69). */
+export async function openDesktop(invokeImpl: typeof invoke = invoke): Promise<void> {
+  await invokeImpl('open_desktop');
+}
+
 export async function call<T>(method: BridgeMethod, params: Record<string, unknown> = {},
   invokeImpl: typeof invoke = invoke): Promise<T> {
   try {

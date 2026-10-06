@@ -377,6 +377,20 @@ describe('App setup', () => {
     expect(screen.getByRole('menuitem', { name: 'Refresh' })).toBeTruthy();
   });
 
+  it('opens the desktop from the popup’s ⋯ menu, and only there (#69)', () => {
+    const onOpenDesktop = vi.fn();
+    render(<App connection={sampleConnection} onOpenDesktop={onOpenDesktop} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Open desktop' }));
+    expect(onOpenDesktop).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('menu')).toBeNull();
+    cleanup();
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} onOpenDesktop={onOpenDesktop} onRefresh={() => {}} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'GeniusBar menu' }));
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    expect(screen.queryByRole('menuitem', { name: 'Open desktop' })).toBeNull();
+  });
+
   it('keeps the update line above an open companion session in the popup', () => {
     const act = vi.fn();
     const updates = { status: { state: 'available' as const, version: '0.1.1' }, act };

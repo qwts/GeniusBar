@@ -164,6 +164,7 @@ export const es: Catalog = {
   close: 'Cerrar',
   cancel: 'Cancelar',
   checkUpdates: 'Buscar actualizaciones…',
+  openDesktop: 'Abrir escritorio',
   refresh: 'Actualizar',
   'remove.action': 'Quitar servicios…',
   'remove.label': 'Quitar servicios',
