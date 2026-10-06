@@ -193,6 +193,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const waiting = useMemo(() => chatApprovals ? menuApprovals(chatApprovals.records, chatApprovals.local, roster) : [],
     [chatApprovals, roster]);
   const working = useMemo(() => workingCount(roster), [roster]);
+  // Who has a proposal waiting, for the desktop's status dots (#122).
+  const awaitingIds = useMemo(() => new Set(waiting.map((w) => w.agentId)), [waiting]);
   const { sound, setSound } = useSound();
   const decide = chat?.decide;
   const empty = emptyRosterText(connection);
@@ -447,7 +449,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
         {menu({ hidden: layout.hidden, onToggle: layoutActions.setHidden, onToggleTeam: layoutActions.setTeamHidden, onShowAll: layoutActions.showAll })}
       </MenuBar>
       <Desktop forest={forest} layout={layout} paused={paused} unreadOf={unread} selectedKey={openKey} onOpen={open}
-        badges={shownBadges} onArchive={archiveWith && setArchiving}
+        badges={shownBadges} onArchive={archiveWith && setArchiving} awaiting={awaitingIds} fleetPaused={fleet.paused}
         notice={notice} onLaunch={launch && !showSetup ? () => { setSelectedKey(null); setLaunchingPackage(true); } : undefined}>
         {selected && session && (
           // The sandbox chip is the design's title-bar pill; while agent-bot
