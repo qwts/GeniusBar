@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { SoulPopulation } from '../bridge';
+import type { SoulMode, SoulPopulation } from '../bridge';
 import { sampleCensus } from '../model/fixtures';
 import { SoulNotices, SoulSourceContext, type SoulSource } from './SoulNotices';
 
@@ -19,6 +19,8 @@ function source(overrides: Partial<SoulSource> = {}): SoulSource {
     setColdWake: vi.fn(),
     signedIn: vi.fn(async () => null),
     signIn: vi.fn(async () => true),
+    mode: vi.fn(async () => null),
+    setMode: vi.fn(async (_id: string, mode: SoulMode) => mode),
     ...overrides,
   };
 }
@@ -86,5 +88,63 @@ describe('SoulNotices (#122)', () => {
     record = expired;
     rerender(<SoulSourceContext.Provider value={s}><SoulNotices soul={luna} refresh={1} /></SoulSourceContext.Provider>);
     await screen.findByRole('alert');
+  });
+});
+
+describe('Auto-Pilot banner (#122)', () => {
+  const banner = 'Auto-Pilot is on — luna runs tools without asking.';
+  const clear = { population: vi.fn(async () => ({ ...expired, harnessAuth: null })) };
+
+  it('shows for a soul on Auto-Pilot, and Turn off asks agent-bot for Safe Mode', async () => {
+    const s = source({ ...clear, mode: vi.fn(async () => 'autopilot' as const) });
+    show(s);
+    expect((await screen.findByRole('status')).textContent).toContain(banner);
+    expect(s.mode).toHaveBeenCalledWith(luna.agentId);
+    fireEvent.click(screen.getByRole('button', { name: 'Turn off' }));
+    expect(s.setMode).toHaveBeenCalledWith(luna.agentId, 'safe');
+    await waitFor(() => expect(screen.queryByText(banner)).toBeNull());
+  });
+
+  it('keeps the banner with the reason when the owner refuses', async () => {
+    const s = source({
+      ...clear,
+      mode: vi.fn(async () => 'autopilot' as const),
+      setMode: vi.fn(async () => { throw new Error('the owner did not approve'); }),
+    });
+    show(s);
+    fireEvent.click(await screen.findByRole('button', { name: 'Turn off' }));
+    expect((await screen.findByRole('alert')).textContent).toBe('Execution mode unchanged: the owner did not approve');
+    expect(screen.getByText(banner)).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Turn off' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('shows nothing in Safe Mode, or when agent-bot cannot say', async () => {
+    const safe = source({ ...clear, mode: vi.fn(async () => 'safe' as const) });
+    const { unmount } = show(safe);
+    await waitFor(() => expect(safe.mode).toHaveBeenCalled());
+    expect(screen.queryByText(banner)).toBeNull();
+    unmount();
+    const none = source(clear);
+    show(none);
+    await waitFor(() => expect(none.mode).toHaveBeenCalled());
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('shows with the expired sign-in banner', async () => {
+    show(source({ mode: vi.fn(async () => 'autopilot' as const) }));
+    expect(await screen.findByText(banner)).toBeTruthy();
+    expect((await screen.findByRole('alert')).textContent).toContain('codex sign-in expired');
+    expect(screen.getByRole('button', { name: 'Turn off' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Sign in again' })).toBeTruthy();
+  });
+
+  it('reads the mode again on refresh', async () => {
+    let mode: SoulMode = 'safe';
+    const s = source({ ...clear, mode: vi.fn(async () => mode) });
+    const { rerender } = show(s);
+    await waitFor(() => expect(s.mode).toHaveBeenCalledOnce());
+    mode = 'autopilot';
+    rerender(<SoulSourceContext.Provider value={s}><SoulNotices soul={luna} refresh={1} /></SoulSourceContext.Provider>);
+    expect(await screen.findByText(banner)).toBeTruthy();
   });
 });

@@ -174,6 +174,48 @@ export async function setSoulColdWake(agentId: string, on: boolean, invokeImpl: 
   return state;
 }
 
+/**
+ * A soul's execution mode (#122, Lovable "Execution mode"), from `soul mode
+ * <agentId> show --json`. In Safe Mode risky and external tool calls wait
+ * for the owner's approval; in Auto-Pilot every call runs without asking.
+ */
+export type SoulMode = 'safe' | 'autopilot';
+
+export function normalizeSoulMode(raw: unknown): SoulMode | null {
+  if (!isRecord(raw)) return null;
+  return raw.mode === 'safe' || raw.mode === 'autopilot' ? raw.mode : null;
+}
+
+/** The soul's execution mode, or null when agent-bot cannot say (outside the app, an older bundle, a refusal). */
+export async function soulMode(agentId: string, invokeImpl: typeof invoke = invoke): Promise<SoulMode | null> {
+  if (!inApp() && invokeImpl === invoke) return null;
+  try {
+    return normalizeSoulMode(await invokeImpl<unknown>('soul_mode', { agent: agentId, action: 'show' }));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Switches the soul to Safe Mode or Auto-Pilot. agent-bot asks the owner
+ * (its consent dialog, Touch ID) and applies the mode on the soul's next
+ * permission request; a refusal rejects with its reason, and the mode
+ * stays as it was.
+ */
+export async function setSoulMode(agentId: string, mode: SoulMode, invokeImpl: typeof invoke = invoke): Promise<SoulMode> {
+  let raw: unknown;
+  try {
+    raw = await invokeImpl<unknown>('soul_mode', { agent: agentId, action: mode });
+  } catch (error) {
+    const e = error as { code?: unknown; message?: unknown };
+    throw new BridgeError(typeof e?.code === 'string' ? e.code : 'soul-mode-failed',
+      typeof e?.message === 'string' ? e.message : String(error));
+  }
+  const state = normalizeSoulMode(raw);
+  if (!state) throw new BridgeError('soul-mode-failed', 'agent-bot gave no execution mode');
+  return state;
+}
+
 /** A harness sign-in a daemon turn found missing or expired (#84). */
 export interface HarnessAuthFailure {
   status: 'signed-out' | 'expired';

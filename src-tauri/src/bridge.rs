@@ -1522,3 +1522,127 @@ mod details_rows_tests {
         );
     }
 }
+
+/// A soul's execution mode (#122, Lovable "Execution mode": Safe Mode or
+/// Auto-Pilot), from agent-bot's `soul mode <agentId> show --json`:
+/// `{agentId, mode}`. In Safe Mode risky and external tool calls wait for the
+/// owner; in Auto-Pilot every call runs. `safe` and `autopilot` are
+/// owner-gated by agent-bot (its consent dialog, Touch ID); GeniusBar never
+/// asks itself. agent-bot answers a change with the mode it now holds.
+#[tauri::command]
+pub async fn soul_mode<R: Runtime>(
+    app: AppHandle<R>,
+    agent: String,
+    action: String,
+) -> Result<Value, BridgeError> {
+    let args = soul_mode_args(&agent, &action)?;
+    let output = run_agent_bot(&app, args, "soul-mode-unavailable").await?;
+    parse_soul_mode(&output.stdout, &output.stderr)
+}
+
+fn soul_mode_args(agent: &str, action: &str) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    if agent.is_empty() || agent.starts_with('-') {
+        return Err(BridgeError::new(
+            "soul-mode-invalid",
+            "agent must be an agent id",
+        ));
+    }
+    if !matches!(action, "show" | "safe" | "autopilot") {
+        return Err(BridgeError::new(
+            "soul-mode-invalid",
+            "action must be show, safe or autopilot",
+        ));
+    }
+    Ok(vec![
+        "soul".into(),
+        "mode".into(),
+        agent.into(),
+        action.into(),
+        "--json".into(),
+    ])
+}
+
+fn parse_soul_mode(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    parse_agent_bot_json(
+        stdout,
+        stderr,
+        "soul-mode-failed",
+        "agent-bot soul mode: ",
+        "agent-bot gave no execution mode",
+        |value| {
+            value.get("agentId").and_then(Value::as_str).is_some()
+                && matches!(
+                    value.get("mode").and_then(Value::as_str),
+                    Some("safe" | "autopilot")
+                )
+        },
+    )
+}
+
+#[cfg(test)]
+mod soul_mode_tests {
+    use super::*;
+
+    #[test]
+    fn builds_soul_mode_arguments() {
+        assert_eq!(
+            soul_mode_args("agent_1", "show").unwrap(),
+            vec!["soul", "mode", "agent_1", "show", "--json"]
+        );
+        assert_eq!(
+            soul_mode_args("agent_1", "safe").unwrap(),
+            vec!["soul", "mode", "agent_1", "safe", "--json"]
+        );
+        assert_eq!(
+            soul_mode_args("agent_1", "autopilot").unwrap(),
+            vec!["soul", "mode", "agent_1", "autopilot", "--json"]
+        );
+        for (agent, action) in [
+            ("agent_1", "on"),
+            ("agent_1", ""),
+            ("--json", "show"),
+            ("", "safe"),
+        ] {
+            assert_eq!(
+                soul_mode_args(agent, action).unwrap_err().code,
+                "soul-mode-invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_soul_modes_or_their_error() {
+        let mode =
+            parse_soul_mode(b"{\"agentId\":\"agent_1\",\"mode\":\"autopilot\"}\n", b"").unwrap();
+        assert_eq!(mode["mode"], "autopilot");
+        assert_eq!(
+            parse_soul_mode(
+                b"{\"error\":{\"code\":\"soul-mode-failed\",\"message\":\"the owner did not approve\"}}\n",
+                b""
+            ),
+            Err(BridgeError::new(
+                "soul-mode-failed",
+                "the owner did not approve"
+            ))
+        );
+        assert_eq!(
+            parse_soul_mode(
+                b"",
+                b"agent-bot soul mode: soul mode settings could not be read\n"
+            ),
+            Err(BridgeError::new(
+                "soul-mode-failed",
+                "soul mode settings could not be read"
+            ))
+        );
+        // An older agent-bot without `soul mode`, or an unknown mode.
+        assert_eq!(
+            parse_soul_mode(b"{\"agentId\":\"agent_1\",\"mode\":\"yolo\"}\n", b"").unwrap_err(),
+            BridgeError::new("soul-mode-failed", "agent-bot gave no execution mode")
+        );
+        assert_eq!(
+            parse_soul_mode(b"", b"").unwrap_err().message,
+            "agent-bot gave no execution mode"
+        );
+    }
+}

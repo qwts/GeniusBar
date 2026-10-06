@@ -1,6 +1,6 @@
 // The fixed fake census and health from R1's snapshot test, for tests and
 // for previewing the popup before the bridge (#7) supplies real rows.
-import type { SoulColdWake, SoulPopulation } from '../bridge';
+import type { SoulColdWake, SoulMode, SoulPopulation } from '../bridge';
 import type { AuditRecord } from './audit';
 import type { CensusRow } from './census';
 import type { ApprovalRecord, ChatEntry, InboxMessage } from './chat';
@@ -123,4 +123,11 @@ export const sampleColdWake: Readonly<Record<string, SoulColdWake>> = {
   agent_p: { on: true, lane: 'acp' },
   agent_s: { on: false, lane: null },
   agent_c: { on: false, lane: null },
+};
+
+/** Execution mode per soul (`soul mode show --json`, #122): luna is on Auto-Pilot (the banner), others Safe Mode. */
+export const sampleModes: Readonly<Record<string, SoulMode>> = {
+  agent_p: 'autopilot',
+  agent_s: 'safe',
+  agent_c: 'safe',
 };

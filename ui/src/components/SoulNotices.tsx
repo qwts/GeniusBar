@@ -1,12 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Loader2, LogIn } from 'lucide-react';
+import { Loader2, LogIn, Zap } from 'lucide-react';
 import {
   harnessSignedIn,
   harnessSignIn,
   setSoulColdWake,
+  setSoulMode,
   soulColdWake,
+  soulMode,
   soulPopulation,
   type SoulColdWake,
+  type SoulMode,
   type SoulPopulation,
 } from '../bridge';
 import { displayName, type CensusRow } from '../model/census';
@@ -22,6 +25,8 @@ export interface SoulSource {
   setColdWake: (agentId: string, on: boolean) => Promise<SoulColdWake>;
   signedIn: (harness: string, agentId: string) => Promise<boolean | null>;
   signIn: (harness: string, agentId: string) => Promise<boolean>;
+  mode: (agentId: string) => Promise<SoulMode | null>;
+  setMode: (agentId: string, mode: SoulMode) => Promise<SoulMode>;
 }
 
 // A source that throws instead of rejecting still settles as a rejection.
@@ -33,6 +38,8 @@ export const SoulSourceContext = createContext<SoulSource>({
   setColdWake: (agentId, on) => settled(() => setSoulColdWake(agentId, on)),
   signedIn: (harness, agentId) => settled(() => harnessSignedIn(harness, agentId)),
   signIn: (harness, agentId) => settled(() => harnessSignIn(harness, agentId)),
+  mode: (agentId) => settled(() => soulMode(agentId)),
+  setMode: (agentId, mode) => settled(() => setSoulMode(agentId, mode)),
 });
 
 /**
@@ -56,6 +63,89 @@ export function useSoulPopulation(agentId: string, refresh = 0) {
   return { record: current?.record ?? null, loaded: current !== null, reload };
 }
 
+// A mode agent-bot accepted reaches every control showing that soul (the
+// ⓘ sheet's switch and the banner above the chat), not only the one used.
+const modeChanges = new Set<(agentId: string, mode: SoulMode) => void>();
+
+/**
+ * The soul's execution mode (#122, agent-bot `soul mode`): read when shown
+ * and on refresh, null while agent-bot cannot say. A change asks the owner
+ * through agent-bot; a refusal leaves the mode where it was and says why.
+ * Not locked while the soul runs: agent-bot applies the mode on its next
+ * permission request. Tickets work as in useSoulColdWake.
+ */
+export function useSoulMode(agentId: string, refresh = 0) {
+  const source = useContext(SoulSourceContext);
+  const [mode, setMode] = useState<SoulMode | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ticket = useRef(0);
+  const changing = useRef(false);
+  const heard = useRef<((id: string, next: SoulMode) => void) | null>(null);
+  useEffect(() => {
+    ticket.current += 1;
+    changing.current = false;
+    setMode(null);
+    setError(null);
+    setSaving(false);
+  }, [agentId]);
+  useEffect(() => {
+    if (changing.current) return;
+    const mine = ++ticket.current;
+    void source.mode(agentId).then((result) => { if (ticket.current === mine) setMode(result); }, () => {});
+  }, [agentId, refresh, source]);
+  useEffect(() => {
+    const hear = (id: string, next: SoulMode) => {
+      if (id !== agentId || changing.current) return;
+      ticket.current += 1;
+      setMode(next);
+      setError(null);
+    };
+    heard.current = hear;
+    modeChanges.add(hear);
+    return () => { modeChanges.delete(hear); };
+  }, [agentId]);
+  const change = (next: SoulMode) => {
+    const mine = ++ticket.current;
+    const latest = () => ticket.current === mine;
+    changing.current = true;
+    setSaving(true);
+    setError(null);
+    source.setMode(agentId, next)
+      .then((result) => {
+        if (!latest()) return;
+        setMode(result);
+        for (const tell of [...modeChanges]) if (tell !== heard.current) tell(agentId, result);
+      })
+      .catch((e: unknown) => { if (latest()) setError(e instanceof Error ? e.message : String(e)); })
+      .finally(() => {
+        if (!latest()) return;
+        changing.current = false;
+        setSaving(false);
+      });
+  };
+  return { mode, saving, error, change };
+}
+
+/**
+ * The design's Auto-Pilot strip (Lovable `MenuBar`), here per soul: shown
+ * while agent-bot says the soul is on Auto-Pilot; Turn off asks agent-bot
+ * (owner-gated) for Safe Mode, and a refusal keeps the strip with the reason.
+ */
+export function AutopilotBanner({ soul, refresh = 0 }: { soul: CensusRow; refresh?: number }) {
+  const { t } = useI18n();
+  const { mode, saving, error, change } = useSoulMode(soul.agentId, refresh);
+  if (mode !== 'autopilot') return null;
+  return (
+    <div role="status" className="flex flex-wrap items-center justify-center gap-x-3 gap-y-0.5 bg-warning px-4 py-1 text-[11px] font-semibold text-warning-foreground">
+      <Zap className="size-3" aria-hidden /> {t('mode.banner', { name: displayName(soul) })}
+      <button type="button" disabled={saving} onClick={() => change('safe')}
+        className="underline underline-offset-2 disabled:opacity-60">{t('mode.turnOff')}</button>
+      {error && <span role="alert" className="basis-full text-center font-normal">{t('mode.failed', { message: error })}</span>}
+    </div>
+  );
+}
+
 /**
  * The expired or missing harness sign-in banner above a soul's chat
  * (Lovable `SoulNotices`). Shown while agent-bot's census records the
@@ -63,7 +153,7 @@ export function useSoulPopulation(agentId: string, refresh = 0) {
  * census again. The Lovable copy notice is not here: agent-bot does not
  * say a launched soul is a copy.
  */
-export function SoulNotices({ soul, refresh = 0 }: { soul: CensusRow; refresh?: number }) {
+function SignInNotice({ soul, refresh }: { soul: CensusRow; refresh: number }) {
   const { t } = useI18n();
   const source = useContext(SoulSourceContext);
   const { record, reload } = useSoulPopulation(soul.agentId, refresh);
@@ -98,5 +188,18 @@ export function SoulNotices({ soul, refresh = 0 }: { soul: CensusRow; refresh?: 
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * The notices above a soul's chat (Lovable `SoulNotices` and the
+ * Auto-Pilot strip): Auto-Pilot first, then an expired sign-in; both can show.
+ */
+export function SoulNotices({ soul, refresh = 0 }: { soul: CensusRow; refresh?: number }) {
+  return (
+    <>
+      <AutopilotBanner soul={soul} refresh={refresh} />
+      <SignInNotice soul={soul} refresh={refresh} />
+    </>
   );
 }

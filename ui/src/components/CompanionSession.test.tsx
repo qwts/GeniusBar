@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BridgeError, runtimeMetrics, setSoulComms, soulComms, type RuntimeMetrics, type SoulPopulation } from '../bridge';
+import { BridgeError, runtimeMetrics, setSoulComms, soulComms, type RuntimeMetrics, type SoulMode, type SoulPopulation } from '../bridge';
 import { buildSoulForest } from '../model/census';
 import { emptyComposer } from '../model/chat';
 import { sampleCensus } from '../model/fixtures';
@@ -274,6 +274,8 @@ describe('Details rows from the Lovable design (#122)', () => {
       setColdWake: vi.fn(async (_id: string, on: boolean) => ({ on, lane: on ? 'acp' : null })),
       signedIn: vi.fn(async () => true),
       signIn: vi.fn(async () => true),
+      mode: vi.fn(async () => null),
+      setMode: vi.fn(async (_id: string, mode: SoulMode) => mode),
       ...overrides,
     };
   }
@@ -364,5 +366,74 @@ describe('Details rows from the Lovable design (#122)', () => {
     expect(screen.getByRole('textbox', { name: 'Message to luna' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Sign in again' }));
     expect(s.signIn).toHaveBeenCalledWith('codex', luna.agentId);
+  });
+
+  it('adds the Execution mode row: Safe Mode with its hint, switched to Auto-Pilot through agent-bot', async () => {
+    const s = source({ mode: vi.fn(async () => 'safe' as const) });
+    render(withSource(s, <CompanionDetails soul={luna} />));
+    const toggle = await screen.findByRole('switch', { name: 'Auto-Pilot for luna' }) as HTMLInputElement;
+    expect(field('Execution mode')).toBe('Safe ModeRisky and external actions wait for your approval.');
+    expect(toggle.checked).toBe(false);
+    expect(s.mode).toHaveBeenCalledWith(luna.agentId);
+    fireEvent.click(toggle);
+    expect(s.setMode).toHaveBeenCalledWith(luna.agentId, 'autopilot');
+    await waitFor(() => expect(field('Execution mode')).toBe('Auto-Pilot'));
+    expect(toggle.checked).toBe(true);
+  });
+
+  it('is not locked while the companion runs', async () => {
+    vi.mocked(soulComms).mockResolvedValue({ ...stopped, running: true });
+    render(withSource(source({ mode: vi.fn(async () => 'autopilot' as const) }), <CompanionDetails soul={luna} />));
+    await screen.findByRole('switch', { name: 'Agent comms for luna' });
+    const toggle = screen.getByRole('switch', { name: 'Auto-Pilot for luna' }) as HTMLInputElement;
+    expect(toggle.disabled).toBe(false);
+  });
+
+  it('a refused mode change leaves the switch where it was and says why', async () => {
+    const s = source({
+      mode: vi.fn(async () => 'safe' as const),
+      setMode: vi.fn(async () => { throw new BridgeError('soul-mode-failed', 'the owner did not approve'); }),
+    });
+    render(withSource(s, <CompanionDetails soul={luna} />));
+    const toggle = await screen.findByRole('switch', { name: 'Auto-Pilot for luna' }) as HTMLInputElement;
+    fireEvent.click(toggle);
+    expect((await screen.findByRole('alert')).textContent).toBe('Execution mode unchanged: the owner did not approve');
+    expect(toggle.checked).toBe(false);
+    expect(field('Execution mode')).toContain('Safe Mode');
+  });
+
+  it('has no Execution mode row when agent-bot cannot say', async () => {
+    const s = source();
+    render(withSource(s, <CompanionDetails soul={luna} />));
+    await screen.findByText('Wake on new messages', { selector: 'dt' });
+    await waitFor(() => expect(s.mode).toHaveBeenCalled());
+    expect(screen.queryByText('Execution mode', { selector: 'dt' })).toBeNull();
+    expect(screen.queryByRole('switch', { name: 'Auto-Pilot for luna' })).toBeNull();
+  });
+
+  it('puts the Execution mode switch in the ⓘ Details sheet, and the banner follows it', async () => {
+    const { InfoButton } = await import('./CompanionSession');
+    const { AutopilotBanner } = await import('./SoulNotices');
+    const s = source({ mode: vi.fn(async () => 'safe' as const) });
+    render(withSource(s, <><AutopilotBanner soul={luna} /><InfoButton soul={luna} /></>));
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+    const sheet = screen.getByRole('dialog', { name: 'Details · luna' });
+    expect(await within(sheet).findByText('Execution mode')).toBeTruthy();
+    expect(within(sheet).getByText('Risky and external actions wait for your approval.')).toBeTruthy();
+    expect(screen.queryByText('Auto-Pilot is on — luna runs tools without asking.')).toBeNull();
+    fireEvent.click(within(sheet).getByRole('switch', { name: 'Auto-Pilot for luna' }));
+    expect(s.setMode).toHaveBeenCalledWith(luna.agentId, 'autopilot');
+    expect(await screen.findByText('Auto-Pilot is on — luna runs tools without asking.')).toBeTruthy();
+  });
+
+  it('shows the Auto-Pilot banner above the chat', async () => {
+    const s = source({ mode: vi.fn(async () => 'autopilot' as const) });
+    const chat = { entries: [], composer: emptyComposer, onDraft: () => {}, onSend: () => {} };
+    render(withSource(s, <CompanionSession soul={luna} forest={forest} roster={sampleCensus} chat={chat} onOpen={() => {}} onClose={() => {}} />));
+    expect(await screen.findByText('Auto-Pilot is on — luna runs tools without asking.')).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Message to luna' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Turn off' }));
+    expect(s.setMode).toHaveBeenCalledWith(luna.agentId, 'safe');
+    await waitFor(() => expect(screen.queryByText('Auto-Pilot is on — luna runs tools without asking.')).toBeNull());
   });
 });

@@ -1,8 +1,9 @@
 // Dev-only preview (`npm run dev`, then /preview.html?mode=tray|window,
 // plus &select=<agent id> to open a companion (its Audit log tab shows
 // sampleAudit; its Details show samplePopulation and sampleColdWake, and
-// &select=agent_s shows the expired sign-in banner), or &open=<path> to open a
-// package as Finder would):
+// &select=agent_s shows the expired sign-in banner; &select=agent_p shows
+// luna on Auto-Pilot from sampleModes, its banner and the mode switch), or
+// &open=<path> to open a package as Finder would):
 // the app on the fixed fixtures, without Tauri. Not part of the build.
 import { StrictMode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -11,7 +12,7 @@ import { AuditSourceContext, type AuditSource } from './components/AuditLog';
 import { SoulSourceContext, type SoulSource } from './components/SoulNotices';
 import type { CensusRow } from './model/census';
 import { emptyChat, emptyComposer, mergeIncoming, type ChatState } from './model/chat';
-import { inboxMessage, sampleApprovals, sampleAudit, sampleCensus, sampleColdWake, sampleConnection, samplePopulation, sampleSessionEntries } from './model/fixtures';
+import { inboxMessage, sampleApprovals, sampleAudit, sampleCensus, sampleColdWake, sampleConnection, sampleModes, samplePopulation, sampleSessionEntries } from './model/fixtures';
 import type { ChatApi } from './useChat';
 import '@fontsource/ibm-plex-sans/latin-400.css';
 import '@fontsource/ibm-plex-sans/latin-500.css';
@@ -52,6 +53,7 @@ const audit: AuditSource = async (agentId) => sampleAudit.filter((r) => agentId 
 // locally, as agent-bot would apply them once the owner approves.
 const population = { ...samplePopulation };
 const wakes = { ...sampleColdWake };
+const modes = { ...sampleModes };
 const soulSource: SoulSource = {
   population: async (agentId) => population[agentId] ?? null,
   coldWake: async (agentId) => wakes[agentId] ?? null,
@@ -62,6 +64,8 @@ const soulSource: SoulSource = {
     if (record) population[agentId] = { ...record, harnessAuth: null };
     return true;
   },
+  mode: async (agentId) => modes[agentId] ?? null,
+  setMode: async (agentId, mode) => (modes[agentId] = mode),
 };
 
 function Preview() {
