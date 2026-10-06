@@ -17,7 +17,7 @@ const archiverOf = (running: boolean | null, remove: Archiver['remove'] = async 
 
 function renderDialog(archiver: Archiver, onCancel = vi.fn(), onArchived = vi.fn()) {
   render(<I18nProvider><ArchiveDialog soul={luna} archiver={archiver} onCancel={onCancel} onArchived={onArchived} /></I18nProvider>);
-  return { dialog: screen.getByRole('alertdialog', { name: 'Archive: luna' }), onCancel, onArchived };
+  return { dialog: screen.getByRole('alertdialog', { name: /^Archive luna\?/ }), onCancel, onArchived };
 }
 
 describe('ArchiveDialog (#94)', () => {
@@ -76,7 +76,7 @@ describe('Archive in the app (#94)', () => {
     render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic archiver={archiver} onRefresh={onRefresh} />);
     fireEvent.contextMenu(within(desktop()).getByRole('button', { name: /^old,/ }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Remove…' }));
-    const dialog = screen.getByRole('alertdialog', { name: 'Archive: old' });
+    const dialog = screen.getByRole('alertdialog', { name: /^Archive old\?/ });
     const archive = within(dialog).getByRole('button', { name: 'Archive' }) as HTMLButtonElement;
     await waitFor(() => expect(archive.disabled).toBe(false));
     fireEvent.click(archive);
@@ -93,7 +93,7 @@ describe('Archive in the app (#94)', () => {
     render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic archiver={archiver} />);
     fireEvent.click(screen.getByRole('button', { name: 'GeniusBar menu' }));
     fireEvent.click(within(screen.getByRole('dialog', { name: 'GeniusBar menu' })).getByRole('button', { name: 'Archive: luna' }));
-    const dialog = screen.getByRole('alertdialog', { name: 'Archive: luna' });
+    const dialog = screen.getByRole('alertdialog', { name: /^Archive luna\?/ });
     const archive = within(dialog).getByRole('button', { name: 'Archive' }) as HTMLButtonElement;
     await waitFor(() => expect(archive.disabled).toBe(false));
     fireEvent.click(archive);

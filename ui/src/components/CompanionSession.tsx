@@ -695,7 +695,7 @@ export function SoulFactRows({ soul, refresh = 0 }: { soul: CensusRow; refresh?:
       {signIn && (
         <div className="flex items-center gap-3 p-3">
           <LogIn className="size-4 text-muted-foreground" aria-hidden />
-          <p className="m-0 flex-1 text-sm">{t('login.status')} · {displayHarness(soul)}</p>
+          <h3 className="m-0 flex-1 text-sm">{t('login.status')} · {displayHarness(soul)}</h3>
           <span className={`text-xs ${signIn === 'ok' ? 'text-success' : 'text-destructive'}`}>{t(SIGN_IN_TEXT[signIn])}</span>
         </div>
       )}
@@ -703,7 +703,7 @@ export function SoulFactRows({ soul, refresh = 0 }: { soul: CensusRow; refresh?:
         <div className="flex items-center gap-3 p-3">
           <Github className="size-4 text-muted-foreground" aria-hidden />
           <div className="min-w-0 flex-1">
-            <p className="m-0 text-sm">{t('keyd.title')}</p>
+            <h3 className="m-0 text-sm">{t('keyd.title')}</h3>
             <p className="m-0 truncate font-mono text-[11px] text-muted-foreground">
               {record.appSlug ? t('keyd.connected', { app: record.appSlug }) : t('keyd.none')}
             </p>
@@ -724,6 +724,7 @@ export function InfoButton({ soul }: { soul: CensusRow }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const close = useRef<HTMLButtonElement>(null);
+  const titleId = useId();
   useEffect(() => { if (open) close.current?.focus(); }, [open]);
   const name = displayName(soul);
   return (
@@ -739,7 +740,7 @@ export function InfoButton({ soul }: { soul: CensusRow }) {
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"
           onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
           onPointerDown={(e) => e.stopPropagation()}>
-          <section role="dialog" aria-modal="true" aria-label={`${t('details.title')} · ${name}`}
+          <section role="dialog" aria-modal="true" aria-labelledby={titleId}
             onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } }}
             className="relative grid w-full max-w-md gap-3 rounded-lg border border-border bg-popover p-5 shadow-2xl">
             <button ref={close} type="button" onClick={() => setOpen(false)} aria-label={t('close')}
@@ -747,7 +748,7 @@ export function InfoButton({ soul }: { soul: CensusRow }) {
               <X className="size-4" aria-hidden />
             </button>
             <div>
-              <h2 className="m-0 text-base font-semibold">{t('details.title')} · {name}</h2>
+              <h2 id={titleId} className="m-0 text-base font-semibold">{t('details.title')} · {name}</h2>
               <p className="m-0 text-sm text-muted-foreground">{displayHarness(soul)}</p>
             </div>
             <div className="divide-y divide-border rounded-md border border-border empty:hidden">

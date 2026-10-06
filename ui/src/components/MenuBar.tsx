@@ -96,14 +96,14 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
       {attention && !open && (
         <div role={attention.isError ? 'alert' : 'status'} className="min-w-0">
           <button type="button" onClick={() => onOpenChange(true)} title={attention.text}
-            className={`max-w-[20rem] truncate rounded px-1.5 py-0.5 text-xs hover:bg-accent ${attention.isError ? 'text-destructive' : 'text-muted-foreground'}`}>
+            className={`min-h-7 max-w-[20rem] truncate rounded px-3 py-0.5 text-xs hover:bg-accent ${attention.isError ? 'text-destructive' : 'text-muted-foreground'}`}>
             {attention.text}
           </button>
         </div>
       )}
       <div className="ml-auto flex items-center gap-3 pr-1">
         {fleetPaused && onResume && (
-          <button type="button" onClick={onResume} className="flex items-center gap-1 rounded bg-secondary px-2 py-0.5 text-secondary-foreground">
+          <button type="button" onClick={onResume} className="flex min-h-7 items-center gap-1 rounded bg-secondary px-3 py-0.5 text-secondary-foreground">
             <Pause className="size-3" aria-hidden /> {t('paused')}
           </button>
         )}
@@ -202,7 +202,7 @@ function Palette({ forest, paused, onClose, onJump }: {
           {teams.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">{t('bar.noResults')}</p>}
           {teams.map((team) => (
             <div key={team.key} role="group" aria-label={team.heading}>
-              <p className="px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">{team.heading}</p>
+              <h3 className="m-0 px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">{team.heading}</h3>
               {team.souls.map((soul) => (
                 <button key={soulKey(soul)} type="button" onClick={() => onJump(soul)}
                   className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none">

@@ -77,3 +77,24 @@ describe('MessageBody', () => {
     expect(container.querySelector('pre')?.textContent).toBe('code');
   });
 });
+
+describe('ToolApprovalCard buttons (a11y audit)', () => {
+  const e = { id: 'q', kind: 'approval_request', tool: 'Bash', args: 'git push', risk: 'external', status: 'pending', at: 1, seq: null } as const;
+
+  it('keeps the same accessible names, in order, at a 28px or larger target', () => {
+    render(<ToolApprovalCard e={e} name="luna" onResolve={() => {}} allowSession />);
+    const buttons = screen.getAllByRole('button');
+    expect(buttons.map((b) => b.textContent)).toEqual(['Approve', 'Approve for session', 'Deny']);
+    for (const name of ['Approve', 'Approve for session', 'Deny']) {
+      const classes = screen.getByRole('button', { name }).className.split(' ');
+      expect(classes).toContain('h-8');
+      expect(classes).toContain('px-3');
+    }
+  });
+
+  it('shows a resolved card at full contrast', () => {
+    render(<ToolApprovalCard e={{ ...e, status: 'approved' }} name="luna" />);
+    const card = screen.getByText('git push').closest('div.rounded-md') as HTMLElement;
+    expect(card.className).not.toMatch(/opacity-/);
+  });
+});

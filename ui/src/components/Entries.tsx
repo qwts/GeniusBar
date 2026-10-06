@@ -79,7 +79,7 @@ export function ToolApprovalCard({ e, name, onResolve, allowSession = false }: {
     <div
       role={pending ? 'alert' : undefined}
       aria-busy={e.deciding ? true : undefined}
-      className={`max-w-xl rounded-md border-2 p-3 ${pending ? 'border-warning bg-warning/10' : 'border-border bg-card opacity-80'}`}
+      className={`max-w-xl rounded-md border-2 p-3 ${pending ? 'border-warning bg-warning/10' : 'border-border bg-card'}`}
     >
       <div className="flex items-start gap-2">
         <ShieldAlert className={`mt-0.5 size-4 shrink-0 ${pending ? 'text-warning' : 'text-muted-foreground'}`} aria-hidden />
@@ -125,11 +125,11 @@ export function AgentAside({ e }: { e: AsideEntry }) {
   return (
     <div className="ml-8 max-w-lg rounded-r-md border-l-2 border-info/60 bg-info/5 py-1 pr-2 pl-3">
       <button type="button" aria-expanded={open} aria-controls={contentId} onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-1.5 rounded bg-transparent p-0 text-left text-xs text-info">
+        className="flex min-h-7 w-full items-center gap-1.5 rounded bg-transparent p-0 text-left text-xs text-info">
         <ChevronRight className={`size-3 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`} aria-hidden />
         <span className="font-mono font-semibold">{t('asideLabel', { from: e.from, to: e.to })}</span>
         <span className="text-muted-foreground">· {t('asideHint')}</span>
-        {e.team && <span className="ml-auto rounded-full border border-info/40 px-1.5 font-mono text-[10px]">{t('aside.team', { team: e.team })}</span>}
+        {e.team && <span className="ml-auto rounded-full border border-info/40 px-1.5 font-mono text-[11px]">{t('aside.team', { team: e.team })}</span>}
       </button>
       {open && (
         <div id={contentId} className="space-y-1 py-1 text-xs">
@@ -167,7 +167,7 @@ function inlines(nodes: readonly Inline[]): ReactNode[] {
         return (
           <span key={i} className="chat-link">
             <span className="underline decoration-dotted underline-offset-2">{text}</span>
-            {!same && <span className="font-mono text-[0.9em] opacity-80"> ({node.href})</span>}
+            {!same && <span className="font-mono text-[0.9em]"> ({node.href})</span>}
           </span>
         );
       }

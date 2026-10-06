@@ -60,7 +60,7 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty, onA
       <li key={key} className="group flex items-center gap-1 px-2">
         <button
           type="button"
-          className={`companion-row flex min-w-0 flex-1 items-center gap-2 rounded-md py-1 pr-1 text-left text-sm hover:bg-accent ${hidden ? 'opacity-50' : ''}`}
+          className={`companion-row flex min-h-7 min-w-0 flex-1 items-center gap-2 rounded-md py-1 pr-1 text-left text-sm hover:bg-accent ${hidden ? 'text-muted-foreground' : ''}`}
           style={{ paddingLeft: 4 + depth * 14 }}
           title={t('showDetails', { name })}
           aria-label={companionLabel(soul, t, unread)}
@@ -70,12 +70,12 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty, onA
           <SoulDudle soul={soul} size={18} paused={paused} />
           <span className="flex min-w-0 flex-col">
             <span className="truncate">{name}</span>
-            {note && <span className="truncate text-[10px] text-muted-foreground">{note}</span>}
+            {note && <span className="truncate text-[11px] text-muted-foreground">{note}</span>}
           </span>
-          <span className="truncate font-mono text-[10px] text-muted-foreground">{displayHarness(soul)}</span>
+          <span className="truncate font-mono text-[11px] text-muted-foreground">{displayHarness(soul)}</span>
           <span className="ml-auto flex shrink-0 items-center gap-1.5">
             {unread > 0 && (
-              <span className="rounded-full bg-primary px-1.5 font-mono text-[10px] font-semibold text-primary-foreground">
+              <span className="rounded-full bg-primary px-1.5 font-mono text-[11px] font-semibold text-primary-foreground">
                 {t('newCount', { count: unread })}
               </span>
             )}
@@ -144,7 +144,7 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty, onA
             {ordered.map((team, i) => (
               <li key={soulKey(team.lead)}>
                 {(team.members.length > 0 || i === firstSolo) && (
-                  <p className="m-0 px-3 pt-2 pb-0.5 font-mono text-[10px] tracking-wider text-muted-foreground uppercase" aria-hidden>
+                  <p className="m-0 px-3 pt-2 pb-0.5 font-mono text-[11px] tracking-wider text-muted-foreground uppercase" aria-hidden>
                     {team.members.length > 0 ? displayName(team.lead) : t('team.none')}
                   </p>
                 )}

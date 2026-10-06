@@ -38,7 +38,7 @@ export function ApprovalsList({ items, paused, onDecide, onOpen }: {
   const later = onDecide ? undefined : t('approval.unavailable');
   return (
     <section role="alert" aria-label={t('approvals.title')} className="shrink-0 border-b border-border">
-      <h2 className="m-0 px-3 pt-2 pb-1 font-mono text-[10px] font-normal tracking-wider text-muted-foreground uppercase">{t('approvals.title')}</h2>
+      <h2 className="m-0 px-3 pt-2 pb-1 font-mono text-[11px] font-normal tracking-wider text-muted-foreground uppercase">{t('approvals.title')}</h2>
       <ul className="m-0 max-h-48 list-none space-y-1 overflow-y-auto px-2 pt-0 pb-2">
         {items.map((item) => {
           const ready = Boolean(onDecide) && !item.deciding;
