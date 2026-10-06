@@ -2,7 +2,8 @@
 // plus &select=<agent id> to open a companion (its Audit log tab shows
 // sampleAudit; its Details show samplePopulation and sampleColdWake, and
 // &select=agent_s shows the expired sign-in banner; &select=agent_p shows
-// luna on Auto-Pilot from sampleModes, its banner and the mode switch), or
+// luna on Auto-Pilot from sampleModes, its banner and the mode switch, and
+// luna's Model row from sampleModels; its Launch… form has the Model field), or
 // &open=<path> to open a package as Finder would):
 // the app on the fixed fixtures, without Tauri. Not part of the build.
 import { StrictMode, useState } from 'react';
@@ -12,7 +13,7 @@ import { AuditSourceContext, type AuditSource } from './components/AuditLog';
 import { SoulSourceContext, type SoulSource } from './components/SoulNotices';
 import type { CensusRow } from './model/census';
 import { emptyChat, emptyComposer, mergeIncoming, type ChatState } from './model/chat';
-import { inboxMessage, sampleApprovals, sampleAudit, sampleCensus, sampleColdWake, sampleConnection, sampleModes, samplePopulation, sampleSessionEntries } from './model/fixtures';
+import { inboxMessage, sampleApprovals, sampleAudit, sampleCensus, sampleColdWake, sampleConnection, sampleModels, sampleModes, samplePopulation, sampleSessionEntries } from './model/fixtures';
 import type { ChatApi } from './useChat';
 import '@fontsource/ibm-plex-sans/latin-400.css';
 import '@fontsource/ibm-plex-sans/latin-500.css';
@@ -54,6 +55,7 @@ const audit: AuditSource = async (agentId) => sampleAudit.filter((r) => agentId 
 const population = { ...samplePopulation };
 const wakes = { ...sampleColdWake };
 const modes = { ...sampleModes };
+const models = { ...sampleModels };
 const soulSource: SoulSource = {
   population: async (agentId) => population[agentId] ?? null,
   coldWake: async (agentId) => wakes[agentId] ?? null,
@@ -66,6 +68,8 @@ const soulSource: SoulSource = {
   },
   mode: async (agentId) => modes[agentId] ?? null,
   setMode: async (agentId, mode) => (modes[agentId] = mode),
+  model: async (agentId) => models[agentId] ?? null,
+  setModel: async (agentId, model) => (models[agentId] = { ...(models[agentId] ?? { available: null, listedAt: null }), model }),
 };
 
 function Preview() {

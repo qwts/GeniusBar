@@ -3,6 +3,7 @@ import { displayName, type CensusRow } from '../model/census';
 import { canLaunch, harnessOptions, MAX_HARNESS, preferredHarness, suggestedName, type LaunchState } from '../model/launch';
 import { useI18n } from '../lib/i18n';
 import type { LaunchApi } from '../useLaunch';
+import { ModelField } from './ModelField';
 
 interface LaunchFormProps {
   launcher: LaunchApi;
@@ -29,6 +30,11 @@ interface LaunchFormProps {
   initialComms?: boolean;
   /** Shown as Cancel beside Launch, when the form sits in a dialog. */
   onCancel?: () => void;
+  /**
+   * The census, whose souls' harness model lists (#128) the Model field
+   * offers; without it the field offers the default and "Other…" only.
+   */
+  roster?: readonly CensusRow[];
 }
 
 export function LaunchStatus({ state }: { state: LaunchState }) {
@@ -68,12 +74,13 @@ const field = 'h-9 w-full rounded-md border border-input bg-transparent px-3 tex
 /**
  * Launch form for an existing soul or a soul package, drawn as Lovable's
  * launch dialog (20.03.51) in four steps: the soul, the harness that runs
- * it, the account it runs as, and its agent comms. Harness and account are
- * picked from what GeniusBar knows, and "Other…" still takes any value.
+ * it (and its model, #128, not yet in the design), the account it runs as,
+ * and its agent comms. Harness, model and account are picked from what
+ * GeniusBar knows, and "Other…" still takes any value.
  * One launch at a time; the result stays on screen and is never retried.
  */
 export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness = null, initialPackagePath = '', packageName, preferredHarnesses,
-  checkingPackage = false, packageError: initialPackageError = null, initialComms, onCancel }: LaunchFormProps) {
+  checkingPackage = false, packageError: initialPackageError = null, initialComms, onCancel, roster = [] }: LaunchFormProps) {
   const { t } = useI18n();
   const [account, setAccount] = useState(soul?.account ?? (accounts.length === 1 ? accounts[0] : ''));
   const [otherAccount, setOtherAccount] = useState(!soul && accounts.length === 0);
@@ -82,6 +89,9 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
   const packageHarness = soul ? null : preferredHarness(preferredHarnesses, harnesses);
   const [harness, setHarness] = useState(soul?.harness ?? defaultHarness ?? packageHarness ?? '');
   const [otherHarness, setOtherHarness] = useState(false);
+  // The model (#128): null is the harness default; a new harness starts over.
+  const [model, setModel] = useState<string | null>(null);
+  useEffect(() => setModel(null), [harness]);
   const [name, setName] = useState(soul ? '' : suggestedName(packageName));
   // The package's manifest arrives after the form opened (agent-bot's locate
   // runs behind the Finder open): it prefills what the owner has not typed yet.
@@ -117,6 +127,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
           harness,
           name,
           ...(comms === undefined ? {} : { comms }),
+          ...(model?.trim() ? { model: model.trim() } : {}),
         });
       }}
     >
@@ -159,6 +170,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
             onChange={(e) => { setTouched((was) => ({ ...was, harness: true })); setHarness(e.target.value); }} />
         )}
         <p className="text-xs text-muted-foreground">{t('launch.harnessHint')}</p>
+        <ModelField roster={roster} harness={harness} value={model} onChange={setModel} />
       </fieldset>
       <fieldset>
         <legend className={legend}>{t('launch.step.account')}</legend>

@@ -1,7 +1,7 @@
 import { useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { AlarmClock, ArrowLeft, Github, Info, LogIn, Radio, ShieldCheck, X, Zap } from 'lucide-react';
-import { runtimeMetrics, setSoulComms, soulComms, type RuntimeMetrics, type RuntimeObservation, type SoulColdWake, type SoulComms, type SoulMode, type SoulPopulation } from '../bridge';
+import { AlarmClock, ArrowLeft, Cpu, Github, Info, LogIn, Radio, ShieldCheck, X, Zap } from 'lucide-react';
+import { runtimeMetrics, setSoulComms, soulComms, type RuntimeMetrics, type RuntimeObservation, type SoulColdWake, type SoulComms, type SoulMode, type SoulModel, type SoulPopulation } from '../bridge';
 import {
   availabilityNote,
   displayHarness,
@@ -20,7 +20,8 @@ import { AuditLog } from './AuditLog';
 import { Conversation } from './Conversation';
 import { SoulDudle } from './FleetList';
 import { LaunchForm } from './LaunchForm';
-import { SoulNotices, SoulSourceContext, useSoulMode, useSoulPopulation } from './SoulNotices';
+import { ModelSelect } from './ModelField';
+import { SoulNotices, SoulSourceContext, useSoulMode, useSoulModel, useSoulPopulation } from './SoulNotices';
 
 /** The conversation with this soul, when chat is available (#17). */
 export interface SoulChat {
@@ -278,6 +279,7 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
   const { record: population, loaded: populationLoaded } = useSoulPopulation(soul.agentId, metricsRefresh);
   const signIn = useHarnessSignIn(soul, population, populationLoaded);
   const execution = useSoulMode(soul.agentId, metricsRefresh);
+  const chosenModel = useSoulModel(soul.agentId, metricsRefresh);
   const snapshot = 'unavailable' in metrics ? null : metrics;
   const observations = snapshot?.souls[soul.agentId]?.observations ?? [];
   const errors = snapshot?.errors.filter((error) => error.agentId === soul.agentId) ?? [];
@@ -325,6 +327,13 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
   const context = observations.find((observation) => observation.metric === 'context_used_tokens');
   if (model) rows.push([t('field.model'), metricValue(model)]);
   if (context) rows.push([t('field.context'), metricValue(context)]);
+  // The owner's model choice (#128), beside what the soul last reported;
+  // agent-bot applies it on the next turn. Absent while agent-bot cannot say.
+  if (chosenModel.setting) {
+    rows.push([t('model.choice'), (
+      <ModelControl soul={soul} setting={chosenModel.setting} saving={chosenModel.saving} error={chosenModel.error} onChange={chosenModel.change} />
+    )]);
+  }
   if (comms) {
     rows.push([t('field.managed'), comms.managed ? t('comms.managed') : t('comms.unmanaged')]);
     rows.push([t('field.comms'), (
@@ -395,7 +404,7 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
       {errors.map((error, index) => (
         <p key={index} className="m-0 text-[11px] text-muted-foreground">{t('metrics.collectorError', { source: error.source, message: error.message })}</p>
       ))}
-      {launch && launching && <LaunchForm {...launch} soul={soul} initialComms={comms?.comms} />}
+      {launch && launching && <LaunchForm {...launch} soul={soul} initialComms={comms?.comms} roster={roster} />}
       {launch && !launching && (
         <div className="flex justify-end">
           <button type="button" onClick={() => setLaunching(true)}
@@ -504,6 +513,48 @@ export function ModeRow({ soul, refresh = 0 }: { soul: CensusRow; refresh?: numb
   );
 }
 
+const modelField = 'h-8 w-full rounded-md border border-input bg-transparent px-2 font-sans text-xs text-foreground';
+
+/**
+ * The model select (#128) with its hints, saving line and refusal, as the
+ * Details row and the ⓘ sheet row draw it. No Lovable design yet: it takes
+ * the launch form's Harness select and the mode row's lines.
+ */
+function ModelControl({ soul, setting, saving, error, onChange }:
+  { soul: CensusRow; setting: SoulModel; saving: boolean; error: string | null; onChange: (model: string | null) => void }) {
+  const { t } = useI18n();
+  const name = displayName(soul);
+  return (
+    <>
+      <ModelSelect value={setting.model} choices={setting.available ?? []} label={t('model.choose', { name })}
+        disabled={saving} commit="submit" onChange={onChange} className={modelField} />
+      <span className="block font-sans text-[11px] text-muted-foreground">{t('model.hint', { name })}</span>
+      {setting.available === null && <span className="block font-sans text-[11px] text-muted-foreground">{t('model.unlisted')}</span>}
+      {saving && <span className="block text-[11px] text-muted-foreground" role="status">{t('comms.saving')}</span>}
+      {error && <span className="error block text-[11px]" role="alert">{t('model.failed', { message: error })}</span>}
+    </>
+  );
+}
+
+/**
+ * The model row in the ⓘ sheet (#128), laid out as the Execution mode row.
+ * Absent while agent-bot cannot say.
+ */
+export function ModelRow({ soul, refresh = 0 }: { soul: CensusRow; refresh?: number }) {
+  const { t } = useI18n();
+  const { setting, saving, error, change } = useSoulModel(soul.agentId, refresh);
+  if (!setting) return null;
+  return (
+    <div className="flex items-start gap-3 p-3">
+      <Cpu className="mt-0.5 size-4 text-muted-foreground" aria-hidden />
+      <span className="grid min-w-0 flex-1 gap-1">
+        <span className="block text-sm font-medium">{t('model.label')}</span>
+        <ModelControl soul={soul} setting={setting} saving={saving} error={error} onChange={change} />
+      </span>
+    </div>
+  );
+}
+
 /**
  * The design's harness sign-in and GitHub App rows. The App row is
  * read-only: agent-bot has no per-soul connect or rotate yet.
@@ -538,8 +589,8 @@ export function SoulFactRows({ soul, refresh = 0 }: { soul: CensusRow; refresh?:
 
 /**
  * ⓘ and the Details sheet (Lovable 19.29.22): the soul's actionable rows.
- * Wake on new messages, Agent comms, execution mode, harness sign-in and
- * the GitHub App (read-only), each once agent-bot reports it.
+ * Wake on new messages, Agent comms, execution mode, model (#128), harness
+ * sign-in and the GitHub App (read-only), each once agent-bot reports it.
  */
 export function InfoButton({ soul }: { soul: CensusRow }) {
   const { t } = useI18n();
@@ -575,6 +626,7 @@ export function InfoButton({ soul }: { soul: CensusRow }) {
               <WakeRow soul={soul} />
               <CommsRow soul={soul} />
               <ModeRow soul={soul} />
+              <ModelRow soul={soul} />
               <SoulFactRows soul={soul} />
             </div>
           </section>

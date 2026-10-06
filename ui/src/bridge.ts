@@ -216,6 +216,69 @@ export async function setSoulMode(agentId: string, mode: SoulMode, invokeImpl: t
   return state;
 }
 
+/** One entry of the harness's own model list, as agent-bot cached it. */
+export interface ModelChoice {
+  modelId: string;
+  name: string;
+  description: string | null;
+}
+
+/**
+ * A soul's model (#128), from `soul model <agentId> show --json`. `model` is
+ * the owner's choice, null for the harness default; `available` is the
+ * harness's own list, null until the soul's first turn lists it.
+ */
+export interface SoulModel {
+  model: string | null;
+  available: ModelChoice[] | null;
+  listedAt: string | null;
+}
+
+export function normalizeSoulModel(raw: unknown): SoulModel | null {
+  if (!isRecord(raw) || !('model' in raw)) return null;
+  if (raw.model !== null && (typeof raw.model !== 'string' || raw.model === '')) return null;
+  const available = Array.isArray(raw.available)
+    ? raw.available.filter((m): m is Record<string, unknown> & { modelId: string } =>
+      isRecord(m) && typeof m.modelId === 'string' && m.modelId !== '').map((m) => ({
+      modelId: m.modelId,
+      name: typeof m.name === 'string' && m.name.trim() !== '' ? m.name : m.modelId,
+      description: typeof m.description === 'string' && m.description !== '' ? m.description : null,
+    }))
+    : null;
+  return { model: raw.model, available, listedAt: typeof raw.listedAt === 'string' ? raw.listedAt : null };
+}
+
+/** The soul's model, or null when agent-bot cannot say (outside the app, an older bundle, a refusal). */
+export async function soulModel(agentId: string, invokeImpl: typeof invoke = invoke): Promise<SoulModel | null> {
+  if (!inApp() && invokeImpl === invoke) return null;
+  try {
+    return normalizeSoulModel(await invokeImpl<unknown>('soul_model', { agent: agentId, action: 'show' }));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sets the soul's model, or (null) returns it to the harness default.
+ * agent-bot asks the owner (its consent dialog, Touch ID) and the daemon
+ * applies it on the soul's next turn; a refusal rejects with its reason.
+ */
+export async function setSoulModel(agentId: string, model: string | null, invokeImpl: typeof invoke = invoke): Promise<SoulModel> {
+  let raw: unknown;
+  try {
+    raw = await invokeImpl<unknown>('soul_model', model === null
+      ? { agent: agentId, action: 'clear' }
+      : { agent: agentId, action: 'set', model });
+  } catch (error) {
+    const e = error as { code?: unknown; message?: unknown };
+    throw new BridgeError(typeof e?.code === 'string' ? e.code : 'soul-model-failed',
+      typeof e?.message === 'string' ? e.message : String(error));
+  }
+  const state = normalizeSoulModel(raw);
+  if (!state) throw new BridgeError('soul-model-failed', 'agent-bot gave no model setting');
+  return state;
+}
+
 /** A harness sign-in a daemon turn found missing or expired (#84). */
 export interface HarnessAuthFailure {
   status: 'signed-out' | 'expired';

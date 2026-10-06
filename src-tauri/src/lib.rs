@@ -248,6 +248,7 @@ pub fn run() {
             bridge::soul_cold_wake,
             bridge::soul_population,
             bridge::soul_mode,
+            bridge::soul_model,
             tray::set_tray_badge,
             updates::update_status,
             updates::update_action,

@@ -10,6 +10,7 @@ import {
   launchParams,
   launchProblem,
   MAX_HARNESS,
+  MAX_MODEL,
   MAX_NAME,
   MAX_PACKAGE,
   type LaunchRequest,
@@ -26,6 +27,15 @@ describe('launch requests', () => {
     expect(launchParams(pkg)).toEqual({ account: 'user', package: '/souls/p', harness: 'codex', name: 'Helper' });
     expect(launchParams({ ...pkg, comms: false })).toMatchObject({ comms: false });
     expect(launchParams({ ...soul, comms: true })).toMatchObject({ comms: true });
+  });
+
+  it('sends a chosen model trimmed, and no model key for the harness default (#128)', () => {
+    expect(launchParams({ ...soul, model: ' claude-opus-4-1 ' })).toEqual({ account: 'user', soul: 'agent_1', harness: 'codex', model: 'claude-opus-4-1' });
+    expect('model' in launchParams({ ...soul, model: '  ' })).toBe(false);
+    expect('model' in launchParams({ ...soul, model: undefined })).toBe(false);
+    expect(launchProblem({ ...soul, model: 'm'.repeat(MAX_MODEL) })).toBeNull();
+    expect(launchProblem({ ...soul, model: 'm'.repeat(MAX_MODEL + 1) })).toMatch(/model is longer/);
+    expect(launchProblem({ ...soul, model: 'a\tb' })).toMatch(/control/);
   });
 
   it('enforces the wire contract limits', () => {

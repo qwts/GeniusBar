@@ -21,6 +21,8 @@ function source(overrides: Partial<SoulSource> = {}): SoulSource {
     signIn: vi.fn(async () => true),
     mode: vi.fn(async () => null),
     setMode: vi.fn(async (_id: string, mode: SoulMode) => mode),
+    model: vi.fn(async () => null),
+    setModel: vi.fn(),
     ...overrides,
   };
 }

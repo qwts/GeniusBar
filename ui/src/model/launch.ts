@@ -3,7 +3,7 @@
 // daemon exactly once; nothing here retries a launch.
 //
 // Contract, from agent-comms docs/principal-client.md (Request a daemon
-// launch): launch({ account, soul | package, harness, name?, comms? }) returns
+// launch): launch({ account, soul | package, harness, name?, comms?, model? }) returns
 // { requestId, status: 'pending' }; launchStatus(requestId) returns the same
 // shape until status is 'launched' or 'failed'.
 
@@ -21,6 +21,12 @@ export interface LaunchRequest {
    * soul's soul.json before starting it. Omitted leaves the soul's setting.
    */
   comms?: boolean;
+  /**
+   * The model for the launched soul (#128); agent-bot saves it before the
+   * soul's first turn. Omitted (or blank) is the harness default and sends
+   * no `model` at all, which older agent-comms and agent-bot expect.
+   */
+  model?: string;
 }
 
 /**
@@ -64,6 +70,7 @@ export function preferredHarness(preferred: readonly string[] | null | undefined
 export const MAX_PACKAGE = 4096;
 export const MAX_HARNESS = 64;
 export const MAX_NAME = 128;
+export const MAX_MODEL = 120;
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f]/;
 
@@ -78,19 +85,22 @@ export function launchProblem(request: LaunchRequest): string | null {
   if (request.harness.trim() === '') return 'Enter a harness.';
   if (request.harness.length > MAX_HARNESS) return `The harness name is longer than ${MAX_HARNESS} characters.`;
   if (request.name.length > MAX_NAME) return `The name is longer than ${MAX_NAME} characters.`;
-  const fields = [request.account, request.harness, request.name,
+  if ((request.model ?? '').trim().length > MAX_MODEL) return `The model is longer than ${MAX_MODEL} characters.`;
+  const fields = [request.account, request.harness, request.name, request.model ?? '',
     'package' in request.target ? request.target.package : request.target.soul];
   if (fields.some((f) => CONTROL.test(f))) return 'Remove control characters (such as newlines or tabs).';
   return null;
 }
 
-/** Bridge params for `launch`, with the name omitted when blank. */
+/** Bridge params for `launch`, with the name and the model omitted when blank. */
 export function launchParams(request: LaunchRequest): Record<string, string | boolean> {
   const params: Record<string, string | boolean> = { account: request.account, harness: request.harness.trim() };
   if ('package' in request.target) params.package = request.target.package;
   else params.soul = request.target.soul;
   if (request.name.trim() !== '') params.name = request.name.trim();
   if (typeof request.comms === 'boolean') params.comms = request.comms;
+  const model = request.model?.trim();
+  if (model) params.model = model;
   return params;
 }
 
