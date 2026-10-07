@@ -197,7 +197,7 @@ export function FloatingDudle({ lead, state, paused = false, computerUser, compu
  * STOP_SETTLE_MS passes). A rejection shows its message; one that says the
  * bundle has no `soul stop` hides Stop instead.
  */
-function useStop(stopper: Stopper | undefined, computerUse: ReadonlySet<string> | undefined) {
+export function useStop(stopper: Stopper | undefined, computerUse: ReadonlySet<string> | undefined) {
   const [supported, setSupported] = useState(false);
   const [phase, setPhase] = useState<StopPhase>({ phase: 'ready' });
   const live = useRef({ phase, computerUse, stopper });
@@ -292,7 +292,7 @@ function useLeadComputerUse(sw: ComputerUseSwitch | undefined) {
  * window listens in capture so a menu's own Escape handling does not hide
  * the hold.
  */
-function useHoldEscape(active: boolean, halt: () => Promise<void>) {
+export function useHoldEscape(active: boolean, halt: () => Promise<void>) {
   useEffect(() => {
     if (!active) return;
     let timer: ReturnType<typeof setTimeout> | undefined;

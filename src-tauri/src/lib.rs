@@ -385,6 +385,7 @@ pub fn run() {
             open_desktop,
             windows::open_surface,
             windows::sync_team_windows,
+            windows::sync_perimeter,
             windows::shell_log,
             bridge::bridge,
             bridge::setup,

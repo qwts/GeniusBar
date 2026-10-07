@@ -3,7 +3,7 @@
 // query. No surface (or `tray` / `window`) keeps today's popup and desktop.
 import type { SessionTab } from '../components/CompanionSession';
 
-export type Surface = 'tray' | 'window' | 'team' | 'session' | 'audit' | 'customize' | 'launch';
+export type Surface = 'tray' | 'window' | 'team' | 'session' | 'audit' | 'customize' | 'launch' | 'perimeter' | 'halt';
 /** The surfaces the popup and the team cards open with `open_surface`. */
 export type WindowSurface = 'session' | 'audit' | 'customize' | 'launch';
 /** A session tab as the URL names it: the delegation tree is `delegation`. */
@@ -21,7 +21,7 @@ export interface SurfaceQuery {
   package: string | null;
 }
 
-const SURFACES: readonly Surface[] = ['tray', 'window', 'team', 'session', 'audit', 'customize', 'launch'];
+const SURFACES: readonly Surface[] = ['tray', 'window', 'team', 'session', 'audit', 'customize', 'launch', 'perimeter', 'halt'];
 
 /** The URL's tab to the session's own name for it; null for anything else. */
 export function sessionTabOf(tab: string | null): SessionTab | null {
