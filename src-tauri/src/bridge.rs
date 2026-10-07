@@ -190,10 +190,20 @@ pub fn start<R: Runtime>(app: AppHandle<R>) {
                         }
                     }
                 }
-                Err(error) => eprintln!("bridge failed to start: {error}"),
+                Err(error) => {
+                    crate::windows::log_line(&app, &format!("bridge failed to start: {error}"))
+                }
             }
             let bridge = app.state::<Bridge>();
             bridge.child.lock().unwrap().take();
+            crate::windows::log_line(
+                &app,
+                &format!(
+                    "bridge exited after {} s; restarting in {} s",
+                    started.elapsed().as_secs(),
+                    backoff.as_secs()
+                ),
+            );
             bridge.fail_all(&BridgeError::new("bridge-restarting", "the bridge exited"));
             if started.elapsed() >= HEALTHY_RUN {
                 backoff = RESTART_MIN;
@@ -206,7 +216,8 @@ pub fn start<R: Runtime>(app: AppHandle<R>) {
 
 /// The web view's single entry point: `invoke('bridge', { method, params })`.
 #[tauri::command]
-pub async fn bridge(
+pub async fn bridge<R: Runtime>(
+    app: AppHandle<R>,
     state: State<'_, Bridge>,
     method: String,
     params: Option<Value>,
@@ -227,6 +238,7 @@ pub async fn bridge(
     };
     if !written {
         state.pending.lock().unwrap().remove(&id);
+        crate::windows::log_line(&app, &format!("bridge {method}: the bridge is not running"));
         return Err(BridgeError::new(
             "bridge-unavailable",
             "the bridge is not running",
@@ -237,6 +249,13 @@ pub async fn bridge(
         Ok(Err(_)) => Err(BridgeError::new("bridge-restarting", "the bridge exited")),
         Err(_) => {
             state.pending.lock().unwrap().remove(&id);
+            crate::windows::log_line(
+                &app,
+                &format!(
+                    "bridge {method}: no answer in {} s",
+                    REQUEST_TIMEOUT.as_secs()
+                ),
+            );
             Err(BridgeError::new(
                 "bridge-timeout",
                 "the bridge did not answer",
