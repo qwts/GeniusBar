@@ -3952,7 +3952,6 @@ impl RevisionCopy {
     }
 
     fn under(parent: &std::path::Path) -> Result<Self, BridgeError> {
-        use std::os::unix::fs::DirBuilderExt;
         // The clock alone is not unique: two edits in one process within the
         // clock's resolution (the test suite on CI) named the same directory
         // and the second failed with EEXIST. A per-process counter makes
@@ -3967,8 +3966,15 @@ impl RevisionCopy {
             "geniusbar-revision-{}-{nanos}-{serial}",
             std::process::id()
         ));
-        std::fs::DirBuilder::new()
-            .mode(0o700)
+        let mut builder = std::fs::DirBuilder::new();
+        // On Windows the temp directory is already the user's own
+        // (ADR-0046): a plain create.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        builder
             .create(&dir)
             .map_err(|e| BridgeError::new("soul-revision-failed", &e.to_string()))?;
         Ok(Self(dir))
@@ -4535,6 +4541,7 @@ mod soul_revision_edit_tests {
         assert!(error.message.contains("generated"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn refuses_a_symlink_in_the_package() {
         let fixture = Fixture::new();
@@ -4963,15 +4970,11 @@ pub async fn identity_app_open(url: String) -> Result<(), BridgeError> {
             "only the App creation page or github.com can be opened",
         ));
     }
-    let status = tauri::async_runtime::spawn_blocking(move || {
-        std::process::Command::new("/usr/bin/open")
-            .arg(url)
-            .status()
-    })
-    .await
-    .map_err(|e| BridgeError::new("identity-app-open-failed", &e.to_string()))?
-    .map_err(|e| BridgeError::new("identity-app-open-failed", &e.to_string()))?;
-    if status.success() {
+    let opened = tauri::async_runtime::spawn_blocking(move || open_in_browser(url))
+        .await
+        .map_err(|e| BridgeError::new("identity-app-open-failed", &e.to_string()))?
+        .map_err(|e| BridgeError::new("identity-app-open-failed", &e.to_string()))?;
+    if opened {
         Ok(())
     } else {
         Err(BridgeError::new(
@@ -4979,6 +4982,23 @@ pub async fn identity_app_open(url: String) -> Result<(), BridgeError> {
             "the browser could not be opened",
         ))
     }
+}
+
+/// Hands an allow-listed URL to the system opener; true when it took it.
+#[cfg(unix)]
+fn open_in_browser(url: String) -> std::io::Result<bool> {
+    std::process::Command::new("/usr/bin/open")
+        .arg(url)
+        .status()
+        .map(|status| status.success())
+}
+
+/// The shell plugin's own opener (the `open` crate): PowerShell's
+/// `Start-Process` with the URL in an environment variable, so no `cmd`
+/// ever parses it.
+#[cfg(windows)]
+fn open_in_browser(url: String) -> std::io::Result<bool> {
+    open::that(url).map(|()| true)
 }
 
 /// The creates this launch started or found again, by handle. Each is an
@@ -5059,11 +5079,16 @@ impl CreateRecord {
     /// create: a pid from a record can have been reused since, and a signal
     /// to someone else's process is worse than a listener left to time out.
     fn kill(&self) {
+        #[cfg(unix)]
         if let Ok(pid) = i32::try_from(self.pid) {
             if pid_alive(self.pid) && pid_runs_create(self.pid) {
                 // SAFETY: a plain signal to a pid this app recorded and checked.
                 unsafe { libc::kill(pid, libc::SIGTERM) };
             }
+        }
+        #[cfg(windows)]
+        if pid_alive(self.pid) && pid_runs_create(self.pid) {
+            terminate_process(self.pid);
         }
     }
 
@@ -5211,7 +5236,8 @@ fn node_sidecar() -> Result<std::path::PathBuf, String> {
     } else {
         dir
     };
-    Ok(dir.join("node"))
+    // Tauri places the sidecar beside the exe as `node.exe` on Windows.
+    Ok(dir.join(if cfg!(windows) { "node.exe" } else { "node" }))
 }
 
 /// Runs `node argv` in its own session, its output in the record's files,
@@ -5220,7 +5246,6 @@ fn spawn_create(
     dir: &std::path::Path,
     argv: Vec<std::ffi::OsString>,
 ) -> Result<CreateRecord, String> {
-    use std::os::unix::{fs::OpenOptionsExt, process::CommandExt};
     let id = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| e.to_string())?
@@ -5228,13 +5253,16 @@ fn spawn_create(
         .to_string();
     let mut record = CreateRecord::new(dir, &id, 0);
     let open = |path: &std::path::Path| {
-        std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .mode(0o600)
-            .open(path)
-            .map_err(|e| e.to_string())
+        let mut options = std::fs::OpenOptions::new();
+        options.create(true).truncate(true).write(true);
+        // The record directory is the user's own on Windows (ADR-0046):
+        // no mode to set.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        options.open(path).map_err(|e| e.to_string())
     };
     let out = open(&record.out)?;
     let err = open(&record.err)?;
@@ -5246,11 +5274,21 @@ fn spawn_create(
         .stdout(out)
         .stderr(err);
     // SAFETY: setsid only, between fork and exec.
+    #[cfg(unix)]
     unsafe {
+        use std::os::unix::process::CommandExt;
         command.pre_exec(|| {
             libc::setsid();
             Ok(())
         });
+    }
+    // Its own process group with no console, so quitting GeniusBar (or a
+    // Ctrl-C in a console that started it) leaves the create running.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        use windows_sys::Win32::System::Threading::{CREATE_NEW_PROCESS_GROUP, DETACHED_PROCESS};
+        command.creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
     }
     let mut child = command.spawn().map_err(|e| {
         record.remove();
@@ -5277,6 +5315,7 @@ fn spawn_create(
 
 /// Whether `pid` is a process: signal 0 touches nothing, and EPERM says it
 /// is there and someone else's.
+#[cfg(unix)]
 fn pid_alive(pid: u32) -> bool {
     let Ok(pid) = i32::try_from(pid) else {
         return false;
@@ -5289,13 +5328,81 @@ fn pid_alive(pid: u32) -> bool {
     sent == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
+/// Whether `pid` is a process: a query-only handle whose exit code is
+/// still `STILL_ACTIVE`, and access denied says it is there and someone
+/// else's.
+#[cfg(windows)]
+fn pid_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, GetLastError, ERROR_ACCESS_DENIED, STILL_ACTIVE,
+    };
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    if pid == 0 {
+        return false;
+    }
+    // SAFETY: a query-only handle to a pid, closed before returning.
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return GetLastError() == ERROR_ACCESS_DENIED;
+        }
+        let mut code = 0u32;
+        let known = GetExitCodeProcess(handle, &mut code) != 0;
+        CloseHandle(handle);
+        known && code == STILL_ACTIVE as u32
+    }
+}
+
+/// Ends `pid`, which `CreateRecord::kill` has checked still runs the create.
+#[cfg(windows)]
+fn terminate_process(pid: u32) {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+    // SAFETY: a terminate-only handle to a pid this app recorded and
+    // checked, closed before returning.
+    unsafe {
+        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if !handle.is_null() {
+            TerminateProcess(handle, 1);
+            CloseHandle(handle);
+        }
+    }
+}
+
 /// Whether `pid`'s command line is an `agent-bot identity app create`, as
 /// `ps` reports it; false for any other process, or when `ps` cannot say.
+#[cfg(unix)]
 fn pid_runs_create(pid: u32) -> bool {
     std::process::Command::new("/bin/ps")
         .args(["-p", &pid.to_string(), "-o", "command="])
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+        .is_some_and(|command| {
+            command.contains("agent-bot.mjs") && command.contains(" identity app create")
+        })
+}
+
+/// The same question through `Get-CimInstance Win32_Process`, the stock
+/// tool that prints a command line (`tasklist` does not; `wmic` is gone).
+/// `pid` is a number, so nothing of it is script text.
+#[cfg(windows)]
+fn pid_runs_create(pid: u32) -> bool {
+    use std::os::windows::process::CommandExt;
+    use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
+    std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command"])
+        .arg(format!(
+            "(Get-CimInstance Win32_Process -Filter 'ProcessId = {pid}').CommandLine"
+        ))
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .ok()
         .filter(|output| output.status.success())
@@ -5365,32 +5472,82 @@ fn iso_time(time: std::time::SystemTime) -> String {
 }
 
 /// Lets the owner pick a private key file in the native open dialog.
-/// `prompt` goes to AppleScript as an argument, never as script text.
+/// `prompt` goes to the dialog script as an argument, never as script text.
 async fn pick_key_file(prompt: String) -> Result<String, BridgeError> {
-    let output = tauri::async_runtime::spawn_blocking(move || {
-        std::process::Command::new("/usr/bin/osascript")
-            .args([
-                "-e",
-                "on run argv",
-                "-e",
-                "POSIX path of (choose file with prompt (item 1 of argv) of type {\"pem\"})",
-                "-e",
-                "end run",
-            ])
-            .arg(prompt)
-            .output()
-    })
-    .await
-    .map_err(|e| BridgeError::new("identity-app-key-unavailable", &e.to_string()))?
-    .map_err(|e| BridgeError::new("identity-app-key-unavailable", &e.to_string()))?;
+    let output = tauri::async_runtime::spawn_blocking(move || key_file_dialog(prompt))
+        .await
+        .map_err(|e| BridgeError::new("identity-app-key-unavailable", &e.to_string()))?
+        .map_err(|e| BridgeError::new("identity-app-key-unavailable", &e.to_string()))?;
     picked_key_file(output.status.success(), &output.stdout, &output.stderr)
 }
 
+/// AppleScript's `choose file`, filtered to `.pem`.
+#[cfg(unix)]
+fn key_file_dialog(prompt: String) -> std::io::Result<std::process::Output> {
+    std::process::Command::new("/usr/bin/osascript")
+        .args([
+            "-e",
+            "on run argv",
+            "-e",
+            "POSIX path of (choose file with prompt (item 1 of argv) of type {\"pem\"})",
+            "-e",
+            "end run",
+        ])
+        .arg(prompt)
+        .output()
+}
+
+/// The Windows dialog: `System.Windows.Forms.OpenFileDialog` filtered to
+/// `.pem`, the chosen path on stdout, and on cancel the `-128` line
+/// AppleScript prints, so `picked_key_file` reads both the same way.
+#[cfg(windows)]
+const KEY_FILE_DIALOG_PS1: &str = r#"Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.OpenFileDialog
+$dialog.Title = [string]$args[0]
+$dialog.Filter = 'Private key (*.pem)|*.pem'
+$dialog.Multiselect = $false
+$dialog.CheckFileExists = $true
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+    [Console]::Out.WriteLine($dialog.FileName)
+    exit 0
+}
+[Console]::Error.WriteLine('User canceled. (-128)')
+exit 1
+"#;
+
+/// PowerShell runs the script from a file in the user's own temp
+/// directory, so the prompt is `-File`'s argument (`$args[0]`), never
+/// script text (`-Command` would splice it in).
+#[cfg(windows)]
+fn key_file_dialog(prompt: String) -> std::io::Result<std::process::Output> {
+    use std::os::windows::process::CommandExt;
+    use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
+    let script =
+        std::env::temp_dir().join(format!("geniusbar-pick-key-{}.ps1", std::process::id()));
+    std::fs::write(&script, KEY_FILE_DIALOG_PS1)?;
+    let output = std::process::Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Sta",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+        ])
+        .arg(&script)
+        .arg(prompt)
+        .stdin(std::process::Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+    let _ = std::fs::remove_file(&script);
+    output
+}
+
 /// The chosen path, or `identity-app-cancelled` when the owner closed the
-/// dialog (AppleScript error -128).
+/// dialog (AppleScript error -128, which the Windows script repeats).
 fn picked_key_file(ok: bool, stdout: &[u8], stderr: &[u8]) -> Result<String, BridgeError> {
     let path = last_line(stdout);
-    if ok && path.starts_with('/') {
+    if ok && std::path::Path::new(&path).is_absolute() {
         return Ok(path);
     }
     if last_line(stderr).contains("-128") {

@@ -1294,6 +1294,7 @@ dependencies = [
  "objc2-app-kit",
  "objc2-foundation",
  "objc2-web-kit",
+ "open",
  "serde",
  "serde_json",
  "tauri",
@@ -1303,6 +1304,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

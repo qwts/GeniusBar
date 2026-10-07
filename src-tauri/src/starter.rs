@@ -71,6 +71,11 @@ pub fn read_starter(package: &Path, account: &str, dev_tools: bool) -> Result<St
 /// directory only once they or Xcode are installed). Elsewhere git is the
 /// user's own concern.
 fn dev_tools_installed(resources: &Path) -> bool {
+    // Windows has no Apple tools: the bundled MinGit is the whole answer
+    // (ADR-0046 decision 6).
+    if cfg!(windows) {
+        return bundled_git_works(resources);
+    }
     if !cfg!(target_os = "macos") {
         return true;
     }
@@ -87,7 +92,14 @@ fn dev_tools_installed(resources: &Path) -> bool {
 /// helper path it names must both be there. A development build without
 /// them (no `build-git.mjs` run) falls back to the command line tools.
 pub fn bundled_git_works(resources: &Path) -> bool {
-    std::process::Command::new(resources.join("bin").join("git"))
+    // `bin\git.cmd` only forwards to MinGit's `git\cmd\git.exe`, and a
+    // `.cmd` cannot be started without `cmd`, so Windows asks git itself.
+    let git = if cfg!(windows) {
+        resources.join("git").join("cmd").join("git.exe")
+    } else {
+        resources.join("bin").join("git")
+    };
+    std::process::Command::new(git)
         .arg("--version")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -115,7 +127,9 @@ fn dev_tools_installer_open() -> bool {
 #[tauri::command]
 pub fn starter_soul<R: Runtime>(app: AppHandle<R>) -> Result<Starter, String> {
     let resources = app.path().resource_dir().map_err(|e| e.to_string())?;
-    let account = std::env::var("USER").unwrap_or_default();
+    // Windows names the account in USERNAME.
+    let account =
+        std::env::var(if cfg!(windows) { "USERNAME" } else { "USER" }).unwrap_or_default();
     let dev_tools = dev_tools_installed(&resources);
     let mut starter = read_starter(
         &resources.join("souls").join("starter.soul"),
@@ -129,6 +143,7 @@ pub fn starter_soul<R: Runtime>(app: AppHandle<R>) -> Result<Starter, String> {
 /// Opens Apple's own installer for the command line tools. It runs on its
 /// own; the web view polls `starter_soul` until the tools are there or the
 /// installer has closed.
+#[cfg(not(windows))]
 #[tauri::command]
 pub fn install_dev_tools() -> Result<(), String> {
     std::process::Command::new("/usr/bin/xcode-select")
@@ -136,6 +151,18 @@ pub fn install_dev_tools() -> Result<(), String> {
         .spawn()
         .map(drop)
         .map_err(|e| e.to_string())
+}
+
+/// Windows has nothing to install: git ships inside the bundle (ADR-0046
+/// decision 6), so a build without it is a packaging fault, which the
+/// message says (the web view shows it beside Retry).
+#[cfg(windows)]
+#[tauri::command]
+pub fn install_dev_tools() -> Result<(), String> {
+    Err(
+        "this GeniusBar build is missing its bundled git (resources\\git); reinstall GeniusBar"
+            .into(),
+    )
 }
 
 #[cfg(test)]

@@ -221,7 +221,8 @@ pub async fn open_surface(
     }
     let ((width, height), (min_width, min_height)) = kind.size();
     let tray = *app.state::<Mode>() == Mode::Tray;
-    // A window needs the regular policy for keyboard focus and a Dock icon.
+    // A window needs the regular policy for keyboard focus and a Dock icon;
+    // Windows has no policy to switch, a window simply joins the taskbar.
     #[cfg(target_os = "macos")]
     if tray {
         let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
@@ -236,7 +237,7 @@ pub async fn open_surface(
         .center()
         .focused(true);
     // The traffic lights float over the page's own header (the design draws
-    // the title bar itself).
+    // the title bar itself); Windows keeps its own frame.
     #[cfg(target_os = "macos")]
     let builder = builder
         .title_bar_style(tauri::TitleBarStyle::Overlay)
@@ -262,7 +263,7 @@ pub async fn open_surface(
     window.set_focus().map_err(|e| e.to_string())
 }
 
-/// Back to a menubar-only app: no Dock icon.
+/// Back to a menubar-only app: no Dock icon (nothing to undo on Windows).
 fn accessory(app: &tauri::AppHandle) {
     #[cfg(target_os = "macos")]
     let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -309,14 +310,15 @@ pub fn plan<'a>(open: &[String], wanted: &'a [TeamSpec]) -> (Vec<&'a TeamSpec>, 
 }
 
 /// Makes the desktop hold exactly these team windows (#223). True when the
-/// shell does this at all: macOS, tray mode. Elsewhere the page keeps its
-/// in-window desktop.
+/// shell does this at all: macOS or Windows (a card sits on the desktop
+/// through `always_on_bottom`, ADR-0046 decision 7), tray mode. Elsewhere
+/// the page keeps its in-window desktop.
 #[tauri::command]
 pub async fn sync_team_windows(
     app: tauri::AppHandle,
     teams: Vec<TeamSpec>,
 ) -> Result<bool, String> {
-    if !cfg!(target_os = "macos") || *app.state::<Mode>() != Mode::Tray {
+    if !cfg!(any(target_os = "macos", windows)) || *app.state::<Mode>() != Mode::Tray {
         return Ok(false);
     }
     let open: Vec<String> = app.webview_windows().keys().cloned().collect();
@@ -399,6 +401,8 @@ pub async fn sync_team_windows(
 /// in-popup perimeter (another platform, or the in-window desktop).
 #[tauri::command]
 pub async fn sync_perimeter(app: tauri::AppHandle, on: bool) -> Result<bool, String> {
+    // macOS only: the perimeter follows the daemon's computer-use seam,
+    // which has no Windows implementation yet.
     if !cfg!(target_os = "macos") || *app.state::<Mode>() != Mode::Tray {
         return Ok(false);
     }
