@@ -8,6 +8,10 @@
       "win-x64": "158f7685b44de51f6c0df1d153526cbcd3e1bc739a8dfc607721cef75de9e541"
     }
   },
+  "git": {
+    "version": "2.56.0",
+    "sha256": "26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3"
+  },
   "components": {
     "agent-comms": {
       "repo": "qwts/agent-comms",

@@ -107,6 +107,16 @@ jobs:
       # into the universal sidecar.
       - name: Fetch bundled components
         run: node scripts/fetch-components.mjs --target universal-apple-darwin
+      # The bundled git (#102) is built from the pinned tarball, one slice per
+      # architecture; a build is kept between runs by its pin, and remade
+      # only when components.json moves it.
+      - name: Restore the bundled git build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/git
+          key: git-${{ hashFiles('components.json') }}
+      - name: Build bundled git
+        run: node scripts/build-git.mjs --target universal-apple-darwin
 
       - name: Select signing mode
         id: signing
@@ -233,6 +243,32 @@ jobs:
           team() { codesign --display --verbose=2 "$1" 2>&1 | sed -n 's/^TeamIdentifier=//p'; }
           test "$(team "$keyd")" = "$(team "$APP")"
           "$keyd" --version
+
+      # The bundled git (#102): universal, signed with the app like node, and
+      # working through the shim the souls get, with its helper and templates.
+      - name: Verify bundled git
+        env:
+          APP: ${{ steps.bundles.outputs.app }}
+        run: |
+          set -euo pipefail
+          for bin in git git-remote-https; do
+            lipo "$APP/Contents/MacOS/$bin" -verify_arch arm64 x86_64
+            codesign --verify --strict --verbose=2 "$APP/Contents/MacOS/$bin"
+          done
+          team() { codesign --display --verbose=2 "$1" 2>&1 | sed -n 's/^TeamIdentifier=//p'; }
+          test "$(team "$APP/Contents/MacOS/git")" = "$(team "$APP")"
+          shim="$APP/Contents/Resources/bin/git"
+          test -x "$shim"
+          "$shim" --version | grep -F "git version $(node -p 'require("./components.json").git.version')"
+          test "$("$shim" --exec-path)" = "$APP/Contents/MacOS"
+          test -f "$APP/Contents/Resources/git-templates/info/exclude"
+          scratch=$(mktemp -d)
+          PATH="$APP/Contents/Resources/bin:/usr/bin:/bin" git init -q "$scratch/repo"
+          test -f "$scratch/repo/.git/info/exclude"
+          PATH="$APP/Contents/Resources/bin:/usr/bin:/bin" git -C "$scratch/repo" -c user.name=ci -c user.email=ci@example.invalid commit -q --allow-empty -m init
+          PATH="$APP/Contents/Resources/bin:/usr/bin:/bin" git -C "$scratch/repo" worktree add -q "$scratch/wt"
+          PATH="$APP/Contents/Resources/bin:/usr/bin:/bin" git clone -q --depth 1 https://github.com/qwts/agent-sop "$scratch/sop"
+          rm -rf "$scratch"
 
       - name: Verify Developer ID signature, Gatekeeper, and notarization
         if: steps.signing.outputs.signed == 'true'
