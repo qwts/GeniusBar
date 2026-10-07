@@ -55,7 +55,9 @@
       "../souls/geniusbar.soul/": "souls/geniusbar.soul/",
       "../bin/agent-comms": "bin/agent-comms",
       "../bin/agent-bot": "bin/agent-bot",
-      "../bin/node": "bin/node"
+      "../bin/node": "bin/node",
+      "../bin/git": "bin/git",
+      "resources/git-templates/": "git-templates/"
     },
     "fileAssociations": [
       {

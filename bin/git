@@ -1,0 +1,7 @@
+#!/bin/sh
+# GeniusBar's git for the souls it runs (#102): the bundled build, so a new
+# Mac needs no Command Line Tools install. The helpers sit beside the app's
+# executable, where Tauri signs them, and the init templates among the
+# resources; git is told where with its own variables.
+here=$(cd "$(dirname "$0")" && pwd -P)
+GIT_EXEC_PATH="$here/../../MacOS" GIT_TEMPLATE_DIR="$here/../git-templates" exec "$here/../../MacOS/git" "$@"

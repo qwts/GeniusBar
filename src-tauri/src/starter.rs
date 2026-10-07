@@ -66,14 +66,30 @@ pub fn read_starter(package: &Path, account: &str, dev_tools: bool) -> Result<St
     })
 }
 
-/// `xcode-select -p` names a developer directory only once the command line
-/// tools or Xcode are installed; elsewhere git is the user's own concern.
-fn dev_tools_installed() -> bool {
+/// Whether git works: the bundled git (#102), which the souls' PATH names
+/// first, or Apple's command line tools (`xcode-select -p` names a developer
+/// directory only once they or Xcode are installed). Elsewhere git is the
+/// user's own concern.
+fn dev_tools_installed(resources: &Path) -> bool {
     if !cfg!(target_os = "macos") {
         return true;
     }
-    std::process::Command::new("/usr/bin/xcode-select")
-        .arg("-p")
+    bundled_git_works(resources)
+        || std::process::Command::new("/usr/bin/xcode-select")
+            .arg("-p")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+}
+
+/// `bin/git --version` through the shim the souls get: the sidecar and the
+/// helper path it names must both be there. A development build without
+/// them (no `build-git.mjs` run) falls back to the command line tools.
+pub fn bundled_git_works(resources: &Path) -> bool {
+    std::process::Command::new(resources.join("bin").join("git"))
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
@@ -100,7 +116,7 @@ fn dev_tools_installer_open() -> bool {
 pub fn starter_soul<R: Runtime>(app: AppHandle<R>) -> Result<Starter, String> {
     let resources = app.path().resource_dir().map_err(|e| e.to_string())?;
     let account = std::env::var("USER").unwrap_or_default();
-    let dev_tools = dev_tools_installed();
+    let dev_tools = dev_tools_installed(&resources);
     let mut starter = read_starter(
         &resources.join("souls").join("starter.soul"),
         &account,
@@ -138,6 +154,23 @@ mod tests {
             starter.harnesses.first().map(String::as_str),
             Some("claude")
         );
+    }
+
+    #[test]
+    fn bundled_git_is_absent_without_the_sidecar() {
+        let resources =
+            std::env::temp_dir().join(format!("geniusbar-no-git-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&resources);
+        std::fs::create_dir_all(resources.join("bin")).unwrap();
+        assert!(!bundled_git_works(&resources));
+        // The shim is there but the sidecar it execs is not.
+        std::fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../bin/git"),
+            resources.join("bin").join("git"),
+        )
+        .unwrap();
+        assert!(!bundled_git_works(&resources));
+        std::fs::remove_dir_all(resources).unwrap();
     }
 
     #[test]
