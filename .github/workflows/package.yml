@@ -260,7 +260,8 @@ jobs:
           shim="$APP/Contents/Resources/bin/git"
           test -x "$shim"
           "$shim" --version | grep -F "git version $(node -p 'require("./components.json").git.version')"
-          test "$("$shim" --exec-path)" = "$APP/Contents/MacOS"
+          # git prints the path the shim set, unnormalized; $APP is relative to the job.
+          test "$(cd "$("$shim" --exec-path)" && pwd -P)" = "$(cd "$APP/Contents/MacOS" && pwd -P)"
           test -f "$APP/Contents/Resources/git-templates/info/exclude"
           scratch=$(mktemp -d)
           PATH="$APP/Contents/Resources/bin:/usr/bin:/bin" git init -q "$scratch/repo"
