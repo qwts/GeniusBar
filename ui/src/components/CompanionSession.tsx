@@ -4,7 +4,6 @@ import { ArrowLeft, Cpu, Github, Info, LogIn, MousePointer2, Palette, Radio, Shi
 import { computerUseSupported, runtimeMetrics, setSoulComms, soulComms, type ComputerUseSwitch, type RuntimeMetrics, type RuntimeObservation, type SoulColdWake, type SoulComms, type SoulMode, type SoulModel, type SoulPopulation } from '../bridge';
 import {
   availabilityNote,
-  displayHarness,
   roleAndHarness,
   displayName,
   parentDisplayName,
@@ -13,6 +12,7 @@ import {
   type SoulNode,
 } from '../model/census';
 import type { ApprovalDecision, ChatEntry, Composer } from '../model/chat';
+import { soulHarnessLabel } from '../model/launch';
 import { dudleFor } from '../model/dudle';
 import { useI18n, type Translate } from '../lib/i18n';
 import type { LaunchApi } from '../useLaunch';
@@ -371,8 +371,9 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
     void runtimeMetrics().then((result) => { if (active) setMetrics(result); });
     return () => { active = false; };
   }, [soul.agentId, metricsRefresh]);
-  const { comms, saving: commsSaving, error: commsError, toggle: toggleComms } = useSoulComms(soul.agentId, metricsRefresh);
-  const { wake, saving: wakeSaving, error: wakeError, toggle: toggleWake } = useSoulColdWake(soul.agentId, metricsRefresh);
+  // As the design's tab, these read as text; their controls live in the ⓘ sheet.
+  const { comms } = useSoulComms(soul.agentId, metricsRefresh);
+  const { wake } = useSoulColdWake(soul.agentId, metricsRefresh);
   const populationRead = useSoulPopulation(soul.agentId, metricsRefresh);
   const { record: population, loaded: populationLoaded } = populationRead;
   const signIn = useHarnessSignIn(soul, population, populationLoaded);
@@ -403,12 +404,12 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
   };
   const note = availabilityNote(soul);
   const parentName = parentDisplayName(soul, roster);
-  let parent: ReactNode = t('none');
+  let parent: ReactNode = '—';
   if (soul.parent !== null) {
     parent = parentName ? (
       <>
         {parentName}
-        <span className="muted small block font-mono">{soul.parent}</span>
+        <span className="block text-[11px] text-muted-foreground">{soul.parent}</span>
       </>
     ) : (
       soul.parent
@@ -418,7 +419,7 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
   const rows: [string, ReactNode][] = [
     [t('field.agentId'), <span className="selectable">{soul.agentId}</span>],
     [t('field.account'), soul.account],
-    [t('field.harness'), displayHarness(soul)],
+    [t('field.harness'), soulHarnessLabel(soul)],
     [t('field.presence'), t(`presence.${soul.presence}`)],
     [t('field.parent'), parent],
     [t('field.unacked'), String(soul.unacked)],
@@ -445,70 +446,15 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
   if (context) rows.push([t('field.context'), metricValue(context)]);
   // The owner's model choice (#128), beside what the soul last reported;
   // agent-bot applies it on the next turn. Absent while agent-bot cannot say.
-  if (chosenModel.setting) {
-    rows.push([t('model.choice'), (
-      <ModelControl soul={soul} setting={chosenModel.setting} saving={chosenModel.saving} error={chosenModel.error} onChange={chosenModel.change} />
-    )]);
-  }
-  if (comms) {
-    rows.push([t('field.managed'), comms.managed ? t('comms.managed') : t('comms.unmanaged')]);
-    rows.push([t('field.comms'), (
-      <>
-        <label className="inline-flex items-center gap-2">
-          <input type="checkbox" role="switch" checked={comms.comms} disabled={comms.running || commsSaving}
-            aria-label={t('comms.toggle', { name: displayName(soul) })}
-            onChange={(e) => toggleComms(e.target.checked)} />
-          <span>{comms.comms ? t('comms.on') : t('comms.off')}</span>
-        </label>
-        {comms.running && <span className="block text-[11px] text-muted-foreground">{t('comms.stopFirst')}</span>}
-        {commsSaving && <span className="block text-[11px] text-muted-foreground" role="status">{t('comms.saving')}</span>}
-        {commsError && <span className="error block text-[11px]" role="alert">{t('comms.failed', { message: commsError })}</span>}
-      </>
-    )]);
-  }
-  // Details rows from the Lovable design (#122), each shown once agent-bot
-  // can say. Wake is locked while the soul runs, as comms is.
-  if (wake) {
-    const locked = comms?.running === true;
-    rows.push([t('details.wake'), (
-      <>
-        <label className="inline-flex items-center gap-2">
-          <input type="checkbox" role="switch" checked={wake.on} disabled={locked || wakeSaving}
-            aria-label={t('details.wakeToggle', { name: displayName(soul) })}
-            onChange={(e) => toggleWake(e.target.checked)} />
-          <span>{wake.on ? t('comms.on') : t('comms.off')}</span>
-        </label>
-        {locked && <span className="block text-[11px] text-muted-foreground">{t('comms.stopFirst')}</span>}
-        {wakeSaving && <span className="block text-[11px] text-muted-foreground" role="status">{t('comms.saving')}</span>}
-        {wakeError && <span className="error block text-[11px]" role="alert">{t('details.wakeFailed', { message: wakeError })}</span>}
-      </>
-    )]);
-  }
-  // Execution mode (#122): not locked while the soul runs; agent-bot applies
-  // it on the next permission request.
-  if (execution.mode) {
-    rows.push([t('mode.label'), (
-      <>
-        <ModeSwitch soul={soul} mode={execution.mode} saving={execution.saving} onChange={execution.change} />
-        {execution.mode === 'safe' && <span className="block text-[11px] text-muted-foreground">{t('mode.safeHint')}</span>}
-        {execution.saving && <span className="block text-[11px] text-muted-foreground" role="status">{t('comms.saving')}</span>}
-        {execution.error && <span className="error block text-[11px]" role="alert">{t('mode.failed', { message: execution.error })}</span>}
-      </>
-    )]);
-  }
-  // Computer use (#122, no Lovable screen): beside Execution mode, in its
-  // style; agent-bot denies the soul's computer-use proposals while off.
-  if (computer.on !== null) {
-    rows.push([t('computerUse.label'), (
-      <>
-        <ComputerUseToggle soul={soul} on={computer.on} saving={computer.saving} onChange={computer.change} />
-        {!computer.on && <span className="block text-[11px] text-muted-foreground">{t('computerUse.hint')}</span>}
-        {computer.stopped && <span className="block text-[11px] text-muted-foreground" role="status">{t('computerUse.stopped')}</span>}
-        {computer.saving && <span className="block text-[11px] text-muted-foreground" role="status">{t('comms.saving')}</span>}
-        {computer.error && <span className="error block text-[11px]" role="alert">{t('computerUse.failed', { message: computer.error })}</span>}
-      </>
-    )]);
-  }
+  // As the design's read-only tab, this row and the four below are text; the
+  // ⓘ sheet beside the tabs (both modes) holds their controls.
+  if (chosenModel.setting) rows.push([t('model.choice'), chosenModel.setting.model ?? t('model.default')]);
+  if (comms) rows.push([t('field.comms'), `${comms.managed ? t('comms.managed') : t('comms.unmanaged')} · ${onOff(comms.comms, t)}`]);
+  // Details rows from the Lovable design (#122), each shown once agent-bot can say.
+  if (wake) rows.push([t('details.wake'), onOff(wake.on, t)]);
+  if (execution.mode) rows.push([t('mode.label'), execution.mode === 'autopilot' ? t('mode.autopilot') : t('mode.safe')]);
+  // Computer use (#122, no Lovable screen): beside Execution mode.
+  if (computer.on !== null) rows.push([t('computerUse.label'), onOff(computer.on, t)]);
   if (signIn) {
     rows.push([t('login.status'), (
       <span className={signIn === 'ok' ? 'text-success' : 'text-destructive'}>{t(SIGN_IN_TEXT[signIn])}</span>
@@ -525,7 +471,7 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
   // As the design's Details tab: a bordered list, sans labels and mono values.
   return (
     <div className="grid gap-3 p-4 md:px-8">
-      {note && <p className="muted m-0">{note}</p>}
+      {note && <p className="m-0 text-sm text-muted-foreground">{note}</p>}
       <dl className="m-0 divide-y divide-border rounded-md border border-border text-sm">
         {rows.map(([term, value]) => (
           <div key={term} className="flex gap-3 px-3 py-2">
@@ -739,7 +685,7 @@ export function SoulFactRows({ soul, refresh = 0 }: { soul: CensusRow; refresh?:
       {signIn && (
         <div className="flex items-center gap-3 p-3">
           <LogIn className="size-4 text-muted-foreground" aria-hidden />
-          <h3 className="m-0 flex-1 text-sm">{t('login.status')} · {displayHarness(soul)}</h3>
+          <h3 className="m-0 flex-1 text-sm">{t('login.status')} · {soulHarnessLabel(soul)}</h3>
           <span className={`text-xs ${signIn === 'ok' ? 'text-success' : 'text-destructive'}`}>{t(SIGN_IN_TEXT[signIn])}</span>
         </div>
       )}
@@ -791,14 +737,14 @@ export function InfoButton({ soul }: { soul: CensusRow }) {
           onPointerDown={(e) => e.stopPropagation()}>
           <section role="dialog" aria-modal="true" aria-labelledby={titleId}
             onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } }}
-            className="relative grid w-full max-w-md gap-3 rounded-lg border border-border bg-background p-6 shadow-lg">
+            className="relative grid w-full max-w-md gap-4 rounded-lg border border-border bg-background p-6 shadow-lg">
             <button ref={close} type="button" onClick={() => setOpen(false)} aria-label={t('close')}
               className="absolute top-4 right-4 rounded-sm text-foreground opacity-70 hover:opacity-100">
               <X className="size-4" aria-hidden />
             </button>
-            <div>
+            <div className="grid gap-1.5 pr-6">
               <h2 id={titleId} className="m-0 text-lg leading-none font-semibold tracking-tight">{t('details.title')} · {name}</h2>
-              <p className="m-0 text-sm text-muted-foreground">{roleAndHarness(soul)}</p>
+              <p className="m-0 text-sm text-muted-foreground">{roleAndHarness(soul, soulHarnessLabel)}</p>
             </div>
             <div className="divide-y divide-border rounded-md border border-border empty:hidden">
               <WakeRow soul={soul} />

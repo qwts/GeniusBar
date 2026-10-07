@@ -5,7 +5,7 @@ import { ArchiveDialog, ArchivedNotice, liveArchiver, type Archiver } from './co
 import { inApp, listSoulTemplates, liveComputerUse, popupVisible, soulStopSupported, stopSoul, type ComputerUseSwitch, type RemovedSoul } from './bridge';
 import { FooterMenu } from './components/FooterMenu';
 import { CompanionSession, ComputerUseContext, InfoButton, type SessionTab } from './components/CompanionSession';
-import { CompanionWindow, Desktop } from './components/Desktop';
+import { AuditWindow, CompanionWindow, Desktop } from './components/Desktop';
 import { FloatingDudle, type Stopper } from './components/FloatingDudle';
 import { FirstLaunch, type DevTools, type HarnessAuth, type Starter } from './components/FirstLaunch';
 import { FleetList, type Hiding } from './components/FleetList';
@@ -31,7 +31,7 @@ import type { SoulBadges } from './model/refresh';
 import { useBadges } from './useBadges';
 import { needsSetup, type ExistingServices, type SetupState } from './model/setup';
 import { disconnected, emptyRosterText, footerStatus, healthHeader, type ConnectionSnapshot } from './model/status';
-import { updateNotice } from './model/updates';
+import { updateNotice, type UpdateStatus } from './model/updates';
 import { layoutActions, useLayout } from './state/layout';
 import { usePreferences } from './state/preferences';
 import { DefaultHarness } from './components/DefaultHarness';
@@ -118,6 +118,15 @@ interface AppProps {
   identityAppsSource?: IdentityAppsSource | null;
 }
 
+/**
+ * During setup the update line shows only when it reports a failure or asks
+ * for an action (install, restart), so a fix stays reachable while setup is stuck.
+ */
+function setupUpdateShows(status: UpdateStatus): boolean {
+  const notice = updateNotice(status);
+  return Boolean(notice && (notice.isError || notice.action));
+}
+
 const liveStopper: Stopper = { supported: () => soulStopSupported(), stop: (agentId) => stopSoul(agentId) };
 
 // Dudles stop blinking while the popup is hidden, as R1's did while the
@@ -173,7 +182,7 @@ function LanguageSelect() {
 // The GeniusBar menu (the tray popup's content, and the toolbar popover in
 // window mode) and, from it, one companion's session.
 function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onOpenDesktop, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, floatingButton = false, archiver, stopper, pauser, computerUseSwitch, templateLister, popupShowing }: AppProps) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const sandbox = useSandbox();
   // The badges' population read also carries the hues souls declare (#64),
   // joined into the census here, before anything draws a Dudle.
@@ -212,7 +221,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const { sound, setSound } = useSound();
   const decide = chat?.decide;
   const empty = emptyRosterText(connection, t);
-  const footer = footerStatus(connection, t);
+  const footer = footerStatus(connection, t, lang);
   const showSetup = Boolean(setup && onSetup && (setup.running || needsSetup(connection)));
   const [launchingPackage, setLaunchingPackage] = useState(false);
   // A Finder-opened package fills the form until it is closed; after that a
@@ -222,6 +231,12 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   // Window mode's menu is a popover; it opens itself when it has news.
   const [menuOpen, setMenuOpen] = useState(false);
   const [panel, setPanel] = useState<'cli' | 'remove' | 'audit' | null>(null);
+  // Window mode's Audit log is a desktop window (Lovable route /audit); the
+  // tray keeps it as a panel in the popup, which is the whole app there.
+  const [auditWindow, setAuditWindow] = useState(false);
+  const openAudit = mode === 'window'
+    ? () => { setAuditWindow(true); setMenuOpen(false); }
+    : () => setPanel(panel === 'audit' ? null : 'audit');
   // An installed soul opened from Finder is that companion, never a new
   // launch (#80); one not in the roster yet keeps the form, and the daemon
   // relaunches it rather than spawning another.
@@ -332,28 +347,39 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   );
 
   // The footer: the design's icon row, the rest in the ⋯ menu (Lovable audit
-  // §4, §7). During setup the design's links lead it (Check for Updates…,
-  // Remove services…, Refresh), and the row keeps what still applies there:
-  // sound, language, history and the ⋯ menu's other actions.
+  // §4, §7). During setup the design's links are the whole footer (Check for
+  // Updates…, Remove services…, Refresh); the language select and the ⋯ menu's
+  // other actions (open the desktop, command-line tools) stay at its end.
+  const refresh = onRefresh && (() => { setMetricsRefresh((value) => value + 1); onRefresh(); });
   const iconFooter = (inSetup: boolean) => (
     <footer className={inSetup ? undefined : 'border-t border-border'}>
-      {inSetup && (
+      {inSetup ? (
         <div className="flex items-center justify-between gap-2 p-3 text-xs">
           {canCheckUpdates && <button type="button" className={setupLink} onClick={() => updates?.act()}>{t('checkUpdates')}</button>}
           {onRemoveServices && !setup?.running && <button type="button" className={setupLink} onClick={() => setPanel('remove')}>{t('remove.action')}</button>}
-          {onRefresh && <button type="button" className={setupLink} onClick={() => { setMetricsRefresh((value) => value + 1); onRefresh(); }}>{t('refresh')}</button>}
+          {refresh && <button type="button" className={setupLink} onClick={refresh}>{t('refresh')}</button>}
+          <span className="flex shrink-0 items-center gap-0.5">
+            <LanguageSelect />
+            {(openDesktop || cliTools) && (
+              <FooterMenu items={[
+                openDesktop && { label: t('openDesktop'), run: openDesktop },
+                cliTools && { label: t('cli.action'), run: () => setPanel('cli') },
+              ]} />
+            )}
+          </span>
         </div>
-      )}
-      <div className={`flex items-center gap-1.5 p-2 text-xs ${inSetup ? 'border-t border-border' : ''}`}>
-        {!inSetup && <FleetMode roster={roster} />}
+      ) : (
+      <div className="flex items-center gap-1.5 p-2 text-xs">
+        <FleetMode roster={roster} />
         <button type="button" aria-label={t('sound')} aria-pressed={sound} onClick={() => setSound(!sound)} className="rounded p-1 text-muted-foreground hover:text-foreground">
           {sound ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />}
         </button>
         <LanguageSelect />
-        {!inSetup && footer && <span className={`min-w-0 truncate ${footer.isError ? 'error small' : 'muted small'}`}>{footer.text}</span>}
+        {/* Freshness sits in the G's title (window) and the health header; only a failure shows here. */}
+        {footer?.isError && <span role="alert" className="min-w-0 truncate text-[11px] text-destructive">{footer.text}</span>}
         <span className="ml-auto flex shrink-0 items-center gap-0.5">
-          <button type="button" className={footerIcon} aria-label={t('auditTitle')} title={t('auditTitle')} aria-pressed={panel === 'audit'}
-            onClick={() => setPanel(panel === 'audit' ? null : 'audit')}>
+          <button type="button" className={footerIcon} aria-label={t('auditTitle')} title={t('auditTitle')}
+            aria-pressed={mode === 'window' ? auditWindow : panel === 'audit'} onClick={openAudit}>
             <History className="size-3.5" aria-hidden />
           </button>
           {canLaunchPackage && (
@@ -361,21 +387,22 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
               <Plus className="size-3.5" aria-hidden />
             </button>
           )}
-          {(openDesktop || canLaunchPackage || cliTools || (!inSetup && (canCheckUpdates || onRemoveServices || onRefresh))) && (
+          {(openDesktop || canLaunchPackage || cliTools || canCheckUpdates || onRemoveServices || onRefresh) && (
             <FooterMenu items={[
               openDesktop && { label: t('openDesktop'), run: openDesktop },
-              !inSetup && canCheckUpdates && { label: t('checkUpdates'), run: () => updates?.act() },
+              canCheckUpdates && { label: t('checkUpdates'), run: () => updates?.act() },
               canLaunchPackage && { label: t('launchPackage'), run: launchPackage },
               cliTools && { label: t('cli.action'), run: () => setPanel('cli') },
-              !inSetup && (onRefresh || (onRemoveServices && !setup?.running)) && 'separator',
-              !inSetup && onRefresh && { label: t('refresh'), run: () => { setMetricsRefresh((value) => value + 1); onRefresh(); } },
-              !inSetup && onRemoveServices && !setup?.running && { label: t('remove.action'), run: () => setPanel('remove'), destructive: true },
+              (refresh || (onRemoveServices && !setup?.running)) && 'separator',
+              refresh && { label: t('refresh'), run: refresh },
+              onRemoveServices && !setup?.running && { label: t('remove.action'), run: () => setPanel('remove'), destructive: true },
             ]} />
           )}
         </span>
       </div>
+      )}
       {/* The design's Audit log page (Lovable route /audit, "All activity"): every companion's records, in the menu. */}
-      {panel === 'audit' && (
+      {panel === 'audit' && mode === 'tray' && (
         <section className="border-t border-border" aria-label={t('auditTitle')}>
           <div className="flex items-center gap-2 px-3 pt-2">
             <h3 className="m-0 flex-1 text-sm font-medium">{t('auditTitle')} <span className="font-normal text-muted-foreground">· {t('allActivity')}</span></h3>
@@ -399,8 +426,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const setupMenu = setup && onSetup && (
     <>
       <SetupHeader connection={connection} running={setup.running} error={footer?.isError ? footer.text : null} />
-      {updates && <UpdateNotice status={updates.status} onAction={updates.act} />}
       <SetupPanel setup={setup} onSetup={onSetup} existing={existingServices} />
+      {updates && setupUpdateShows(updates.status) && <UpdateNotice status={updates.status} onAction={updates.act} />}
       {iconFooter(true)}
     </>
   );
@@ -423,7 +450,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
         onDecide={decide && ((proposalId, decision) => { void decide(proposalId, decision); })} />
       <FleetList forest={forest} paused={paused} unreadOf={unread} onOpen={open} hiding={hiding} onArchive={archiveWith && setArchiving}
         awaiting={awaitingIds} busy={(badges ?? liveBadges).busy}
-        empty={!showStarter && empty && <p className="muted empty">{empty}</p>} />
+        empty={!showStarter && empty && <p className="m-0 px-3 py-2 text-sm text-muted-foreground">{empty}</p>} />
       {launch && <DefaultHarness harnesses={launch.harnesses} />}
       <SandboxCard />
       <IdentityAppsCard roster={roster} />
@@ -481,7 +508,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     );
   }
 
-  const header = healthHeader(connection, t);
+  const header = healthHeader(connection, t, lang);
   // The menu is a popover, so its update line and an error footer also show
   // beside the GeniusBar button while it is closed.
   const update = updates ? updateNotice(updates.status) : null;
@@ -499,10 +526,10 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     : null;
   return (
     <div className="gb flex h-full flex-col">
-      <MenuBar open={menuOpen} onOpenChange={setMenuOpen} tone={header.tone} title={header.title}
+      <MenuBar open={menuOpen} onOpenChange={setMenuOpen} tone={header.tone} title={footer && !footer.isError ? `${header.title} · ${footer.text}` : header.title}
         attention={attention} onReset={layoutActions.reset} unread={unreadTotal} approvals={waiting.length} working={working} forest={forest} paused={paused} onJump={open}
         autopilot={autopilot} onAutopilotOff={() => { void fleetMode.change('safe'); }}
-        onAudit={() => { setPanel('audit'); setMenuOpen(true); }}
+        onAudit={openAudit}
         fleetPaused={fleet.paused} onResume={toggleFleet}
         onLaunch={canLaunchPackage ? launchPackage : undefined} hiddenCount={layout.hidden.length} onShowAll={layoutActions.showAll}>
         {menu({ hidden: layout.hidden, onToggle: layoutActions.setHidden, onToggleTeam: layoutActions.setTeamHidden, onShowAll: layoutActions.showAll })}
@@ -517,6 +544,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
             paused={paused} onClose={() => setSelectedKey(null)}
             actions={<><SandboxChip soul={selected} /><InfoButton soul={selected} /></>}>{session}</CompanionWindow>
         )}
+        {auditWindow && <AuditWindow roster={roster} onClose={() => setAuditWindow(false)} />}
       </Desktop>
       <FloatingDudle showButton={floatingButton} lead={floatingLead(forest, layout.hidden)} paused={paused}
         state={floatingState({ roster, approvals: waiting.length, busy: shownBadges.busy, computerUse: shownBadges.computerUse })}

@@ -6,7 +6,7 @@ import { emptyComposer, mergeIncoming, emptyChat } from './model/chat';
 import type { CensusRow } from './model/census';
 import { inboxMessage, sampleCensus, sampleConnection, sampleTemplates } from './model/fixtures';
 import { idleSetup } from './model/setup';
-import { disconnected } from './model/status';
+import { disconnected, formatTime } from './model/status';
 import { LAYOUT_KEY, layoutActions } from './state/layout';
 import { preferenceActions } from './state/preferences';
 import type { ChatApi } from './useChat';
@@ -64,6 +64,26 @@ describe('App', () => {
     expect(session.isConnected).toBe(false);
   });
 
+  it('keeps the healthy header to the name and counts, the footer to failures, and the empty line in Tailwind (N5, N6, N7)', () => {
+    const lastRefresh = new Date(2026, 0, 1, 9, 5, 0);
+    render(<App connection={{ ...sampleConnection, lastRefresh }} isStatic />);
+    const header = screen.getByRole('heading', { name: 'GeniusBar' }).closest('header')!;
+    expect(within(header).getByRole('status', { name: 'Connected' }).className).toBe('sr-only');
+    expect(header.querySelector('.dot')).toBeNull();
+    expect(screen.queryByText(/^Updated /)).toBeNull();
+    expect(screen.getByText('No companions yet. Launch one to get started.').className).toBe('m-0 px-3 py-2 text-sm text-muted-foreground');
+    cleanup();
+    render(<App connection={{ ...sampleConnection, lastRefresh, lastError: 'Could not read the census.' }} isStatic />);
+    expect(screen.getByRole('alert').textContent).toBe('Could not read the census.');
+    expect(screen.getByRole('alert').className).toContain('text-destructive');
+  });
+
+  it('puts freshness in the G’s title in window mode (N6)', () => {
+    const lastRefresh = new Date(2026, 0, 1, 9, 5, 0);
+    render(<App mode="window" connection={{ ...sampleConnection, lastRefresh }} isStatic />);
+    expect(screen.getByRole('button', { name: 'GeniusBar menu' }).title).toBe(`Connected · Updated ${formatTime(lastRefresh)}`);
+  });
+
   it('opens the detail it is told to select, for --snapshot-detail', () => {
     render(<App census={sampleCensus} connection={sampleConnection} isStatic select="user/agent_c" />);
     expect(screen.getByRole('region', { name: 'agent_c, agent_c' })).toBeTruthy();
@@ -81,7 +101,8 @@ describe('App', () => {
       />,
     );
     expect(screen.getByRole('status').textContent).toContain('Can’t reach the background service');
-    expect(screen.getAllByText(`Last updated · ${lastRefresh.toLocaleTimeString()}`)).toHaveLength(2);
+    // The header says when; the footer row shows only failures now (N6), and the time is hour:minute (P2-b).
+    expect(screen.getAllByText(`Last updated · ${formatTime(lastRefresh)}`)).toHaveLength(1);
     expect(screen.getAllByRole('button', { name: /Ready|Starting|Unavailable/ })).toHaveLength(3);
     fireEvent.click(screen.getByRole('button', { name: 'More' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Refresh' }));
@@ -129,6 +150,23 @@ describe('App setup', () => {
     expect(onRefresh).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole('button', { name: 'Remove services…' }));
     expect(screen.getByRole('button', { name: 'Remove' })).toBeTruthy();
+  });
+
+  it('during setup the footer is only the design’s links, with the language at the end (P2-a)', () => {
+    const unpaired = { ...disconnected, bridgeConnected: true, unpaired: true };
+    const updates = { status: { state: 'up-to-date' as const, version: null }, act: vi.fn() };
+    const { unmount } = render(<App connection={unpaired} setup={idleSetup} onSetup={() => {}} onRefresh={vi.fn()} updates={updates} />);
+    expect(screen.queryByRole('button', { name: 'Sound cues' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Audit log' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Launch companion' })).toBeNull();
+    const language = screen.getByRole('combobox', { name: 'Language' });
+    expect(language.closest('div.p-3')?.textContent).toContain('Refresh');
+    expect(screen.queryByRole('status', { name: 'Update' })).toBeNull();
+    unmount();
+    // An update to install, or a failed one, still shows, after the steps.
+    render(<App connection={unpaired} setup={idleSetup} onSetup={() => {}} updates={{ ...updates, status: { state: 'available', version: '0.1.1' } }} />);
+    const notice = screen.getByRole('status', { name: 'Update' });
+    expect(screen.getByRole('region', { name: 'Setup' }).compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('keeps the fleet, not setup, while installed services are starting (#118)', () => {
@@ -549,13 +587,14 @@ describe('App window mode', () => {
     fireEvent.keyDown(window, { key: 'k', metaKey: true });
     expect(screen.queryByRole('dialog', { name: 'GeniusBar menu' })).toBeNull();
     const palette = screen.getByRole('dialog', { name: 'Jump to companion' });
-    // The results are options of the search box (arrow keys), so it is the only Tab stop.
+    // The results are options of the search box (arrow keys); the design's ✕ is the only other Tab stop.
     const input = within(palette).getByRole('combobox');
-    expect(within(palette).queryAllByRole('button')).toEqual([]);
+    const close = within(palette).getByRole('button', { name: 'Close' });
+    expect(within(palette).queryAllByRole('button')).toEqual([close]);
     input.focus();
-    fireEvent.keyDown(input, { key: 'Tab' });
-    expect(document.activeElement).toBe(input);
     fireEvent.keyDown(input, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(close);
+    fireEvent.keyDown(close, { key: 'Tab' });
     expect(document.activeElement).toBe(input);
     fireEvent.keyDown(input, { key: 'Escape' });
     expect(document.activeElement).toBe(item);

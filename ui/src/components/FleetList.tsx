@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Archive, Eye, EyeOff, Search, Users } from 'lucide-react';
-import { availabilityNote, displayHarness, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
+import { availabilityNote, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
+import { soulHarnessLabel } from '../model/launch';
 import { dudleFor } from '../model/dudle';
 import { companionLabel, searchTeams, teamKeys, teamsOf } from '../model/fleet';
 import { useI18n } from '../lib/i18n';
@@ -88,7 +89,7 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty, onA
             <span className="truncate">{name}</span>
             {note && <span className="truncate text-[11px] text-muted-foreground">{note}</span>}
           </span>
-          <span className="truncate font-mono text-[11px] text-muted-foreground">{displayHarness(soul)}</span>
+          <span className="truncate font-mono text-[11px] text-muted-foreground">{soulHarnessLabel(soul)}</span>
           <span className="ml-auto flex shrink-0 items-center gap-1.5">
             {unread > 0 && (
               <span className="rounded-full bg-primary px-1.5 font-mono text-[11px] font-semibold text-primary-foreground">

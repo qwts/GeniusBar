@@ -1,7 +1,10 @@
 // Health header and status text, ported from R1's ContentView/AppState.
 // The view state is a plain snapshot so the bridge (#7) can fill it and
 // tests can drive every branch without a broker.
-import { translate, type Translate } from '../lib/i18n';
+import { translate, type Lang, type Translate } from '../lib/i18n';
+import type { MessageKey } from '../locales/en';
+
+const english: Translate = (key, vars) => translate('en', key, vars);
 
 /** Broker health as the R1 health op reported it. */
 export interface BrokerHealth {
@@ -20,6 +23,10 @@ export interface ConnectionSnapshot {
   /** Set while unreachable; the last census stays on screen as "Last known". */
   brokerUnreachable: boolean;
   health: BrokerHealth | null;
+  /**
+   * The last failure: one of `statusErrors` (a locale key, translated where
+   * it shows; see `errorText`), or the broker's own prose when it had some.
+   */
   lastError: string | null;
   lastRefresh: Date | null;
   /**
@@ -48,23 +55,47 @@ export const disconnected: ConnectionSnapshot = {
   failingSince: null,
 };
 
-// The setup panel shows whenever the app is unpaired, so this points there
-// rather than at a terminal (R4: a friend has none).
-export const unpairedMessage = 'GeniusBar needs setup on this Mac. Choose Set up below.';
-export const pendingApprovalMessage =
-  'GeniusBar needs approval to connect. Ask your account owner to approve it.';
+/**
+ * The failures GeniusBar words itself, stored in `lastError` as their locale
+ * keys and translated where they show (`errorText`).
+ */
+export const statusErrors = {
+  // The setup panel shows whenever the app is unpaired, so this points there
+  // rather than at a terminal (R4: a friend has none).
+  unpaired: 'status.error.unpaired',
+  notApproved: 'status.error.notApproved',
+  unreachable: 'status.error.unreachable',
+  unknown: 'status.error.unknown',
+  bridge: 'status.error.bridge',
+} as const satisfies Record<string, MessageKey>;
+
+const errorKeys: ReadonlySet<string> = new Set(Object.values(statusErrors));
+
+/** `lastError` in the app's language: a code is translated, the broker's prose shown as it is. */
+export function errorText(error: string, t: Translate = english): string {
+  return errorKeys.has(error) ? t(error as MessageKey) : error;
+}
+
+export const unpairedMessage = translate('en', statusErrors.unpaired);
+export const pendingApprovalMessage = translate('en', statusErrors.notApproved);
 
 /**
- * User-facing text for a broker error. Pairing errors point at the fix;
- * the broker's own message is prose, so it is never echoed as a code.
+ * What `lastError` stores for a broker error: a code GeniusBar translates,
+ * or the broker's own message. Pairing errors point at the fix; the
+ * broker's message is prose, so its code is never echoed.
  */
-export function brokerErrorMessage(code: string, message: string): string {
-  if (code === 'unauthenticated') return unpairedMessage;
-  if (code === 'not-approved') return pendingApprovalMessage;
+export function brokerErrorCode(code: string, message: string): string {
+  if (code === 'unauthenticated') return statusErrors.unpaired;
+  if (code === 'not-approved') return statusErrors.notApproved;
   if (code === 'broker-unreachable' || code === 'broker-timeout' || code === 'broker-untrusted') {
-    return 'GeniusBar can’t reach its background service yet.';
+    return statusErrors.unreachable;
   }
-  return message === '' ? 'GeniusBar couldn’t check your account. Try again in a moment.' : message;
+  return message === '' ? statusErrors.unknown : message;
+}
+
+/** User-facing text for a broker error, in the given language (English by default). */
+export function brokerErrorMessage(code: string, message: string, t: Translate = english): string {
+  return errorText(brokerErrorCode(code, message), t);
 }
 
 export function formatUptime(ms: number): string {
@@ -74,8 +105,9 @@ export function formatUptime(ms: number): string {
   return `${Math.trunc(s / 3600)}h ${Math.trunc((s % 3600) / 60)}m`;
 }
 
-export function formatTime(date: Date): string {
-  return date.toLocaleTimeString();
+/** Hour and minute in the app's language, as the chat's timestamps. */
+export function formatTime(date: Date, lang: Lang = 'en'): string {
+  return new Intl.DateTimeFormat(lang, { hour: '2-digit', minute: '2-digit' }).format(date);
 }
 
 export type Tone = 'ok' | 'bad' | 'unknown';
@@ -88,9 +120,7 @@ export interface HeaderState {
   label: string;
 }
 
-const english: Translate = (key, vars) => translate('en', key, vars);
-
-export function healthHeader(s: ConnectionSnapshot, t: Translate = english): HeaderState {
+export function healthHeader(s: ConnectionSnapshot, t: Translate = english, lang: Lang = 'en'): HeaderState {
   if (!s.bridgeConnected) {
     const title = t('status.connecting');
     return { tone: 'unknown', title, detail: null, label: title };
@@ -104,7 +134,7 @@ export function healthHeader(s: ConnectionSnapshot, t: Translate = english): Hea
   if (s.brokerUnreachable) {
     const title = t('status.unreachable');
     if (s.lastRefresh) {
-      const time = formatTime(s.lastRefresh);
+      const time = formatTime(s.lastRefresh, lang);
       return {
         tone: 'bad',
         title,
@@ -151,17 +181,17 @@ export interface FooterState {
 }
 
 /** Footer status: outage age first, then the last error, then freshness. */
-export function footerStatus(s: ConnectionSnapshot, t: Translate = english): FooterState | null {
+export function footerStatus(s: ConnectionSnapshot, t: Translate = english, lang: Lang = 'en'): FooterState | null {
   if (s.brokerUnreachable && s.lastRefresh) {
-    return { text: t('status.lastUpdated', { time: formatTime(s.lastRefresh) }), isError: false };
+    return { text: t('status.lastUpdated', { time: formatTime(s.lastRefresh, lang) }), isError: false };
   }
   // Before the first successful census this is part of first-run setup;
   // the setup panel already explains what to do.
   if (s.brokerUnreachable && !s.lastRefresh) return null;
   // A missing credential is the setup panel's job, not an error. Approval
   // instructions and bridge failures (no setup panel then) still show.
-  const setupsJob = s.unpaired && s.bridgeConnected && s.lastError !== pendingApprovalMessage;
-  if (s.lastError !== null && !setupsJob) return { text: s.lastError, isError: true };
-  if (s.lastRefresh) return { text: t('status.updated', { time: formatTime(s.lastRefresh) }), isError: false };
+  const setupsJob = s.unpaired && s.bridgeConnected && s.lastError !== statusErrors.notApproved;
+  if (s.lastError !== null && !setupsJob) return { text: errorText(s.lastError, t), isError: true };
+  if (s.lastRefresh) return { text: t('status.updated', { time: formatTime(s.lastRefresh, lang) }), isError: false };
   return null;
 }

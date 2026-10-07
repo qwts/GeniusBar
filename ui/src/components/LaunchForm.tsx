@@ -146,7 +146,7 @@ const radio = 'inline-flex min-h-9 items-center justify-center gap-1 rounded-md 
 const radioOn = 'border-primary bg-primary/10 text-foreground';
 const radioOff = 'border-border text-muted-foreground hover:bg-accent';
 const legend = 'mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground';
-const field = 'h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm text-foreground';
+const field = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm text-foreground shadow-sm';
 
 /**
  * Launch form for an existing soul or a soul package, drawn as Lovable's
@@ -330,7 +330,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
           <span className="text-sm font-medium">{t('launch.brief')}</span>
           <textarea value={brief} rows={3} placeholder={t('launch.briefPlaceholder')} autoComplete="off" disabled={briefLoading}
             aria-describedby="launch-brief-hint launch-brief-count" aria-invalid={briefTooLong || undefined}
-            className="min-h-16 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm text-foreground disabled:opacity-50"
+            className="min-h-16 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm text-foreground shadow-sm disabled:opacity-50"
             onChange={(e) => { briefTyped.current = true; setBrief(e.target.value); }} />
         </label>
         <p className="flex justify-between gap-2 text-xs text-muted-foreground">

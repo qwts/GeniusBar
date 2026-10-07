@@ -6,7 +6,7 @@ import { emptyComposer } from '../model/chat';
 import type { LaunchRequest } from '../model/launch';
 import { sampleCensus, sampleProfile } from '../model/fixtures';
 import { ProfileSourceContext, type ProfileSource } from '../useSoulProfile';
-import { CompanionDetails, CompanionSession, ComputerUseContext } from './CompanionSession';
+import { CommsRow, CompanionDetails, CompanionSession, ComputerUseContext, ComputerUseRow, ModelRow, ModeRow, WakeRow } from './CompanionSession';
 import { SoulSourceContext, type SoulSource } from './SoulNotices';
 
 afterEach(cleanup);
@@ -48,12 +48,13 @@ describe('CompanionDetails', () => {
   describe('managed and agent comms (#71)', () => {
     const stopped = { agentId: child.agentId, managed: true, comms: true, running: false };
 
-    it('adds Managed and Agent comms rows, keeping every other row', async () => {
+    it('adds the Agent comms row as text, Managed · On, keeping every other row (N10)', async () => {
       vi.mocked(soulComms).mockResolvedValue(stopped);
       render(<CompanionDetails soul={child} />);
-      await screen.findByText('Managed', { selector: 'dt' });
-      expect(field('Managed')).toBe('Managed');
-      expect(field('Agent comms')).toBe('On');
+      await screen.findByText('Agent comms', { selector: 'dt' });
+      expect(field('Agent comms')).toBe('Managed · On');
+      // Read-only, as the design's tab: the switch lives in the ⓘ sheet.
+      expect(screen.queryByRole('switch')).toBeNull();
       expect(field('Agent id')).toBe(child.agentId);
       for (const term of ['Account', 'Harness', 'Presence', 'Parent', 'Unread', 'Last wake']) {
         expect(screen.getByText(term, { selector: 'dt' })).toBeTruthy();
@@ -64,13 +65,13 @@ describe('CompanionDetails', () => {
     it('shows Unmanaged and Off', async () => {
       vi.mocked(soulComms).mockResolvedValue({ ...stopped, managed: false, comms: false });
       render(<CompanionDetails soul={child} />);
-      await screen.findByText('Unmanaged');
-      expect(field('Agent comms')).toBe('Off');
+      await screen.findByText('Unmanaged · Off');
+      expect(field('Agent comms')).toBe('Unmanaged · Off');
     });
 
     it('locks the toggle while the companion runs', async () => {
       vi.mocked(soulComms).mockResolvedValue({ ...stopped, running: true });
-      render(<CompanionDetails soul={child} />);
+      render(<CommsRow soul={child} />);
       const toggle = await screen.findByRole('switch', { name: /Agent comms for/ });
       expect((toggle as HTMLInputElement).disabled).toBe(true);
       expect(screen.getByText('Stop it first to change this.')).toBeTruthy();
@@ -79,27 +80,30 @@ describe('CompanionDetails', () => {
     it('turns comms off through agent-bot when stopped, and shows a refusal', async () => {
       vi.mocked(soulComms).mockResolvedValue(stopped);
       vi.mocked(setSoulComms).mockResolvedValueOnce({ ...stopped, comms: false });
-      render(<CompanionDetails soul={child} />);
-      fireEvent.click(await screen.findByRole('switch', { name: /Agent comms for/ }));
+      render(<CommsRow soul={child} />);
+      const toggle = await screen.findByRole('switch', { name: /Agent comms for/ }) as HTMLInputElement;
+      fireEvent.click(toggle);
       expect(setSoulComms).toHaveBeenCalledWith(child.agentId, false);
-      await waitFor(() => expect(field('Agent comms')).toBe('Off'));
+      await waitFor(() => expect(toggle.checked).toBe(false));
       vi.mocked(setSoulComms).mockRejectedValueOnce(new BridgeError('soul-comms-failed', 'the owner did not approve'));
-      fireEvent.click(screen.getByRole('switch', { name: /Agent comms for/ }));
+      fireEvent.click(toggle);
       await screen.findByText('Agent comms unchanged: the owner did not approve');
-      expect(field('Agent comms')).toMatch(/^Off/);
+      expect(toggle.checked).toBe(false);
     });
 
     it('a change for one soul never lands on another soul shown since', async () => {
       vi.mocked(soulComms).mockImplementation(async (agentId: string) => ({ ...stopped, agentId, comms: agentId === child.agentId }));
       let finish: (value: typeof stopped) => void = () => {};
       vi.mocked(setSoulComms).mockImplementationOnce(() => new Promise((done) => { finish = done; }));
-      const { rerender } = render(<CompanionDetails soul={child} />);
+      const { rerender } = render(<CommsRow soul={child} />);
       fireEvent.click(await screen.findByRole('switch', { name: /Agent comms for/ }));
-      rerender(<CompanionDetails soul={luna} />);
-      await waitFor(() => expect(field('Agent comms')).toBe('Off'));
+      rerender(<CommsRow soul={luna} />);
+      const checked = () => (screen.getByRole('switch', { name: /Agent comms for/ }) as HTMLInputElement).checked;
+      await waitFor(() => expect(screen.getByRole('switch', { name: 'Agent comms for luna' })).toBeTruthy());
+      await waitFor(() => expect(checked()).toBe(false));
       finish({ ...stopped, comms: true });
       await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(field('Agent comms')).toBe('Off');
+      expect(checked()).toBe(false);
       expect(screen.queryByText('Waiting for your approval…')).toBeNull();
     });
 
@@ -107,12 +111,13 @@ describe('CompanionDetails', () => {
       vi.mocked(soulComms).mockResolvedValue(stopped);
       let finish: (value: typeof stopped) => void = () => {};
       vi.mocked(setSoulComms).mockImplementationOnce(() => new Promise((done) => { finish = done; }));
-      const { rerender } = render(<CompanionDetails soul={child} metricsRefresh={0} />);
-      fireEvent.click(await screen.findByRole('switch', { name: /Agent comms for/ }));
-      rerender(<CompanionDetails soul={child} metricsRefresh={1} />);
+      const { rerender } = render(<CommsRow soul={child} refresh={0} />);
+      const toggle = await screen.findByRole('switch', { name: /Agent comms for/ }) as HTMLInputElement;
+      fireEvent.click(toggle);
+      rerender(<CommsRow soul={child} refresh={1} />);
       expect(soulComms).toHaveBeenCalledOnce();
       finish({ ...stopped, comms: false });
-      await waitFor(() => expect(field('Agent comms')).toBe('Off'));
+      await waitFor(() => expect(toggle.checked).toBe(false));
     });
 
     it('relaunching keeps the soul setting: no switch until it is known, then it follows it', async () => {
@@ -144,7 +149,7 @@ describe('CompanionDetails', () => {
     it('adds no rows when agent-bot cannot say', async () => {
       render(<CompanionDetails soul={child} />);
       await waitFor(() => expect(soulComms).toHaveBeenCalledOnce());
-      expect(screen.queryByText('Managed', { selector: 'dt' })).toBeNull();
+      expect(screen.queryByText('Agent comms', { selector: 'dt' })).toBeNull();
       expect(screen.queryByRole('switch')).toBeNull();
     });
   });
@@ -212,15 +217,58 @@ describe('CompanionDetails', () => {
     expect(screen.queryByText('Hardened')).toBeNull();
   });
 
-  it('falls back to the raw parent ID without a roster, and none for roots', () => {
+  it('falls back to the raw parent ID without a roster, and a dash for roots', () => {
     render(<CompanionDetails soul={child} />);
     expect(field('Parent')).toBe('agent_p');
     cleanup();
     render(<CompanionDetails soul={luna} />);
-    expect(field('Parent')).toBe('none');
+    expect(field('Parent')).toBe('—');
     expect(field('Verification')).toBe('verified');
     expect(field('Hardened')).toBe('On');
     expect(field('Daemon watching')).toBe('On');
+  });
+});
+
+describe('the read-only Details tab (N10)', () => {
+  it('shows every setting as text, with the controls only in the ⓘ sheet, which both modes reach', async () => {
+    const { InfoButton } = await import('./CompanionSession');
+    vi.mocked(soulComms).mockResolvedValue({ agentId: luna.agentId, managed: false, comms: true, running: false });
+    const s: SoulSource = {
+      population: vi.fn(async () => ({ agentId: luna.agentId, appSlug: null, harnessAuth: null, computerUse: false })),
+      coldWake: vi.fn(async () => ({ on: false, lane: null })), setColdWake: vi.fn(),
+      signedIn: vi.fn(async () => null), signIn: vi.fn(),
+      mode: vi.fn(async () => 'autopilot' as const), setMode: vi.fn(),
+      model: vi.fn(async () => ({ model: null, available: null, listedAt: null })), setModel: vi.fn(),
+    };
+    const sw: ComputerUseSwitch = { supported: vi.fn(async () => true), read: vi.fn(async () => false), set: vi.fn() };
+    render(<SoulSourceContext.Provider value={s}><ComputerUseContext.Provider value={sw}>
+      <CompanionDetails soul={luna} /><InfoButton soul={luna} />
+    </ComputerUseContext.Provider></SoulSourceContext.Provider>);
+    await screen.findByText('Computer use', { selector: 'dt' });
+    expect(field('Agent comms')).toBe('Unmanaged · On');
+    expect(field('Wake on new messages')).toBe('Off');
+    expect(field('Execution mode')).toBe('Auto-Pilot');
+    expect(field('Computer use')).toBe('Off');
+    expect(field('Model choice')).toBe('Harness default');
+    expect(screen.queryAllByRole('switch')).toEqual([]);
+    expect(screen.queryAllByRole('combobox')).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+    const sheet = screen.getByRole('dialog', { name: 'Details · luna' });
+    for (const name of ['Wake luna on new messages', 'Agent comms for luna', 'Auto-Pilot for luna', 'Computer use for luna']) {
+      expect(await within(sheet).findByRole('switch', { name })).toBeTruthy();
+    }
+    expect(within(sheet).getByRole('combobox', { name: 'Model for luna' })).toBeTruthy();
+  });
+
+  it('puts ⓘ beside the tabs in the popup (the desktop window puts it in its title bar)', () => {
+    render(<CompanionSession soul={luna} forest={forest} roster={sampleCensus} showBack onOpen={() => {}} onClose={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+    expect(screen.getByRole('dialog', { name: 'Details · luna' })).toBeTruthy();
+  });
+
+  it('labels the harness by name in the tab (N3)', () => {
+    render(<CompanionDetails soul={{ ...luna, harness: 'claude' }} />);
+    expect(field('Harness')).toBe('Claude Code');
   });
 });
 
@@ -335,11 +383,12 @@ describe('Details rows from the Lovable design (#122)', () => {
   it('turns wake off through agent-bot; a refusal leaves the switch and says why', async () => {
     const s = source();
     vi.mocked(soulComms).mockResolvedValue(stopped);
-    render(withSource(s, <CompanionDetails soul={luna} />));
+    render(withSource(s, <WakeRow soul={luna} />));
     const toggle = await screen.findByRole('switch', { name: 'Wake luna on new messages' }) as HTMLInputElement;
+    await waitFor(() => expect(soulComms).toHaveBeenCalled());
     fireEvent.click(toggle);
     expect(s.setColdWake).toHaveBeenCalledWith(luna.agentId, false);
-    await waitFor(() => expect(field('Wake on new messages')).toContain('Off'));
+    await waitFor(() => expect(toggle.checked).toBe(false));
     vi.mocked(s.setColdWake).mockRejectedValueOnce(new BridgeError('cold-wake-failed', 'the owner did not approve'));
     fireEvent.click(toggle);
     expect((await screen.findByRole('alert')).textContent).toBe('Wake setting unchanged: the owner did not approve');
@@ -348,10 +397,10 @@ describe('Details rows from the Lovable design (#122)', () => {
 
   it('locks the wake switch while the companion runs', async () => {
     vi.mocked(soulComms).mockResolvedValue({ ...stopped, running: true });
-    render(withSource(source(), <CompanionDetails soul={luna} />));
-    await screen.findByRole('switch', { name: 'Agent comms for luna' });
-    const toggle = screen.getByRole('switch', { name: 'Wake luna on new messages' }) as HTMLInputElement;
-    expect(toggle.disabled).toBe(true);
+    render(withSource(source(), <WakeRow soul={luna} />));
+    const toggle = await screen.findByRole('switch', { name: 'Wake luna on new messages' }) as HTMLInputElement;
+    await waitFor(() => expect(toggle.disabled).toBe(true));
+    expect(screen.getByText('Stop it first to change this.')).toBeTruthy();
   });
 
   it('adds none of them when agent-bot cannot say', async () => {
@@ -399,24 +448,29 @@ describe('Details rows from the Lovable design (#122)', () => {
     expect((screen.getByRole('textbox', { name: 'Message luna' }) as HTMLTextAreaElement).disabled).toBe(true);
   });
 
-  it('adds the Execution mode row: Safe Mode with its hint, switched to Auto-Pilot through agent-bot', async () => {
+  it('adds the Execution mode row as text (N10), and the sheet row switches it to Auto-Pilot through agent-bot', async () => {
     const s = source({ mode: vi.fn(async () => 'safe' as const) });
-    render(withSource(s, <CompanionDetails soul={luna} />));
-    const toggle = await screen.findByRole('switch', { name: 'Auto-Pilot for luna' }) as HTMLInputElement;
-    expect(field('Execution mode')).toBe('Safe ModeRisky and external actions wait for your approval.');
-    expect(toggle.checked).toBe(false);
+    const { unmount } = render(withSource(s, <CompanionDetails soul={luna} />));
+    await screen.findByText('Execution mode', { selector: 'dt' });
+    expect(field('Execution mode')).toBe('Safe Mode');
+    expect(screen.queryByRole('switch', { name: 'Auto-Pilot for luna' })).toBeNull();
     expect(s.mode).toHaveBeenCalledWith(luna.agentId);
+    unmount();
+    render(withSource(s, <ModeRow soul={luna} />));
+    const toggle = await screen.findByRole('switch', { name: 'Auto-Pilot for luna' }) as HTMLInputElement;
+    expect(screen.getByText('Risky and external actions wait for your approval.')).toBeTruthy();
+    expect(toggle.checked).toBe(false);
     fireEvent.click(toggle);
     expect(s.setMode).toHaveBeenCalledWith(luna.agentId, 'autopilot');
-    await waitFor(() => expect(field('Execution mode')).toBe('Auto-Pilot'));
-    expect(toggle.checked).toBe(true);
+    await waitFor(() => expect(toggle.checked).toBe(true));
+    expect(screen.queryByText('Risky and external actions wait for your approval.')).toBeNull();
   });
 
   it('is not locked while the companion runs', async () => {
     vi.mocked(soulComms).mockResolvedValue({ ...stopped, running: true });
-    render(withSource(source({ mode: vi.fn(async () => 'autopilot' as const) }), <CompanionDetails soul={luna} />));
+    render(withSource(source({ mode: vi.fn(async () => 'autopilot' as const) }), <><CommsRow soul={luna} /><ModeRow soul={luna} /></>));
     await screen.findByRole('switch', { name: 'Agent comms for luna' });
-    const toggle = screen.getByRole('switch', { name: 'Auto-Pilot for luna' }) as HTMLInputElement;
+    const toggle = await screen.findByRole('switch', { name: 'Auto-Pilot for luna' }) as HTMLInputElement;
     expect(toggle.disabled).toBe(false);
   });
 
@@ -425,12 +479,12 @@ describe('Details rows from the Lovable design (#122)', () => {
       mode: vi.fn(async () => 'safe' as const),
       setMode: vi.fn(async () => { throw new BridgeError('soul-mode-failed', 'the owner did not approve'); }),
     });
-    render(withSource(s, <CompanionDetails soul={luna} />));
+    render(withSource(s, <ModeRow soul={luna} />));
     const toggle = await screen.findByRole('switch', { name: 'Auto-Pilot for luna' }) as HTMLInputElement;
     fireEvent.click(toggle);
     expect((await screen.findByRole('alert')).textContent).toBe('Execution mode unchanged: the owner did not approve');
     expect(toggle.checked).toBe(false);
-    expect(field('Execution mode')).toContain('Safe Mode');
+    expect(screen.getByText('Safe Mode')).toBeTruthy();
   });
 
   it('has no Execution mode row when agent-bot cannot say', async () => {
@@ -494,23 +548,35 @@ describe('the model picker (#128)', () => {
   const withSource = (s: SoulSource, ui: React.ReactElement) => <SoulSourceContext.Provider value={s}>{ui}</SoulSourceContext.Provider>;
   const options = (select: HTMLElement) => [...select.querySelectorAll('option')].map((o) => o.textContent);
 
-  it('adds a Model choice row: the default, the harness list and Other…, with the hint', async () => {
+  it('adds a Model choice row as text, the default when none is chosen (N10)', async () => {
     const s = source();
-    render(withSource(s, <CompanionDetails soul={luna} />));
+    const { unmount } = render(withSource(s, <CompanionDetails soul={luna} />));
+    await screen.findByText('Model choice', { selector: 'dt' });
+    expect(field('Model choice')).toBe('opus');
+    expect(screen.queryByRole('combobox')).toBeNull();
+    expect(s.model).toHaveBeenCalledWith(luna.agentId);
+    unmount();
+    render(withSource(source({ model: vi.fn(async () => ({ ...listed, model: null })) }), <CompanionDetails soul={luna} />));
+    await screen.findByText('Model choice', { selector: 'dt' });
+    expect(field('Model choice')).toBe('Harness default');
+  });
+
+  it('offers the default, the harness list and Other… in the sheet row, with the hint', async () => {
+    const s = source();
+    render(withSource(s, <ModelRow soul={luna} />));
     const select = await screen.findByRole('combobox', { name: 'Model for luna' }) as HTMLSelectElement;
     expect(options(select)).toEqual(['Harness default', 'Opus', 'Sonnet', 'Other…']);
     expect(select.value).toBe('opus');
     expect((select.querySelector('option[value="opus"]') as HTMLOptionElement).title).toBe('Most capable');
-    expect(field('Model choice')).toContain("Applies on luna's next turn.");
-    expect(s.model).toHaveBeenCalledWith(luna.agentId);
+    expect(screen.getByText("Applies on luna's next turn.")).toBeTruthy();
   });
 
   it('keeps a chosen model the list lacks, and says when the harness has listed nothing', async () => {
-    render(withSource(source({ model: vi.fn(async () => ({ model: 'my-model', available: null, listedAt: null })) }), <CompanionDetails soul={luna} />));
+    render(withSource(source({ model: vi.fn(async () => ({ model: 'my-model', available: null, listedAt: null })) }), <ModelRow soul={luna} />));
     const select = await screen.findByRole('combobox', { name: 'Model for luna' }) as HTMLSelectElement;
     expect(options(select)).toEqual(['Harness default', 'my-model', 'Other…']);
     expect(select.value).toBe('my-model');
-    expect(field('Model choice')).toContain('The harness lists its models after the first turn.');
+    expect(screen.getByText('The harness lists its models after the first turn.')).toBeTruthy();
   });
 
   it('has no Model choice row when agent-bot cannot say', async () => {
@@ -523,7 +589,7 @@ describe('the model picker (#128)', () => {
 
   it('sets a listed model, or the default, through agent-bot', async () => {
     const s = source();
-    render(withSource(s, <CompanionDetails soul={luna} />));
+    render(withSource(s, <ModelRow soul={luna} />));
     const select = await screen.findByRole('combobox', { name: 'Model for luna' }) as HTMLSelectElement;
     fireEvent.change(select, { target: { value: 'sonnet' } });
     expect(s.setModel).toHaveBeenCalledWith(luna.agentId, 'sonnet');
@@ -535,7 +601,7 @@ describe('the model picker (#128)', () => {
 
   it('a refused change leaves the model where it was and says why', async () => {
     const s = source({ setModel: vi.fn(async () => { throw new BridgeError('soul-model-failed', 'the owner did not approve'); }) });
-    render(withSource(s, <CompanionDetails soul={luna} />));
+    render(withSource(s, <ModelRow soul={luna} />));
     const select = await screen.findByRole('combobox', { name: 'Model for luna' }) as HTMLSelectElement;
     fireEvent.change(select, { target: { value: 'sonnet' } });
     expect((await screen.findByRole('alert')).textContent).toBe('Model unchanged: the owner did not approve');
@@ -544,7 +610,7 @@ describe('the model picker (#128)', () => {
 
   it('takes any model id through Other…, on Enter or Use', async () => {
     const s = source();
-    render(withSource(s, <CompanionDetails soul={luna} />));
+    render(withSource(s, <ModelRow soul={luna} />));
     const select = await screen.findByRole('combobox', { name: 'Model for luna' }) as HTMLSelectElement;
     fireEvent.change(select, { target: { value: '__other' } });
     expect(s.setModel).not.toHaveBeenCalled();
@@ -566,7 +632,8 @@ describe('the model picker (#128)', () => {
     const { InfoButton } = await import('./CompanionSession');
     const s = source();
     render(withSource(s, <><CompanionDetails soul={luna} /><InfoButton soul={luna} /></>));
-    await screen.findByRole('combobox', { name: 'Model for luna' });
+    await screen.findByText('Model choice', { selector: 'dt' });
+    expect(field('Model choice')).toBe('opus');
     fireEvent.click(screen.getByRole('button', { name: 'Details' }));
     const sheet = screen.getByRole('dialog', { name: 'Details · luna' });
     expect(await within(sheet).findByText('Model')).toBeTruthy();
@@ -574,9 +641,8 @@ describe('the model picker (#128)', () => {
     expect(within(sheet).getByText("Applies on luna's next turn.")).toBeTruthy();
     fireEvent.change(select, { target: { value: 'sonnet' } });
     expect(s.setModel).toHaveBeenCalledWith(luna.agentId, 'sonnet');
-    await waitFor(() => expect(field('Model choice')).toBeTruthy());
-    const details = screen.getAllByRole('combobox', { name: 'Model for luna' }).find((el) => !sheet.contains(el)) as HTMLSelectElement;
-    await waitFor(() => expect(details.value).toBe('sonnet'));
+    await waitFor(() => expect(field('Model choice')).toBe('sonnet'));
+    expect(screen.getAllByRole('combobox', { name: 'Model for luna' }).every((el) => sheet.contains(el))).toBe(true);
   });
 
   describe('in the launch form', () => {
@@ -670,27 +736,31 @@ describe('Computer use row (#122, agent-bot soul computer-use)', () => {
   it('sits beside Execution mode, read from the census record, and switches off and on through agent-bot', async () => {
     const s = source(true);
     const sw = switchFor(s);
-    render(withBoth(s, sw, <CompanionDetails soul={luna} />));
-    const toggle = await screen.findByRole('switch', { name: 'Computer use for luna' }) as HTMLInputElement;
-    expect(toggle.checked).toBe(true);
+    const { unmount } = render(withBoth(s, sw, <CompanionDetails soul={luna} />));
+    await screen.findByText('Computer use', { selector: 'dt' });
     expect(field('Computer use')).toBe('On');
+    expect(screen.queryByRole('switch')).toBeNull();
     const terms = [...document.querySelectorAll('dt')].map((dt) => dt.textContent);
     expect(terms.indexOf('Computer use')).toBe(terms.indexOf('Execution mode') + 1);
+    unmount();
+    render(withBoth(s, sw, <ComputerUseRow soul={luna} />));
+    const toggle = await screen.findByRole('switch', { name: 'Computer use for luna' }) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
     fireEvent.click(toggle);
     expect(sw.set).toHaveBeenCalledWith(luna.agentId, false);
     await waitFor(() => expect(toggle.checked).toBe(false));
-    expect(field('Computer use')).toBe('OffOff: its requests to control the screen are denied.Its screen session was stopped.');
+    expect(screen.getByText('Off: its requests to control the screen are denied.')).toBeTruthy();
+    expect(screen.getByText('Its screen session was stopped.')).toBeTruthy();
     await waitFor(() => expect(vi.mocked(s.population).mock.calls.length).toBeGreaterThan(1));
     fireEvent.click(toggle);
     expect(sw.set).toHaveBeenLastCalledWith(luna.agentId, true);
     await waitFor(() => expect(toggle.checked).toBe(true));
-    expect(field('Computer use')).toBe('On');
   });
 
   it('a refused change leaves the switch where it was and says why', async () => {
     const s = source(true);
     const sw = switchFor(s, { set: vi.fn(async () => { throw new BridgeError('soul-computer-use-failed', 'the owner did not approve'); }) });
-    render(withBoth(s, sw, <CompanionDetails soul={luna} />));
+    render(withBoth(s, sw, <ComputerUseRow soul={luna} />));
     const toggle = await screen.findByRole('switch', { name: 'Computer use for luna' }) as HTMLInputElement;
     fireEvent.click(toggle);
     expect((await screen.findByRole('alert')).textContent).toBe('Computer use unchanged: the owner did not approve');
@@ -723,7 +793,7 @@ describe('Computer use row (#122, agent-bot soul computer-use)', () => {
   it('a bundle that turns out to lack the command hides the row instead of failing', async () => {
     const s = source(true);
     const sw = switchFor(s, { set: vi.fn(async () => { throw new BridgeError('soul-computer-use-unsupported', 'this agent-bot has no soul computer-use'); }) });
-    render(withBoth(s, sw, <CompanionDetails soul={luna} />));
+    render(withBoth(s, sw, <ComputerUseRow soul={luna} />));
     fireEvent.click(await screen.findByRole('switch', { name: 'Computer use for luna' }));
     await waitFor(() => expect(screen.queryByRole('switch', { name: 'Computer use for luna' })).toBeNull());
     expect(screen.queryByRole('alert')).toBeNull();
@@ -800,6 +870,8 @@ describe('the declared role (#122, agent-bot-identity #535)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Details' }));
     const sheet = screen.getByRole('dialog', { name: 'Details · luna' });
     expect(within(sheet).getByText('Release captain · codex', { selector: 'p' })).toBeTruthy();
+    // The heading and description sit apart, clear of the ✕ (N4).
+    expect(within(sheet).getByRole('heading').parentElement?.className).toBe('grid gap-1.5 pr-6');
     unmount();
     render(<InfoButton soul={luna} />);
     fireEvent.click(screen.getByRole('button', { name: 'Details' }));

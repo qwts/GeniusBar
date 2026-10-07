@@ -7,6 +7,8 @@
 // { requestId, status: 'pending' }; launchStatus(requestId) returns the same
 // shape until status is 'launched' or 'failed'.
 
+import { displayHarness, type CensusRow } from './census';
+
 /** What to launch: an existing soul, or a soul package path in the account. */
 export type LaunchTarget = { soul: string } | { package: string };
 
@@ -57,6 +59,16 @@ export const KNOWN_HARNESSES: readonly { id: string; label: string }[] = [
   { id: 'opencode', label: 'opencode' },
   { id: 'muse', label: 'Muse' },
 ];
+
+/** A harness's name as people know it ("claude" → "Claude Code"); an unknown one keeps its ID. */
+export function harnessLabel(id: string): string {
+  return KNOWN_HARNESSES.find((h) => h.id === id)?.label ?? id;
+}
+
+/** A soul's harness by its label, as the design shows it outside the window title and session subtitle. */
+export function soulHarnessLabel(soul: Pick<CensusRow, 'harness'>): string {
+  return soul.harness ? harnessLabel(soul.harness) : displayHarness(soul);
+}
 
 /** The known harnesses, then any others seen in the census or chosen, each once. */
 export function harnessOptions(seen: readonly string[], ...extra: (string | null | undefined)[]): { id: string; label: string }[] {

@@ -129,7 +129,7 @@ export function Conversation({ name, entries, composer, onDraft, onSend, dudle, 
           </button>
         </div>
         {composer.error && (
-          <p id={errorId} role="alert" className="error small mx-1 mt-1 mb-0">
+          <p id={errorId} role="alert" className="mx-1 mt-1 mb-0 text-xs text-destructive">
             {composer.error}
           </p>
         )}

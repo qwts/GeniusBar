@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { ArrowLeft, X } from 'lucide-react';
 import { BridgeError, inApp, type SoulProfileFileEntry } from '../bridge';
-import { displayHarness, displayName, type CensusRow } from '../model/census';
+import { displayName, type CensusRow } from '../model/census';
+import { harnessLabel, MAX_ROLE, soulHarnessLabel } from '../model/launch';
 import { useI18n, type Translate } from '../lib/i18n';
 import { ProfileSourceContext, useSoulProfile } from '../useSoulProfile';
 import { derivedHue } from '../model/dudle';
@@ -13,8 +14,11 @@ import { SoulDudle } from './FleetList';
 type Tab = 'profile' | 'context';
 const TABS: readonly Tab[] = ['profile', 'context'];
 
-const field = 'w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm text-foreground disabled:cursor-default disabled:opacity-100';
-const label = 'block text-sm font-medium';
+// As the design's shadcn Input and Textarea, and their labels.
+const fieldBase = 'w-full rounded-md border border-input bg-transparent px-3 text-sm text-foreground shadow-sm disabled:cursor-default disabled:opacity-100';
+const field = `h-9 py-1 ${fieldBase}`;
+const textareaField = `min-h-[60px] py-2 ${fieldBase}`;
+const label = 'block text-sm leading-none font-medium';
 const sectionTitle = 'm-0 mb-1 text-xs font-medium text-muted-foreground';
 const shortCommit = (commit: string) => commit.slice(0, 10);
 const shortRevision = (revision: string) => revision.replace(/^sha256:/, '').slice(0, 12);
@@ -139,7 +143,7 @@ function CustomizeBody({ soul, onClose, save, onReload }: { soul: CensusRow; onC
   const baseHue = saved.hue !== undefined ? saved.hue
     : profile ? profile.profile.appearance?.hue ?? null : soul.hue ?? null;
   const hue = draft.hue !== undefined ? draft.hue : baseHue;
-  const harness = profile?.profile.harness ?? displayHarness(soul);
+  const harness = profile?.profile.harness ? harnessLabel(profile.profile.harness) : soulHarnessLabel(soul);
   const nameChanged = draft.name !== undefined && draft.name.trim() !== baseName;
   const descriptionChanged = draft.description !== undefined && draft.description.trim() !== baseDescription.trim();
   const changedFiles = Object.entries(files).filter(([, f]) => f.current !== f.original);
@@ -187,7 +191,7 @@ function CustomizeBody({ soul, onClose, save, onReload }: { soul: CensusRow; onC
       <div className="flex items-center gap-3 pr-8">
         {/* The chosen colour, live, as the design's title. */}
         <SoulDudle soul={hue === null ? { ...soul, hue: undefined } : { ...soul, hue }} size={36} paused={false} />
-        <h2 id={titleId} className="m-0 truncate text-lg leading-none font-semibold tracking-tight">{baseName}</h2>
+        <h2 id={titleId} className="m-0 truncate text-lg leading-none font-semibold tracking-tight">{name.trim() || baseName}</h2>
         <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">{harness}</span>
       </div>
       {/* The session's segmented tabs, as the design's. */}
@@ -270,7 +274,7 @@ function CustomizeBody({ soul, onClose, save, onReload }: { soul: CensusRow; onC
       <div className="flex justify-end gap-2">
         <button type="button" onClick={onClose}
           className="min-h-8 rounded-md px-4 text-sm font-medium text-foreground hover:bg-accent">
-          {t('close')}
+          {t('cancel')}
         </button>
         {editable && (
           <button type="button" onClick={() => { void onSave(); }} disabled={!dirty || !valid || saving}
@@ -305,13 +309,13 @@ function ProfilePanel({ ids, name, description, editable, onName, onDescription,
         <div className="grid gap-1">
           <label htmlFor={`${ids}-role`} className={label}>{t('edit.role')}</label>
           {/* agent-bot's profile carries no role; it comes from the population list. Empty removes it. */}
-          <input id={`${ids}-role`} className={field} value={role} maxLength={60} placeholder={t('none')}
+          <input id={`${ids}-role`} className={field} value={role} maxLength={MAX_ROLE}
             disabled={!editable} onChange={(e) => onRole(e.target.value)} />
         </div>
       </div>
       <div className="grid gap-1">
         <label htmlFor={`${ids}-desc`} className={label}>{t('edit.description')}</label>
-        <textarea id={`${ids}-desc`} className={`${field} resize-none`} rows={3} value={description} maxLength={500}
+        <textarea id={`${ids}-desc`} className={`${textareaField} resize-none`} rows={3} value={description} maxLength={500}
           placeholder={t('edit.descriptionHint')} disabled={!editable} onChange={(e) => onDescription(e.target.value)} />
       </div>
       <ColourField ids={ids} hue={hue} declared={declared} editable={editable} onHue={onHue} />

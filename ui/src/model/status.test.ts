@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { translate } from '../lib/i18n';
 import {
+  brokerErrorCode,
   brokerErrorMessage,
   credentialNote,
+  errorText,
   disconnected,
   emptyRosterText,
   footerStatus,
@@ -10,6 +12,7 @@ import {
   formatUptime,
   healthHeader,
   pendingApprovalMessage,
+  statusErrors,
   unpairedMessage,
   type BrokerHealth,
   type ConnectionSnapshot,
@@ -46,6 +49,30 @@ describe('Broker error messages', () => {
     expect(brokerErrorMessage('no-such-soul', '')).toBe('GeniusBar couldn’t check your account. Try again in a moment.');
     expect(brokerErrorMessage('broker-unreachable', 'socket missing'))
       .toBe('GeniusBar can’t reach its background service yet.');
+  });
+
+  it('stores a code GeniusBar translates where it shows, or the broker’s own prose (P2-b)', () => {
+    const es = (key: Parameters<typeof translate>[1], vars?: Record<string, string | number>) => translate('es', key, vars);
+    expect(brokerErrorCode('unauthenticated', 'who?')).toBe(statusErrors.unpaired);
+    expect(brokerErrorCode('not-approved', '')).toBe(statusErrors.notApproved);
+    expect(brokerErrorCode('broker-timeout', 'slow')).toBe(statusErrors.unreachable);
+    expect(brokerErrorCode('no-such-soul', '')).toBe(statusErrors.unknown);
+    expect(brokerErrorCode('no-such-soul', 'gone')).toBe('gone');
+    expect(errorText(statusErrors.unreachable, es)).toBe('GeniusBar aún no puede contactar con su servicio en segundo plano.');
+    expect(errorText(statusErrors.bridge)).toBe('GeniusBar had trouble starting its background service. Try reopening GeniusBar.');
+    expect(errorText('gone', es)).toBe('gone');
+    expect(brokerErrorMessage('not-approved', '', es)).toBe('GeniusBar necesita aprobación para conectarse. Pide al propietario de tu cuenta que lo apruebe.');
+    expect(footerStatus({ ...connected, unpaired: true, lastError: statusErrors.notApproved }, es))
+      .toEqual({ text: 'GeniusBar necesita aprobación para conectarse. Pide al propietario de tu cuenta que lo apruebe.', isError: true });
+  });
+
+  it('shows the time as hour and minute in the app’s language (P2-b)', () => {
+    const at = new Date(2026, 0, 1, 15, 4, 59);
+    expect(formatTime(at)).toBe(new Intl.DateTimeFormat('en', { hour: '2-digit', minute: '2-digit' }).format(at));
+    expect(formatTime(at)).not.toMatch(/59/);
+    expect(formatTime(at, 'es')).toBe('15:04');
+    const es = (key: Parameters<typeof translate>[1], vars?: Record<string, string | number>) => translate('es', key, vars);
+    expect(footerStatus({ ...connected, lastRefresh: at }, es, 'es')).toEqual({ text: 'Actualizado 15:04', isError: false });
   });
 });
 
@@ -128,12 +155,11 @@ describe('Footer status', () => {
     ).toEqual({ text: `Last updated · ${formatTime(refreshed)}`, isError: false });
     // Before setup the keychain has no principal: the header says so, not the footer.
     expect(footerStatus({ ...connected, unpaired: true, lastError: 'cannot read the principal' })).toBeNull();
-    expect(footerStatus({ ...connected, brokerUnreachable: true, lastError: 'GeniusBar can’t reach its background service yet.' })).toBeNull();
+    expect(footerStatus({ ...connected, brokerUnreachable: true, lastError: statusErrors.unreachable })).toBeNull();
     // Waiting for approval and a dropped bridge are still the footer's to say.
-    expect(footerStatus({ ...connected, unpaired: true, lastError: pendingApprovalMessage }))
+    expect(footerStatus({ ...connected, unpaired: true, lastError: statusErrors.notApproved }))
       .toEqual({ text: pendingApprovalMessage, isError: true });
-    expect(footerStatus({ ...connected, unpaired: true, bridgeConnected: false,
-      lastError: 'GeniusBar had trouble starting its background service. Try reopening GeniusBar.' }))
+    expect(footerStatus({ ...connected, unpaired: true, bridgeConnected: false, lastError: statusErrors.bridge }))
       .toEqual({ text: 'GeniusBar had trouble starting its background service. Try reopening GeniusBar.', isError: true });
   });
 });
