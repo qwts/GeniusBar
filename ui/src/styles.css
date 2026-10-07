@@ -148,10 +148,12 @@
   .gb input[type="checkbox"][role="switch"] {
     appearance: none; position: relative; flex-shrink: 0; width: 36px; height: 20px; margin: 0;
     border-radius: 9999px; background: var(--input); transition: background 0.15s;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / .05);
   }
   .gb input[type="checkbox"][role="switch"]::before {
     content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
     border-radius: 9999px; background: var(--background); transition: transform 0.15s;
+    box-shadow: 0 10px 15px -3px rgb(0 0 0 / .1), 0 4px 6px -4px rgb(0 0 0 / .1);
   }
   .gb input[type="checkbox"][role="switch"]:checked { background: var(--primary); }
   .gb input[type="checkbox"][role="switch"]:checked::before { transform: translateX(16px); }

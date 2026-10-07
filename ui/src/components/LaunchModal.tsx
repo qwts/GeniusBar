@@ -26,17 +26,17 @@ export function LaunchModal({ onClose, busy = false, children }: { onClose: () =
     box.current?.querySelector<HTMLElement>('input:not([readonly]), select')?.focus();
   }, []);
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4"
       onPointerDown={(e) => { pressedBackdrop.current = e.target === e.currentTarget; }}
       onClick={(e) => { if (e.target === e.currentTarget && pressedBackdrop.current) onClose(); }}>
       <section ref={box} role="dialog" aria-modal="true" aria-labelledby={titleId}
         onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); escape.current(); } }}
-        className="relative grid max-h-full w-full max-w-lg gap-5 overflow-y-auto rounded-lg border border-border bg-popover p-6 shadow-2xl">
+        className="relative grid max-h-full w-full max-w-lg gap-5 overflow-y-auto rounded-lg border border-border bg-background p-6 shadow-lg">
         <button type="button" onClick={onClose} aria-label={t('close')}
-          className="absolute top-4 right-4 rounded p-1 text-muted-foreground hover:text-foreground">
+          className="absolute top-4 right-4 rounded-sm text-foreground opacity-70 hover:opacity-100">
           <X className="size-4" aria-hidden />
         </button>
-        <h2 id={titleId} className="m-0 pr-8 text-lg font-semibold tracking-tight">{t('launchDialogTitle')}</h2>
+        <h2 id={titleId} className="m-0 pr-8 text-lg leading-none font-semibold tracking-tight">{t('launchDialogTitle')}</h2>
         {children}
       </section>
     </div>

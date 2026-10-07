@@ -97,7 +97,7 @@ describe('Health header', () => {
     expect(header.tone).toBe('ok');
     expect(header.title).toBe('Connected');
     expect(header.detail).toBeNull();
-    expect(emptyRosterText({ ...connected, health })).toBe('No companions yet. Your first companion will appear here.');
+    expect(emptyRosterText({ ...connected, health })).toBe('No companions yet. Launch one to get started.');
   });
 
   it('says unknown when connected with no health yet', () => {

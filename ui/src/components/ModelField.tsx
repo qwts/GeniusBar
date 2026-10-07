@@ -3,6 +3,7 @@ import type { ModelChoice } from '../bridge';
 import type { CensusRow } from '../model/census';
 import { MAX_MODEL } from '../model/launch';
 import { useI18n } from '../lib/i18n';
+import { Select } from './Select';
 import { SoulSourceContext } from './SoulNotices';
 
 const DEFAULT = '__default';
@@ -73,7 +74,9 @@ export function ModelSelect({ value, choices, label, disabled = false, commit, o
   };
   return (
     <span className="grid gap-1">
-      <select aria-label={label} value={other ? OTHER : value ?? DEFAULT} disabled={disabled} className={className}
+      {/* The design's Select trigger; its padding leaves the chevron room on the right. */}
+      <Select aria-label={label} value={other ? OTHER : value ?? DEFAULT} disabled={disabled} wrapperClassName="w-full"
+        className={className.replace(/(^|\s)px-(\S+)/, '$1pl-$2')}
         onChange={(e) => {
           const next = e.target.value;
           if (next === OTHER) {
@@ -90,7 +93,7 @@ export function ModelSelect({ value, choices, label, disabled = false, commit, o
         {choices.map((m) => <option key={m.modelId} value={m.modelId} title={m.description ?? undefined}>{m.name}</option>)}
         {!listed && value !== null && <option value={value}>{value}</option>}
         <option value={OTHER}>{t('model.other')}</option>
-      </select>
+      </Select>
       {other && (
         <span className="flex items-center gap-2">
           <input type="text" aria-label={t('model.otherLabel')} placeholder={t('model.otherPlaceholder')} value={draft}

@@ -11,6 +11,15 @@ const entries: ChatEntry[] = [
 ];
 
 describe('Conversation', () => {
+  it('disables the composer while the companion cannot take messages', () => {
+    const onSend = vi.fn();
+    render(<Conversation name="luna" entries={entries} composer={{ ...emptyComposer, draft: 'hi' }} onDraft={() => {}} onSend={onSend} disabled />);
+    expect((screen.getByRole('textbox', { name: 'Message luna' }) as HTMLTextAreaElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.submit(screen.getByRole('textbox', { name: 'Message luna' }).closest('form')!);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it('lists messages oldest first and renders bodies as safe Markdown, never HTML (#117)', () => {
     render(<Conversation name="luna" entries={entries} composer={emptyComposer} onDraft={() => {}} onSend={() => {}} />);
     const items = screen.getByRole('list', { name: 'Conversation with luna' }).querySelectorAll(':scope > li');
@@ -77,7 +86,7 @@ describe('Conversation', () => {
     expect(screen.getByText('Say hello to luna. Ask for anything — they’ll show their work here.')).toBeTruthy();
     const send = screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement;
     expect(send.disabled).toBe(true);
-    fireEvent.change(screen.getByRole('textbox', { name: 'Message to luna' }), { target: { value: 'hi' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message luna' }), { target: { value: 'hi' } });
     expect(onDraft).toHaveBeenCalledWith('hi');
 
     rerender(<Conversation name="luna" entries={[]} composer={{ ...emptyComposer, draft: 'hi' }} onDraft={onDraft} onSend={onSend} />);

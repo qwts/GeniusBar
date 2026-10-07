@@ -33,6 +33,7 @@ type SignIn = { phase: 'checking' | 'signed-in' | 'signed-out' | 'signing-in' } 
  * Checks once, and offers the harness's own browser sign-in when needed.
  */
 function HarnessSignIn({ auth, harness, soul }: { auth: HarnessAuth; harness: string; soul: string }) {
+  const { t } = useI18n();
   const [state, setState] = useState<SignIn>({ phase: 'checking' });
   const run = (action: 'status' | 'login') => {
     setState({ phase: action === 'login' ? 'signing-in' : 'checking' });
@@ -44,17 +45,17 @@ function HarnessSignIn({ auth, harness, soul }: { auth: HarnessAuth; harness: st
   useEffect(() => { run('status'); }, [harness, soul]); // eslint-disable-line react-hooks/exhaustive-deps
   switch (state.phase) {
     case 'checking':
-      return <p className="muted small" role="status">Checking the {harness} sign-in…</p>;
+      return <p className="muted small" role="status">{t('starter.checkingSignIn', { harness })}</p>;
     case 'signed-in':
-      return <p className="small" role="status">Ready. Open the companion in the fleet to chat.</p>;
+      return <p className="small" role="status">{t('starter.ready')}</p>;
     case 'signing-in':
-      return <p className="muted small" role="status">Finish signing in to {harness} in your browser…</p>;
+      return <p className="muted small" role="status">{t('starter.signingIn', { harness })}</p>;
     case 'signed-out':
     case 'error':
       return (
         <div className="detail-actions">
           {state.phase === 'error' && <p className="error small" role="alert">{state.text}</p>}
-          <button type="button" onClick={() => run('login')}>Sign in to {harness === 'claude' ? 'Claude' : harness}</button>
+          <button type="button" onClick={() => run('login')}>{t('starter.signIn', { harness: harness === 'claude' ? 'Claude' : harness })}</button>
         </div>
       );
   }
@@ -153,7 +154,7 @@ export function FirstLaunch({ starter, launcher, auth, devTools, onStart }:
   return (
     <form
       className="first-launch"
-      aria-label="Start with Starter"
+      aria-label={t('starter.start')}
       onSubmit={(e) => {
         e.preventDefault();
         if (!ready) return;
@@ -162,10 +163,10 @@ export function FirstLaunch({ starter, launcher, auth, devTools, onStart }:
         void launcher.launch({ account: starter.account, target: { package: starter.package }, harness, name: starter.name, comms });
       }}
     >
-      {!started && <p>No companions yet. Start with {starter.name}, a friendly first companion you can chat with.</p>}
+      {!started && <p>{t('starter.intro', { name: starter.name })}</p>}
       <datalist id={`${ids}-harnesses`}>{starter.harnesses.map((h) => <option key={h} value={h} />)}</datalist>
       <label>
-        <span>Harness</span>
+        <span>{t('field.harness')}</span>
         <input value={harness} readOnly={started} list={`${ids}-harnesses`} onChange={(e) => setHarness(e.target.value)} />
       </label>
       <label>
@@ -180,7 +181,7 @@ export function FirstLaunch({ starter, launcher, auth, devTools, onStart }:
       )}
       {!started && (
         <div className="detail-actions">
-          <button type="submit" disabled={!ready}>Start with Starter</button>
+          <button type="submit" disabled={!ready}>{t('starter.start')}</button>
         </div>
       )}
     </form>

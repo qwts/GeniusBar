@@ -88,9 +88,11 @@ export interface HeaderState {
   label: string;
 }
 
-export function healthHeader(s: ConnectionSnapshot, t: Translate = (key, vars) => translate('en', key, vars)): HeaderState {
+const english: Translate = (key, vars) => translate('en', key, vars);
+
+export function healthHeader(s: ConnectionSnapshot, t: Translate = english): HeaderState {
   if (!s.bridgeConnected) {
-    const title = 'Connecting to GeniusBar’s background service…';
+    const title = t('status.connecting');
     return { tone: 'unknown', title, detail: null, label: title };
   }
   // Installed services still starting after login (#118): not an outage yet.
@@ -100,40 +102,37 @@ export function healthHeader(s: ConnectionSnapshot, t: Translate = (key, vars) =
     return { tone: 'unknown', title, detail, label: `${title} ${detail}` };
   }
   if (s.brokerUnreachable) {
-    const title = 'Can’t reach the background service';
+    const title = t('status.unreachable');
     if (s.lastRefresh) {
       const time = formatTime(s.lastRefresh);
       return {
         tone: 'bad',
         title,
-        detail: `Last updated · ${time}`,
-        label: `Can’t reach the background service. Last updated ${time}.`,
+        detail: t('status.lastUpdated', { time }),
+        label: t('status.unreachableSince', { time }),
       };
     }
-    return {
-      tone: 'bad',
-      title,
-      detail: 'Your companions will appear here once GeniusBar connects.',
-      label: 'Can’t reach the background service. Your companions will appear here once GeniusBar connects.',
-    };
+    const detail = t('status.appearOnConnect');
+    return { tone: 'bad', title, detail, label: t('status.unreachableLabel', { detail }) };
   }
   if (s.health) {
-    return { tone: 'ok', title: 'Connected', detail: null, label: 'Connected' };
+    const title = t('status.connected');
+    return { tone: 'ok', title, detail: null, label: title };
   }
   // The principal client has no health op; a census proves the broker is up.
   if (s.lastRefresh) {
-    const title = 'Connected';
+    const title = t('status.connected');
     return { tone: 'ok', title, detail: null, label: title };
   }
-  const title = 'Checking connection…';
+  const title = t('status.checking');
   return { tone: 'unknown', title, detail: null, label: title };
 }
 
 /** Credential line under the header, or null when there is nothing to say. */
-export function credentialNote(s: ConnectionSnapshot): string | null {
+export function credentialNote(s: ConnectionSnapshot, t: Translate = english): string | null {
   if (!s.bridgeConnected) return null;
-  if (s.loadingCredential) return 'Loading credential…';
-  if (s.unpaired) return unpairedMessage;
+  if (s.loadingCredential) return t('status.loadingCredential');
+  if (s.unpaired) return t('status.unpaired');
   return null;
 }
 
@@ -141,9 +140,9 @@ export function credentialNote(s: ConnectionSnapshot): string | null {
  * Text for an empty roster. Null before the bridge connects, when nothing
  * is known about the machine yet.
  */
-export function emptyRosterText(s: ConnectionSnapshot): string | null {
+export function emptyRosterText(s: ConnectionSnapshot, t: Translate = english): string | null {
   if (!s.bridgeConnected) return null;
-  return s.brokerUnreachable ? 'Your companions will appear here once GeniusBar connects.' : 'No companions yet. Your first companion will appear here.';
+  return s.brokerUnreachable ? t('status.appearOnConnect') : t('fleet.empty');
 }
 
 export interface FooterState {
@@ -152,9 +151,9 @@ export interface FooterState {
 }
 
 /** Footer status: outage age first, then the last error, then freshness. */
-export function footerStatus(s: ConnectionSnapshot): FooterState | null {
+export function footerStatus(s: ConnectionSnapshot, t: Translate = english): FooterState | null {
   if (s.brokerUnreachable && s.lastRefresh) {
-    return { text: `Last updated · ${formatTime(s.lastRefresh)}`, isError: false };
+    return { text: t('status.lastUpdated', { time: formatTime(s.lastRefresh) }), isError: false };
   }
   // Before the first successful census this is part of first-run setup;
   // the setup panel already explains what to do.
@@ -163,6 +162,6 @@ export function footerStatus(s: ConnectionSnapshot): FooterState | null {
   // instructions and bridge failures (no setup panel then) still show.
   const setupsJob = s.unpaired && s.bridgeConnected && s.lastError !== pendingApprovalMessage;
   if (s.lastError !== null && !setupsJob) return { text: s.lastError, isError: true };
-  if (s.lastRefresh) return { text: `Updated ${formatTime(s.lastRefresh)}`, isError: false };
+  if (s.lastRefresh) return { text: t('status.updated', { time: formatTime(s.lastRefresh) }), isError: false };
   return null;
 }

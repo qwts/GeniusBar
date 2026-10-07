@@ -56,6 +56,9 @@ export const SoulSourceContext = createContext<SoulSource>({
  * sign-in), read when the soul is shown and on each refresh. `loaded` turns
  * true once the first read settles, even when agent-bot cannot say.
  */
+/** A soul's census record as useSoulPopulation reads it. */
+export interface SoulPopulationRead { record: SoulPopulation | null; reload: () => void }
+
 export function useSoulPopulation(agentId: string, refresh = 0) {
   const source = useContext(SoulSourceContext);
   const [state, setState] = useState<{ agentId: string; record: SoulPopulation | null } | null>(null);
@@ -282,10 +285,10 @@ export function AutopilotBanner({ soul, refresh = 0 }: { soul: CensusRow; refres
  * census again. The Lovable copy notice is not here: agent-bot does not
  * say a launched soul is a copy.
  */
-function SignInNotice({ soul, refresh }: { soul: CensusRow; refresh: number }) {
+function SignInNotice({ soul, population }: { soul: CensusRow; population: SoulPopulationRead }) {
   const { t } = useI18n();
   const source = useContext(SoulSourceContext);
-  const { record, reload } = useSoulPopulation(soul.agentId, refresh);
+  const { record, reload } = population;
   const [signing, setSigning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const failure = record?.harnessAuth;
@@ -301,7 +304,7 @@ function SignInNotice({ soul, refresh }: { soul: CensusRow; refresh: number }) {
       .finally(() => { setSigning(false); reload(); });
   };
   return (
-    <div className="space-y-2 border-b border-border p-3">
+    <div className="space-y-2 border-b border-border p-3 md:px-8">
       <div role="alert" className="flex items-start gap-3 rounded-md border border-destructive/50 bg-destructive/10 p-3">
         <LogIn className="mt-0.5 size-4 text-destructive" aria-hidden />
         <div className="min-w-0 flex-1">
@@ -312,7 +315,7 @@ function SignInNotice({ soul, refresh }: { soul: CensusRow; refresh: number }) {
           {error && <p className="error m-0 text-[11px]">{t('login.failed', { message: error })}</p>}
         </div>
         <button type="button" disabled={signing} onClick={signIn}
-          className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50">
           {signing ? <><Loader2 className="size-4 animate-spin" aria-hidden />{t('login.signingIn', { harness })}</> : t('login.signIn')}
         </button>
       </div>
@@ -324,11 +327,22 @@ function SignInNotice({ soul, refresh }: { soul: CensusRow; refresh: number }) {
  * The notices above a soul's chat (Lovable `SoulNotices` and the
  * Auto-Pilot strip): Auto-Pilot first, then an expired sign-in; both can show.
  */
-export function SoulNotices({ soul, refresh = 0 }: { soul: CensusRow; refresh?: number }) {
+export function SoulNotices({ soul, refresh = 0, population }: { soul: CensusRow; refresh?: number; population?: SoulPopulationRead }) {
+  return population
+    ? <Notices soul={soul} refresh={refresh} population={population} />
+    : <ReadNotices soul={soul} refresh={refresh} />;
+}
+
+function ReadNotices({ soul, refresh }: { soul: CensusRow; refresh: number }) {
+  const population = useSoulPopulation(soul.agentId, refresh);
+  return <Notices soul={soul} refresh={refresh} population={population} />;
+}
+
+function Notices({ soul, refresh, population }: { soul: CensusRow; refresh: number; population: SoulPopulationRead }) {
   return (
     <>
       <AutopilotBanner soul={soul} refresh={refresh} />
-      <SignInNotice soul={soul} refresh={refresh} />
+      <SignInNotice soul={soul} population={population} />
     </>
   );
 }

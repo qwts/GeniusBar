@@ -237,6 +237,14 @@ describe('the ⌘K palette’s actions and keys (#122)', () => {
     expect(screen.getByRole('dialog', { name: 'Launch a new companion' })).toBeTruthy();
   });
 
+  it('groups companions with no team under "No team", after the teams', () => {
+    desk();
+    const palette = openPalette();
+    const groups = within(palette).getAllByRole('group').map((g) => g.getAttribute('aria-label'));
+    expect(groups).toEqual(['luna', 'No team', 'Actions']);
+    expect(within(within(palette).getByRole('group', { name: 'No team' })).getAllByRole('option')).toHaveLength(1);
+  });
+
   it('offers no launch entry without a launcher', () => {
     desk(false);
     expect(within(openPalette()).queryByRole('option', { name: 'Launch a companion…' })).toBeNull();

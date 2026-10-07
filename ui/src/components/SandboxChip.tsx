@@ -62,17 +62,15 @@ export function SandboxChip({ soul }: { soul: CensusRow }) {
       </button>
       {open && (
         <div role="menu" aria-label={t('sandbox.title')}
-          className="absolute top-full right-0 z-50 mt-1 w-64 rounded-md border border-border bg-popover p-1 text-xs shadow-2xl">
-          <p className="m-0 px-2 py-1.5 text-muted-foreground">{runsAsText(row, t)}</p>
+          className="absolute top-full right-0 z-50 mt-1 w-64 rounded-md border border-border bg-popover p-1 shadow-md">
+          <p className="m-0 px-2 py-1.5 text-xs text-muted-foreground">{runsAsText(row, t)}</p>
           {failure && <p role="alert" className="error m-0 px-2 pb-1.5 text-[11px]">{t('sandbox.failed', { message: failure })}</p>}
-          <div role="separator" className="-mx-1 my-1 h-px bg-border" />
+          <div role="separator" className="-mx-1 my-1 h-px bg-muted" />
           {choices.map(([value, label]) => (
             <button key={value} type="button" role="menuitemradio" aria-checked={row.override === value}
               onClick={() => choose(value)}
-              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-none">
-              <span className={`grid size-3 place-items-center rounded-full border ${row.override === value ? 'border-foreground' : 'border-muted-foreground'}`} aria-hidden>
-                {row.override === value && <span className="size-1.5 rounded-full bg-foreground" />}
-              </span>
+              className="relative flex w-full items-center rounded-sm py-1.5 pr-2 pl-8 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none">
+              {row.override === value && <span className="absolute left-2 size-2 rounded-full bg-current" aria-hidden />}
               {label}
             </button>
           ))}
