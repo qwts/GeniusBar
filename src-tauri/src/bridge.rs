@@ -3854,7 +3854,9 @@ fn manifest_appearance(value: &Value) -> Result<Option<u64>, BridgeError> {
         .filter(|hue| *hue <= 359);
     match hue {
         Some(hue) => Ok(Some(hue)),
-        None => Err(revision_invalid("the appearance must be null or a hue from 0 to 359")),
+        None => Err(revision_invalid(
+            "the appearance must be null or a hue from 0 to 359",
+        )),
     }
 }
 
