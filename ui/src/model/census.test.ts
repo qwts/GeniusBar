@@ -13,6 +13,7 @@ import {
   type CensusRow,
   type Presence,
   type SoulNode,
+  withoutArchived,
 } from './census';
 
 function mk(
@@ -192,5 +193,26 @@ describe('withHues (#64)', () => {
     const hued = withHues(rows, new Map([['agent_b', 30]]));
     expect(withHues(hued, new Map([['agent_b', 30]]))).toBe(hued);
     expect(withHues(hued, new Map())[1]).not.toHaveProperty('hue');
+  });
+});
+
+describe('withoutArchived (#196)', () => {
+  const left = { account: 'a', agentId: 'agent_gone', presence: 'left' } as never;
+  const stays = { account: 'a', agentId: 'agent_left', presence: 'left' } as never;
+  const joined = { account: 'a', agentId: 'agent_here', presence: 'joined' } as never;
+  const souls = [left, stays, joined];
+
+  it('drops the rows of souls agent-bot has archived, and only those', () => {
+    const population = [
+      { agentId: 'agent_gone', status: 'retired' },
+      { agentId: 'agent_left', status: 'active' },
+      { agentId: 'agent_here', status: null },
+    ];
+    expect(withoutArchived(souls, population)).toEqual([stays, joined]);
+  });
+
+  it('hides nothing without a population read or without archived souls', () => {
+    expect(withoutArchived(souls, null)).toBe(souls);
+    expect(withoutArchived(souls, [{ agentId: 'agent_here', status: 'active' }])).toBe(souls);
   });
 });

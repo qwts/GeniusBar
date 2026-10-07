@@ -1,12 +1,14 @@
 // Polls the census through the bridge every 5 seconds, as R1 did, and
 // keeps the last successful rows on screen through an outage.
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { BridgeError, call, inApp, servicesInstalled } from './bridge';
-import type { CensusRow } from './model/census';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BridgeError, call, inApp, populationList, servicesInstalled, type PopulationEntry } from './bridge';
+import { withoutArchived, type CensusRow } from './model/census';
 import { applyCensus, type CensusOutcome } from './model/refresh';
 import { disconnected, type ConnectionSnapshot } from './model/status';
 
 export const CENSUS_INTERVAL_MS = 5_000;
+/** How often the roster re-reads which souls are archived (#196); an explicit refresh reads at once. */
+export const POPULATION_INTERVAL_MS = 60_000;
 
 export async function fetchCensus(callImpl: typeof call = call): Promise<CensusOutcome> {
   try {
@@ -29,19 +31,29 @@ export async function brokerInstalled(outcome: CensusOutcome,
   return (await check())?.broker ?? false;
 }
 
-export function useCensus(enabled: boolean = inApp()) {
-  const [census, setCensus] = useState<readonly CensusRow[]>([]);
+export function useCensus(enabled: boolean = inApp(), population: () => Promise<PopulationEntry[] | null> = populationList) {
+  const [rows, setRows] = useState<readonly CensusRow[]>([]);
+  const [archivedBy, setArchivedBy] = useState<PopulationEntry[] | null>(null);
   const [connection, setConnection] = useState<ConnectionSnapshot>(disconnected);
   const inFlight = useRef(false);
+  const readPopulation = useRef(population);
+  readPopulation.current = population;
 
-  const refresh = useCallback(async () => {
+  // The hub's rows, and (less often, it is an agent-bot run) which of them
+  // agent-bot has archived (#196). An explicit refresh, such as after an
+  // archive, reads both so the row goes at once.
+  const refresh = useCallback(async ({ archived = true }: { archived?: boolean } = {}) => {
     if (inFlight.current) return;
     inFlight.current = true;
     try {
       const outcome = await fetchCensus();
       const installed = await brokerInstalled(outcome);
-      if (outcome.ok) setCensus(outcome.souls);
+      if (outcome.ok) setRows(outcome.souls);
       setConnection((prev) => applyCensus(prev, outcome, new Date(), installed));
+      if (archived) {
+        const list = await readPopulation.current().catch(() => null);
+        if (list) setArchivedBy(list);
+      }
     } finally {
       inFlight.current = false;
     }
@@ -50,9 +62,15 @@ export function useCensus(enabled: boolean = inApp()) {
   useEffect(() => {
     if (!enabled) return;
     void refresh();
-    const timer = setInterval(() => { void refresh(); }, CENSUS_INTERVAL_MS);
+    let ticks = 0;
+    const timer = setInterval(() => {
+      ticks += 1;
+      void refresh({ archived: ticks % Math.max(1, Math.round(POPULATION_INTERVAL_MS / CENSUS_INTERVAL_MS)) === 0 });
+    }, CENSUS_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [enabled, refresh]);
 
-  return { census, connection, refresh: enabled ? refresh : undefined };
+  const census = useMemo(() => withoutArchived(rows, archivedBy), [rows, archivedBy]);
+  const refreshAll = useCallback(() => refresh(), [refresh]);
+  return { census, connection, refresh: enabled ? refreshAll : undefined };
 }

@@ -1,6 +1,17 @@
-import { describe, expect, it } from 'vitest';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BridgeError } from './bridge';
-import { brokerInstalled, fetchCensus } from './useCensus';
+import { brokerInstalled, fetchCensus, useCensus } from './useCensus';
+
+const bridge = vi.hoisted(() => ({
+  souls: [] as { account: string; agentId: string; presence: string }[],
+}));
+vi.mock('./bridge', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./bridge')>()),
+  call: async () => ({ souls: bridge.souls }),
+  servicesInstalled: async () => ({ broker: true }),
+  inApp: () => true,
+}));
 
 describe('fetchCensus', () => {
   it('returns the rows from the bridge', async () => {
@@ -32,5 +43,34 @@ describe('brokerInstalled (#118)', () => {
     const timeout = { ok: false as const, code: 'broker-unreachable', message: '' };
     await expect(brokerInstalled(timeout, installed(false))).resolves.toBe(false);
     await expect(brokerInstalled(timeout, async () => null)).resolves.toBe(false);
+  });
+});
+
+describe('useCensus', () => {
+  afterEach(() => cleanup());
+
+  it('drops archived souls from the roster and re-reads them on an explicit refresh (#196)', async () => {
+    bridge.souls = [
+      { account: 'a', agentId: 'agent_gone', presence: 'left' },
+      { account: 'a', agentId: 'agent_here', presence: 'joined' },
+    ];
+    let population: { agentId: string; comms: boolean; managed: boolean; status: string | null }[] = [
+      { agentId: 'agent_gone', comms: false, managed: true, status: 'active' },
+    ];
+    const reads = vi.fn(async () => population);
+    const { result } = renderHook(() => useCensus(true, reads));
+    await waitFor(() => expect(result.current.census.map((s) => s.agentId)).toEqual(['agent_gone', 'agent_here']));
+    expect(reads).toHaveBeenCalledTimes(1);
+    // The owner archives agent_gone; the archive path refreshes.
+    population = [{ agentId: 'agent_gone', comms: false, managed: true, status: 'retired' }];
+    await act(async () => { await result.current.refresh?.(); });
+    await waitFor(() => expect(result.current.census.map((s) => s.agentId)).toEqual(['agent_here']));
+    expect(reads).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps every hub row when agent-bot cannot list the population', async () => {
+    bridge.souls = [{ account: 'a', agentId: 'agent_gone', presence: 'left' }];
+    const { result } = renderHook(() => useCensus(true, async () => null));
+    await waitFor(() => expect(result.current.census).toHaveLength(1));
   });
 });
