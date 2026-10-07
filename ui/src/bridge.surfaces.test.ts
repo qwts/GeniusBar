@@ -31,7 +31,11 @@ describe('native window surfaces (#223)', () => {
     await expect(syncTeamWindows(teams, yes)).resolves.toBe(true);
     expect(calls).toEqual([['sync_team_windows', { teams }]]);
     await expect(syncTeamWindows(teams, (async () => false) as never)).resolves.toBe(false);
-    await expect(syncTeamWindows(teams, (async () => { throw new Error('unknown command'); }) as never)).resolves.toBe(false);
+    // An older shell without the command, or one whose capabilities refuse it, cannot; any other failure is retried later.
+    await expect(syncTeamWindows(teams, (async () => { throw new Error('Command sync_team_windows not found'); }) as never)).resolves.toBe(false);
+    await expect(syncTeamWindows(teams, (async () => { throw 'sync_team_windows not allowed. Permissions associated with this command: ...'; }) as never)).resolves.toBe(false);
+    await expect(syncTeamWindows(teams, (async () => { throw 'team windows not created: user/lead: window server refused'; }) as never))
+      .rejects.toMatchObject({ code: 'sync-failed', message: 'team windows not created: user/lead: window server refused' });
     await expect(syncTeamWindows(teams)).resolves.toBe(false);
   });
 
