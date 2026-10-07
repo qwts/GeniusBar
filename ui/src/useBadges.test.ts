@@ -135,3 +135,20 @@ describe('useBadges hues (#64)', () => {
     expect(fake.population).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('useBadges roles (agent-bot-identity #535)', () => {
+  it('keeps the roles souls declare from the same population call', async () => {
+    const fake: BadgeSources = {
+      status: vi.fn(async () => null),
+      population: vi.fn(async () => [
+        { agentId: 'agent_p', comms: false, managed: true, role: 'Release captain', roleLine: 'Release captain' },
+        { agentId: 'agent_c', comms: false, managed: true },
+      ]),
+      comms: vi.fn(async () => null),
+    };
+    const { result } = renderHook(() => useBadges(['agent_p', 'agent_c'], true, fake));
+    await waitFor(() => expect(result.current.roles && [...result.current.roles])
+      .toEqual([['agent_p', { role: 'Release captain', roleLine: 'Release captain' }]]));
+    expect(fake.population).toHaveBeenCalledTimes(1);
+  });
+});

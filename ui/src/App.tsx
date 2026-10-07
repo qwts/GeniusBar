@@ -25,7 +25,7 @@ import { I18nProvider, LANGS, useI18n, type Lang } from './lib/i18n';
 import { menuApprovals, workingCount } from './model/approvals';
 import { canLaunch } from './model/launch';
 import { conversationOf, emptyComposer, unreadOf } from './model/chat';
-import { allSouls, buildSoulForest, displayName, findSoul, soulKey, withHues, type CensusRow } from './model/census';
+import { allSouls, buildSoulForest, displayName, findSoul, soulKey, withHues, withRoles, type CensusRow } from './model/census';
 import { computerUserName, floatingLead, floatingState } from './model/floating';
 import type { SoulBadges } from './model/refresh';
 import { useBadges } from './useBadges';
@@ -180,7 +180,9 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const badgeIds = useMemo(() => [...new Set(census.filter((s) => s.presence !== 'left').map((s) => s.agentId))], [census]);
   const liveBadges = useBadges(badgeIds, !badges && mode === 'window' && inApp() && !isStatic);
   const hues = (badges ?? liveBadges).hues;
-  const hued = useMemo(() => withHues(census, hues), [census, hues]);
+  // The same read carries the roles souls declare (agent-bot-identity #535).
+  const roles = (badges ?? liveBadges).roles;
+  const hued = useMemo(() => withRoles(withHues(census, hues), roles), [census, hues, roles]);
   const forest = useMemo(() => buildSoulForest(hued), [hued]);
   const roster = useMemo(() => allSouls(forest), [forest]);
   // Selection holds the roster key and resolves against each census, so

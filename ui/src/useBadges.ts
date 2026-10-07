@@ -7,7 +7,8 @@
 // and the floating Dudle's working state clear promptly.
 import { useEffect, useRef, useState } from 'react';
 import { daemonStatus, populationList, soulComms, type DaemonStatus, type PopulationEntry, type SoulComms } from './bridge';
-import { busyOf, commsAmong, commsOf, computerUseOf, huesOf, noBadges, sameHues, sameSet, type SoulBadges } from './model/refresh';
+import { busyOf, commsAmong, commsOf, computerUseOf, huesOf, noBadges, rolesOf, sameHues, sameRoles, sameSet, type SoulBadges } from './model/refresh';
+import type { SoulRole } from './model/census';
 import { CENSUS_INTERVAL_MS } from './useCensus';
 
 export const COMMS_INTERVAL_MS = 60_000;
@@ -67,6 +68,7 @@ export function useBadges(agentIds: readonly string[], enabled: boolean, sources
       try {
         let next: ReadonlySet<string>;
         let hues: ReadonlyMap<string, number> | undefined;
+        let roles: ReadonlyMap<string, SoulRole> | undefined;
         if (list.length === 0) {
           next = new Set();
         } else {
@@ -74,6 +76,7 @@ export function useBadges(agentIds: readonly string[], enabled: boolean, sources
           if (all) {
             next = commsAmong(all, list);
             hues = huesOf(all);
+            roles = rolesOf(all);
           } else {
             // Older bundle: one agent-bot run per soul, one at a time.
             const states: (SoulComms | null)[] = [];
@@ -88,8 +91,9 @@ export function useBadges(agentIds: readonly string[], enabled: boolean, sources
           setBadges((b) => {
             const sameComms = sameSet(b.comms, next);
             const keepHues = hues === undefined || sameHues(b.hues, hues);
-            if (sameComms && keepHues) return b;
-            return { ...b, ...(sameComms ? {} : { comms: next }), ...(keepHues ? {} : { hues }) };
+            const keepRoles = roles === undefined || sameRoles(b.roles, roles);
+            if (sameComms && keepHues && keepRoles) return b;
+            return { ...b, ...(sameComms ? {} : { comms: next }), ...(keepHues ? {} : { hues }), ...(keepRoles ? {} : { roles }) };
           });
         }
       } finally { busy = false; }

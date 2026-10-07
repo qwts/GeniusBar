@@ -50,3 +50,11 @@ describe('fleet', () => {
     expect(companionLabel(left, t)).toMatch(/Unavailable.*Left — no longer available/);
   });
 });
+
+describe('matchesQuery role (agent-bot-identity #535)', () => {
+  it('matches the declared role as the design\'s search does', () => {
+    const [luna] = sampleCensus;
+    expect(matchesQuery({ ...luna, role: 'Release captain' }, 'captain')).toBe(true);
+    expect(matchesQuery(luna, 'captain')).toBe(false);
+  });
+});

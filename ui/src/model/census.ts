@@ -26,6 +26,14 @@ export interface CensusRow {
    * joined from agent-bot's population list by `withHues`; absent derives it.
    */
   hue?: number;
+  /**
+   * The role the soul declares (soul.json `role`, agent-bot-identity #535),
+   * joined from agent-bot's population list by `withRoles`; absent or null
+   * when it declares none, and the harness shows instead.
+   */
+  role?: string | null;
+  /** agent-bot's role line (the role, else "Lead" and the subagent count); joined like `role`. */
+  roleLine?: string | null;
 }
 
 /** A soul with its subagents nested underneath. */
@@ -59,6 +67,24 @@ export function displayName(soul: Pick<CensusRow, 'agentId' | 'name'>): string {
 /** Harness label with an explicit fallback instead of a bare dash. */
 export function displayHarness(soul: Pick<CensusRow, 'harness'>): string {
   return soul.harness ? soul.harness : 'unknown harness';
+}
+
+/**
+ * A companion's subtitle (#122, agent-bot-identity #535): the role it
+ * declares, else its harness, so a soul without a role reads as before.
+ */
+export function displayRole(soul: Pick<CensusRow, 'harness' | 'role'>): string {
+  const role = soul.role?.trim();
+  return role ? role : displayHarness(soul);
+}
+
+/**
+ * The design's "role · harness" line: the declared role ahead of the
+ * harness when there is one, else the harness alone.
+ */
+export function roleAndHarness(soul: Pick<CensusRow, 'harness' | 'role'>): string {
+  const role = soul.role?.trim();
+  return role ? `${role} · ${displayHarness(soul)}` : displayHarness(soul);
 }
 
 /**
@@ -189,6 +215,31 @@ export function withHues(souls: readonly CensusRow[], hues: ReadonlyMap<string, 
     if (hue !== undefined) return { ...soul, hue };
     const { hue: _dropped, ...rest } = soul;
     return rest;
+  });
+  return changed ? out : souls;
+}
+
+/** A soul's declared role and agent-bot's role line, from one `population_list` read. */
+export interface SoulRole {
+  role?: string | null;
+  roleLine?: string | null;
+}
+
+/**
+ * The census with each soul's declared role (agent-bot `population list`,
+ * agent-bot-identity #535) joined in, beside `withHues`. Unchanged rows
+ * (and the same array, when nothing changed) are kept.
+ */
+export function withRoles(souls: readonly CensusRow[], roles: ReadonlyMap<string, SoulRole> | undefined): readonly CensusRow[] {
+  let changed = false;
+  const out = souls.map((soul) => {
+    const next = roles?.get(soul.agentId);
+    const role = next?.role ?? undefined;
+    const roleLine = next?.roleLine ?? undefined;
+    if ((soul.role ?? undefined) === role && (soul.roleLine ?? undefined) === roleLine) return soul;
+    changed = true;
+    const { role: _role, roleLine: _line, ...rest } = soul;
+    return { ...rest, ...(role ? { role } : {}), ...(roleLine ? { roleLine } : {}) };
   });
   return changed ? out : souls;
 }

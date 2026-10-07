@@ -1,7 +1,7 @@
 // Folds one census attempt into the connection snapshot, as R1's AppState
 // refresh did, with errors told apart by their stable code.
 import type { DaemonStatus, SoulComms } from '../bridge';
-import type { CensusRow } from './census';
+import type { CensusRow, SoulRole } from './census';
 import { brokerErrorMessage, STARTING_WINDOW_MS, type ConnectionSnapshot } from './status';
 
 export type CensusOutcome =
@@ -57,6 +57,11 @@ export interface SoulBadges {
    * absent before it answers or from a bundle without the list.
    */
   hues?: ReadonlyMap<string, number>;
+  /**
+   * Declared roles by agent ID (agent-bot-identity #535), from the same read;
+   * absent before it answers or from a bundle without the list.
+   */
+  roles?: ReadonlyMap<string, SoulRole>;
 }
 
 export const noBadges: SoulBadges = { comms: new Set(), computerUse: new Set(), busy: new Set() };
@@ -98,4 +103,17 @@ export function huesOf(entries: readonly { agentId: string; appearance?: { hue: 
 /** Same hues, so a poll that changed nothing keeps the old map and skips a render. */
 export function sameHues(a: ReadonlyMap<string, number> | undefined, b: ReadonlyMap<string, number>): boolean {
   return a !== undefined && a.size === b.size && [...a].every(([id, hue]) => b.get(id) === hue);
+}
+
+/** Declared roles by agent ID from one `population_list` read; souls with neither a role nor a role line are left out. */
+export function rolesOf(entries: readonly { agentId: string; role?: string | null; roleLine?: string | null }[]): ReadonlyMap<string, SoulRole> {
+  return new Map(entries.flatMap((e) => (e.role || e.roleLine
+    ? [[e.agentId, { ...(e.role ? { role: e.role } : {}), ...(e.roleLine ? { roleLine: e.roleLine } : {}) }] as const]
+    : [])));
+}
+
+/** Same roles, so a poll that changed nothing keeps the old map and skips a render. */
+export function sameRoles(a: ReadonlyMap<string, SoulRole> | undefined, b: ReadonlyMap<string, SoulRole>): boolean {
+  return a !== undefined && a.size === b.size
+    && [...a].every(([id, r]) => b.get(id)?.role === r.role && b.get(id)?.roleLine === r.roleLine);
 }

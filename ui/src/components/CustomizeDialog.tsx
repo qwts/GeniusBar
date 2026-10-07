@@ -27,8 +27,10 @@ export interface RevisionEditRequest {
   /**
    * `appearance`: the soul.json key to write (`{ hue }`, 0..359) or remove
    * (null, back to the hue derived from the agent ID); absent leaves it.
+   * `role`: soul.json's `role` (agent-bot-identity #535), at most 60
+   * characters; empty removes it; absent leaves it.
    */
-  edit: { name?: string; description?: string; appearance?: { hue: number } | null; files: Record<string, string> };
+  edit: { name?: string; description?: string; appearance?: { hue: number } | null; role?: string; files: Record<string, string> };
 }
 
 /** The design's colour swatches, in degrees. */
@@ -79,8 +81,10 @@ type Drafts = Record<string, { original: string; current: string }>;
  * time it opens. Name, description and colour, and the soul's own instruction and
  * skill files, can be edited; Save records them as one owner-approved
  * revision of the soul's package (agent-bot `soul revision edit`, which asks
- * the owner itself), with a one-line reason. Role stays read-only (the
- * profile has none) and the other files open in a read-only viewer.
+ * the owner itself), with a one-line reason. Role is edited too: `soul
+ * profile` has none, so it starts from the census row's role (agent-bot's
+ * population list, agent-bot-identity #535). The other files open in a
+ * read-only viewer.
  * Escape, ×, Close or a backdrop click closes it.
  */
 export function CustomizeDialog({ soul, onClose, save = saveRevision }: { soul: CensusRow; onClose: () => void; save?: SaveRevision }) {
@@ -108,8 +112,8 @@ function CustomizeBody({ soul, onClose, save, onReload }: { soul: CensusRow; onC
   const [tab, setTab] = useState<Tab>('profile');
   const [viewing, setViewing] = useState<string | null>(null);
   // hue: a number is a declared colour, null the derived one; undefined untouched.
-  const [draft, setDraft] = useState<{ name?: string; description?: string; hue?: number | null }>({});
-  const [saved, setSaved] = useState<{ name?: string; description?: string; hue?: number | null }>({});
+  const [draft, setDraft] = useState<{ name?: string; description?: string; hue?: number | null; role?: string }>({});
+  const [saved, setSaved] = useState<{ name?: string; description?: string; hue?: number | null; role?: string }>({});
   const [files, setFiles] = useState<Drafts>({});
   const [reason, setReason] = useState(() => t('edit.reasonDefault'));
   const [saving, setSaving] = useState(false);
@@ -128,6 +132,9 @@ function CustomizeBody({ soul, onClose, save, onReload }: { soul: CensusRow; onC
   const baseDescription = saved.description ?? profile?.profile.description ?? '';
   const name = draft.name ?? baseName;
   const description = draft.description ?? baseDescription;
+  // The profile has no role, so the census row's (population list) is the base.
+  const baseRole = saved.role ?? soul.role ?? '';
+  const role = draft.role ?? baseRole;
   // Until the profile answers, the census's population hue stands in.
   const baseHue = saved.hue !== undefined ? saved.hue
     : profile ? profile.profile.appearance?.hue ?? null : soul.hue ?? null;
@@ -137,7 +144,8 @@ function CustomizeBody({ soul, onClose, save, onReload }: { soul: CensusRow; onC
   const descriptionChanged = draft.description !== undefined && draft.description.trim() !== baseDescription.trim();
   const changedFiles = Object.entries(files).filter(([, f]) => f.current !== f.original);
   const hueChanged = draft.hue !== undefined && draft.hue !== baseHue;
-  const dirty = nameChanged || descriptionChanged || hueChanged || changedFiles.length > 0;
+  const roleChanged = draft.role !== undefined && draft.role.trim() !== baseRole.trim();
+  const dirty = nameChanged || descriptionChanged || hueChanged || roleChanged || changedFiles.length > 0;
   const valid = (!nameChanged || name.trim() !== '') && (!descriptionChanged || description.trim() !== '') && reason.trim() !== '';
   const editable = profile !== null;
 
@@ -148,13 +156,16 @@ function CustomizeBody({ soul, onClose, save, onReload }: { soul: CensusRow; onC
     if (nameChanged) edit.name = name.trim();
     if (descriptionChanged) edit.description = description.trim();
     if (hueChanged) edit.appearance = draft.hue === null || draft.hue === undefined ? null : { hue: draft.hue };
+    if (roleChanged) edit.role = role.trim();
     setSaving(true);
     edited();
     try {
       const record = await save(profile.agentId, { expectedRevision: profile.profile.revision, reason: reason.trim(), edit });
       setResult(record.revision);
       setSaved((s) => ({ name: edit.name ?? s.name, description: edit.description ?? s.description,
-        hue: edit.appearance === undefined ? s.hue : edit.appearance?.hue ?? null }));
+        hue: edit.appearance === undefined ? s.hue : edit.appearance?.hue ?? null,
+        // The saved role shows here before the next population read brings it.
+        role: edit.role ?? s.role }));
       setDraft({});
       setFiles((all) => Object.fromEntries(Object.entries(all).map(([path, f]) => [path, { original: f.current, current: f.current }])));
     } catch (failure) {
@@ -205,6 +216,7 @@ function CustomizeBody({ soul, onClose, save, onReload }: { soul: CensusRow; onC
           <ProfilePanel ids={ids} name={name} description={description} editable={editable}
             onName={(value) => { setDraft((d) => ({ ...d, name: value })); edited(); }}
             onDescription={(value) => { setDraft((d) => ({ ...d, description: value })); edited(); }}
+            role={role} onRole={(value) => { setDraft((d) => ({ ...d, role: value })); edited(); }}
             hue={hue ?? derivedHue(soul.agentId)} declared={hue !== null}
             onHue={(value) => { setDraft((d) => ({ ...d, hue: value })); edited(); }}
             facts={profile ? [
@@ -271,10 +283,12 @@ function CustomizeBody({ soul, onClose, save, onReload }: { soul: CensusRow; onC
   );
 }
 
-/** The design's Profile tab: Name and Role, then Description; then the profile's other facts. Role stays read-only. */
-function ProfilePanel({ ids, name, description, editable, onName, onDescription, hue, declared, onHue, facts }: {
+/** The design's Profile tab: Name and Role, then Description; then the profile's other facts. */
+function ProfilePanel({ ids, name, description, editable, onName, onDescription, role, onRole, hue, declared, onHue, facts }: {
   ids: string; name: string; description: string; editable: boolean;
   onName: (value: string) => void; onDescription: (value: string) => void;
+  /** The role shown (soul.json `role`, from the census row); empty when none. */
+  role: string; onRole: (value: string) => void;
   /** The hue shown, 0..359; `declared` false when it is the derived one. */
   hue: number; declared: boolean; onHue: (value: number | null) => void;
   facts: [string, string | null][];
@@ -290,8 +304,9 @@ function ProfilePanel({ ids, name, description, editable, onName, onDescription,
         </div>
         <div className="grid gap-1">
           <label htmlFor={`${ids}-role`} className={label}>{t('edit.role')}</label>
-          {/* agent-bot's profile carries no role yet. */}
-          <input id={`${ids}-role`} className={field} value="" placeholder={t('none')} readOnly disabled />
+          {/* agent-bot's profile carries no role; it comes from the population list. Empty removes it. */}
+          <input id={`${ids}-role`} className={field} value={role} maxLength={60} placeholder={t('none')}
+            disabled={!editable} onChange={(e) => onRole(e.target.value)} />
         </div>
       </div>
       <div className="grid gap-1">
