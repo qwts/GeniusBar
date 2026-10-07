@@ -14,6 +14,7 @@ function fakeSurfaces(opens = true) {
     open: vi.fn(async (request: SurfaceRequest) => { opened.push(request); if (!opens) throw new Error('no window'); }),
     hide: vi.fn(async () => {}),
     sync: vi.fn(async () => true),
+    perimeter: vi.fn(async () => true),
   };
   return { opened, surfaces };
 }
@@ -91,6 +92,19 @@ describe('the popup\'s native windows (#223)', () => {
     rerender(<App census={sampleCensus} connection={connected} surfaces={surfaces} rosterSettled />);
     await act(async () => { vi.advanceTimersByTime(200); });
     expect(surfaces.sync).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the perimeter over the screen while a soul drives it, and closes it after (#122)', async () => {
+    const { surfaces } = fakeSurfaces();
+    const driving = { comms: new Set<string>(), computerUse: new Set(['agent_c']), busy: new Set<string>() };
+    const idle = { comms: new Set<string>(), computerUse: new Set<string>(), busy: new Set<string>() };
+    const { rerender } = render(<App census={sampleCensus} connection={connected} surfaces={surfaces} badges={idle} />);
+    await waitFor(() => expect(surfaces.perimeter).toHaveBeenCalledWith(false));
+    rerender(<App census={sampleCensus} connection={connected} surfaces={surfaces} badges={driving} />);
+    await waitFor(() => expect(surfaces.perimeter).toHaveBeenCalledWith(true));
+    rerender(<App census={sampleCensus} connection={connected} surfaces={surfaces} badges={idle} />);
+    await waitFor(() => expect(surfaces.perimeter).toHaveBeenCalledTimes(3));
+    expect(surfaces.perimeter).toHaveBeenLastCalledWith(false);
   });
 
   it('changes nothing outside the app', () => {

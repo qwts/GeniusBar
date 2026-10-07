@@ -348,6 +348,10 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const layout = useLayout();
   // The popup keeps each team's native window in step (#223), once a census has come.
   useTeamWindows(forest, layout, Boolean(native) && connection.lastRefresh !== null && rosterSettled, native?.sync);
+  // The perimeter and Stop pill over the real screen (#122) while a soul
+  // drives it. Here, with the other coordinator: the tray popup returns
+  // before the desktop's hooks below, which is why it was missing from 0.1.47.
+  usePerimeter((badges ?? liveBadges).computerUse.size > 0, Boolean(native) && connection.lastRefresh !== null, native?.perimeter);
   const desktopOn = desktopWindowsOn(layout);
   // The menu bar's Auto-Pilot banner and amber G (Lovable MenuBar): window mode only.
   const fleetMode = useFleetMode(mode === 'window' ? roster : NO_CENSUS);
@@ -598,8 +602,6 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     : footer?.isError ? { text: footer.text, isError: true }
     : null;
   const shownBadges = badges ?? liveBadges;
-  // The perimeter and Stop pill over the real screen (#122) while a soul drives it.
-  usePerimeter(shownBadges.computerUse.size > 0, Boolean(native) && connection.lastRefresh !== null, native?.perimeter);
   const autopilot = fleetMode.mode === 'autopilot';
   const unreadTotal = unread ? roster.reduce((sum, soul) => sum + unread(soul), 0) : 0;
   const notice = showSetup ? t('setupHint')
