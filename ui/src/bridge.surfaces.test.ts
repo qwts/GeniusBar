@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PhysicalPosition } from '@tauri-apps/api/window';
-import { BridgeError, currentWindow, openSurface, syncTeamWindows, type TauriWindowLike } from './bridge';
+import { BridgeError, currentWindow, openSurface, shellLog, syncTeamWindows, type TauriWindowLike } from './bridge';
 
 describe('native window surfaces (#223)', () => {
   it('asks the shell to open a surface, and rejects outside the app', async () => {
@@ -70,5 +70,16 @@ describe('native window surfaces (#223)', () => {
     } finally {
       Object.defineProperty(window, 'devicePixelRatio', { value: original, configurable: true });
     }
+  });
+});
+
+describe('shellLog', () => {
+  it('sends the line to the shell and swallows a failure', async () => {
+    const invoke = vi.fn(async () => undefined);
+    shellLog('team sync: 4 teams', invoke as never);
+    expect(invoke).toHaveBeenCalledWith('shell_log', { message: 'team sync: 4 teams' });
+    const failing = vi.fn(async () => { throw new Error('no shell'); });
+    expect(() => shellLog('x', failing as never)).not.toThrow();
+    await Promise.resolve();
   });
 });

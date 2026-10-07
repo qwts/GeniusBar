@@ -1,7 +1,7 @@
 // Polls the census through the bridge every 5 seconds, as R1 did, and
 // keeps the last successful rows on screen through an outage.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BridgeError, call, inApp, populationList, servicesInstalled, type PopulationEntry } from './bridge';
+import { BridgeError, call, inApp, populationList, servicesInstalled, shellLog, type PopulationEntry } from './bridge';
 import { withoutArchived, type CensusRow } from './model/census';
 import { applyCensus, type CensusOutcome } from './model/refresh';
 import { disconnected, type ConnectionSnapshot } from './model/status';
@@ -40,6 +40,8 @@ export function useCensus(enabled: boolean = inApp(), population: () => Promise<
   const [populationRead, setPopulationRead] = useState(false);
   const [connection, setConnection] = useState<ConnectionSnapshot>(disconnected);
   const inFlight = useRef(false);
+  // The last census and population outcomes, so `shell.log` gets each change once (#223).
+  const logged = useRef<{ census: string | null; population: string | null }>({ census: null, population: null });
   const readPopulation = useRef(population);
   readPopulation.current = population;
 
@@ -54,10 +56,14 @@ export function useCensus(enabled: boolean = inApp(), population: () => Promise<
       const installed = await brokerInstalled(outcome);
       if (outcome.ok) setRows(outcome.souls);
       setConnection((prev) => applyCensus(prev, outcome, new Date(), installed));
+      const censusLine = outcome.ok ? `census ok: ${outcome.souls.length} souls` : `census ${outcome.code}: ${outcome.message}`;
+      if (censusLine !== logged.current.census) { logged.current.census = censusLine; shellLog(censusLine); }
       if (archived) {
         const list = await readPopulation.current().catch(() => null);
         if (list) setArchivedBy(list);
         setPopulationRead(true);
+        const populationLine = list ? `population: ${list.length} entries` : 'population: not read';
+        if (populationLine !== logged.current.population) { logged.current.population = populationLine; shellLog(populationLine); }
       }
     } finally {
       inFlight.current = false;

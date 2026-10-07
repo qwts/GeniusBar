@@ -385,6 +385,7 @@ pub fn run() {
             open_desktop,
             windows::open_surface,
             windows::sync_team_windows,
+            windows::shell_log,
             bridge::bridge,
             bridge::setup,
             bridge::remove_services,
@@ -441,6 +442,10 @@ pub fn run() {
             snapshot::snapshot_ready
         ])
         .setup(move |app| {
+            windows::log_line(
+                app.handle(),
+                &format!("launch {} {:?}", app.package_info().version, mode),
+            );
             bridge::start(app.handle().clone());
             if !matches!(mode, Mode::Snapshot(_)) {
                 bridge::refresh_services(app.handle().clone());
