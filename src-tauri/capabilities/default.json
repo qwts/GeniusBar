@@ -1,7 +1,31 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The popup and the desktop window (#69) get core APIs only.",
-  "windows": ["main", "desktop"],
-  "permissions": ["core:default"]
+  "description": "Every window gets the core APIs; the surface windows (#223) also move, size, drag and close themselves.",
+  "windows": [
+    "main",
+    "desktop",
+    "team-*",
+    "session-*",
+    "audit",
+    "audit-*",
+    "customize-*",
+    "launch"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-close",
+    "core:window:allow-set-size",
+    "core:window:allow-inner-size",
+    "core:window:allow-outer-position",
+    "core:window:allow-set-position",
+    "core:window:allow-set-focus",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-is-visible",
+    "core:window:allow-minimize",
+    "core:window:allow-unminimize",
+    "core:window:allow-set-title"
+  ]
 }

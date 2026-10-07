@@ -8,6 +8,7 @@ mod soul_package;
 mod starter;
 mod tray;
 mod updates;
+mod windows;
 
 use std::{
     sync::Mutex,
@@ -168,9 +169,12 @@ fn open_desktop_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::R
     window.on_window_event(move |event| {
         if let WindowEvent::Destroyed = event {
             // Closing the desktop leaves the tray app running (see the
-            // ExitRequested handler) and takes its Dock icon away.
+            // ExitRequested handler) and takes its Dock icon away, unless
+            // a session or other surface window still needs it (#223).
             #[cfg(target_os = "macos")]
-            let _ = handle.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            if !handle.state::<windows::Documents>().any() {
+                let _ = handle.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            }
             let _ = &handle;
         }
     });
@@ -372,12 +376,15 @@ pub fn run() {
         .manage(soul_package::PendingSoulPackages::default())
         .manage(Dismissed::default())
         .manage(updates::Updates::default())
+        .manage(windows::Documents::default())
         // A copy: the closure below matches on the original.
         .manage(mode.clone())
         .manage(snapshot::Snapshot::new(snapshot))
         .invoke_handler(tauri::generate_handler![
             app_mode,
             open_desktop,
+            windows::open_surface,
+            windows::sync_team_windows,
             bridge::bridge,
             bridge::setup,
             bridge::remove_services,
