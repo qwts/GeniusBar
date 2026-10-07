@@ -330,7 +330,12 @@ export function useIdentityAction() {
     if (!source) return;
     setBusy(scope);
     setError(null);
-    action(source)
+    // The action is called now (a caller's test sees the call at once), but
+    // through a promise even when it throws or returns nothing: a refusal
+    // belongs in `error`, not on the console.
+    let outcome: Promise<T>;
+    try { outcome = Promise.resolve(action(source)); } catch (e) { outcome = Promise.reject(e); }
+    outcome
       .then((result) => done?.(result), (e: unknown) => setError(identityFailure(e, t)))
       .finally(() => { setBusy(null); reload(); });
   }, [source, reload, t]);
