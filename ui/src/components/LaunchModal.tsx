@@ -10,7 +10,12 @@ import { useI18n } from '../lib/i18n';
  * Escape works wherever focus is, even after it left the dialog (the Launch
  * button disables while a launch runs), and is ignored while `busy` (#116).
  */
-export function LaunchModal({ onClose, busy = false, children }: { onClose: () => void; busy?: boolean; children: ReactNode }) {
+export function LaunchModal({ onClose, busy = false, page = false, children }: {
+  onClose: () => void; busy?: boolean;
+  /** Its own native window (#223): the dialog is the page, with no backdrop. */
+  page?: boolean;
+  children: ReactNode;
+}) {
   const { t } = useI18n();
   const box = useRef<HTMLElement>(null);
   const titleId = useId();
@@ -25,20 +30,26 @@ export function LaunchModal({ onClose, busy = false, children }: { onClose: () =
   useEffect(() => {
     box.current?.querySelector<HTMLElement>('input:not([readonly]), select')?.focus();
   }, []);
+  const dialog = (
+    <section ref={box} role="dialog" aria-modal="true" aria-labelledby={titleId}
+      onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); escape.current(); } }}
+      // As a window's page (#223) it fills the window, below the native traffic lights.
+      className={page ? 'relative grid min-h-full w-full content-start gap-5 bg-background p-6 pt-10'
+        : 'relative grid max-h-full w-full max-w-lg gap-5 overflow-y-auto rounded-lg border border-border bg-background p-6 shadow-lg'}>
+      <button type="button" onClick={onClose} aria-label={t('close')}
+        className={`absolute right-4 rounded-sm text-foreground opacity-70 outline-none hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring ${page ? 'top-10' : 'top-4'}`}>
+        <X className="size-4" aria-hidden />
+      </button>
+      <h2 id={titleId} className="m-0 pr-8 text-lg leading-none font-semibold tracking-tight">{t('launchDialogTitle')}</h2>
+      {children}
+    </section>
+  );
+  if (page) return dialog;
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4"
       onPointerDown={(e) => { pressedBackdrop.current = e.target === e.currentTarget; }}
       onClick={(e) => { if (e.target === e.currentTarget && pressedBackdrop.current) onClose(); }}>
-      <section ref={box} role="dialog" aria-modal="true" aria-labelledby={titleId}
-        onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); escape.current(); } }}
-        className="relative grid max-h-full w-full max-w-lg gap-5 overflow-y-auto rounded-lg border border-border bg-background p-6 shadow-lg">
-        <button type="button" onClick={onClose} aria-label={t('close')}
-          className="absolute top-4 right-4 rounded-sm text-foreground opacity-70 outline-none hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring">
-          <X className="size-4" aria-hidden />
-        </button>
-        <h2 id={titleId} className="m-0 pr-8 text-lg leading-none font-semibold tracking-tight">{t('launchDialogTitle')}</h2>
-        {children}
-      </section>
+      {dialog}
     </div>
   );
 }

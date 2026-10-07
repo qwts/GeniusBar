@@ -624,3 +624,40 @@ export function fromStored(text: string | null): ChatState {
   }
   return enforceAggregateBounds({ conversations, ids });
 }
+
+/**
+ * Another window's saved history folded into this one (#223): every window
+ * of the app polls and acks the same inbox and saves to the same storage,
+ * so each takes in what the others stored. Text entries this window lacks
+ * are added in time order; unread counts follow the other window's, the
+ * newest writer's, except the conversation on screen here, which stays
+ * read. `ahead` says this window holds saved entries (or a read) the other
+ * lacks, so it saves back and the windows agree; nothing is ever removed.
+ */
+export function mergeStored(state: ChatState, other: ChatState, openKey: string | null = null): { state: ChatState; ahead: boolean } {
+  let next = state;
+  const put = (key: string, conversation: Conversation, ids = next.ids) => {
+    next = { conversations: { ...next.conversations, [key]: conversation }, ids };
+  };
+  for (const [key, theirs] of Object.entries(other.conversations)) {
+    const fresh = theirs.entries.filter((e) => !next.ids.has(e.id));
+    if (fresh.length) {
+      const mine = conversationOf(next, key);
+      const ids = new Set(next.ids);
+      fresh.forEach((e) => ids.add(e.id));
+      put(key, { entries: [...mine.entries, ...fresh].sort(byTime), unread: mine.unread }, ids);
+    }
+    const mine = conversationOf(next, key);
+    const unread = key === openKey ? 0 : Math.min(theirs.unread, mine.entries.length);
+    if (mine.unread !== unread) put(key, { ...mine, unread });
+  }
+  next = next === state ? state : enforceAggregateBounds(next);
+  // Only what toStored would save counts, or windows holding more than
+  // STORED_ENTRIES would save back to each other for ever.
+  const ahead = Object.entries(next.conversations).some(([key, c]) => {
+    const saved = c.entries.slice(-STORED_ENTRIES).filter(isEntry);
+    return saved.some((e) => !other.ids.has(e.id))
+      || (key === openKey && (other.conversations[key]?.unread ?? 0) > 0);
+  });
+  return { state: next, ahead };
+}

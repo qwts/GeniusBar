@@ -1,4 +1,4 @@
-import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode, type RefObject } from 'react';
+import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode, type Ref, type RefObject } from 'react';
 import { Archive, ChevronDown, Eye, EyeOff, History, Monitor, MoreHorizontal, Palette, Plus, Radio, Shield, ShieldOff, Users, X } from 'lucide-react';
 import { displayName, displayRole, roleAndHarness, soulKey, type CensusRow, type SoulNode } from '../model/census';
 import { companionLabel, teamKeys, teamsOf, type Team } from '../model/fleet';
@@ -13,11 +13,32 @@ import { SoulDudle } from './FleetList';
 import type { DudleState } from './Dudle';
 import { CompanionHoverCard, useHoverCard } from './HoverCard';
 import { soulStatus, statusText, StatusDot, type StatusInputs } from './DesktopStatus';
+import { SurfaceOpenerContext } from '../surfaces/opener';
 
 const CARD_W = 300;
 /** A lead with no subagents is a slim card, as the design's solo cards. */
 const SOLO_W = 200;
 const GAP = 16;
+
+/**
+ * How one team's card shows under the layout: who in it is visible, whether
+ * it is collapsed, and the card's size. The desktop places cards with it and
+ * the popup's coordinator sizes native team windows with it (#223), before
+ * the window measures its own card.
+ */
+export function teamCard(team: Team, layout: DesktopLayout) {
+  const key = soulKey(team.lead);
+  const visible = team.members.filter((m) => !layout.hidden.includes(soulKey(m.soul)));
+  const collapsed = layout.collapsed.includes(key);
+  const leadHidden = layout.hidden.includes(key);
+  return {
+    key, visible, collapsed, leadHidden,
+    /** A hidden lead with nobody visible under it has no card at all. */
+    shown: !(leadHidden && !visible.length),
+    width: team.members.length > 0 ? CARD_W : SOLO_W,
+    height: 64 + (collapsed || !visible.length ? 0 : Math.ceil(visible.length / 4) * 68 + 12),
+  };
+}
 
 interface DesktopProps {
   forest: readonly SoulNode[];
@@ -68,14 +89,11 @@ export function Desktop({ forest, layout, paused, unreadOf, selectedKey, onOpen,
     const column = CARD_W + GAP;
     const heights = Array<number>(Math.max(1, Math.floor((width - GAP) / column))).fill(GAP);
     return teams.map((team) => {
-      const key = soulKey(team.lead);
-      const visible = team.members.filter((m) => !layout.hidden.includes(soulKey(m.soul)));
-      const collapsed = layout.collapsed.includes(key);
-      const height = 64 + (collapsed || !visible.length ? 0 : Math.ceil(visible.length / 4) * 68 + 12);
+      const { key, visible, collapsed, leadHidden, height } = teamCard(team, layout);
       const col = heights.indexOf(Math.min(...heights));
       const fallback = { x: GAP + col * column, y: heights[col] };
       heights[col] += height + GAP;
-      return { team, id: key, visible, collapsed, leadHidden: layout.hidden.includes(key), pos: layout.pos[key] ?? fallback };
+      return { team, id: key, visible, collapsed, leadHidden, pos: layout.pos[key] ?? fallback };
     });
   }, [teams, layout, width]);
 
@@ -115,6 +133,12 @@ interface ClusterProps {
   badges: SoulBadges;
   onArchive?: (soul: CensusRow) => void;
   status: StatusInputs;
+  /**
+   * A native team window (#223): the card is the whole page, the window
+   * moves by the title (`data-tauri-drag-region`), and nothing is absolute.
+   */
+  windowed?: boolean;
+  cardRef?: Ref<HTMLElement>;
 }
 
 /** Subagents beneath each member: the members after it, deeper, until one is not. */
@@ -134,7 +158,7 @@ function descendants(members: Team['members']): Map<string, number> {
  * counts, so hiding a team root hides it even when the team has visible
  * subagents to reach. Only the controls those subagents need stay.
  */
-function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unreadOf, selectedKey, onOpen, badges, onArchive, status }: ClusterProps) {
+function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unreadOf, selectedKey, onOpen, badges, onArchive, status, windowed = false, cardRef }: ClusterProps) {
   const { t } = useI18n();
   const key = soulKey(team.lead);
   const drag = useRef<{ dx: number; dy: number } | null>(null);
@@ -170,22 +194,27 @@ function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unread
     setLive(null);
   };
 
+  // A native window moves itself: the shell drags it from any element marked
+  // as a drag region, and only that element, so the title's text is marked too.
+  const dragRegion = windowed ? { 'data-tauri-drag-region': '' } : {};
   return (
     <section
+      ref={cardRef}
       aria-label={leadHidden ? t('team.placeholder') : displayName(team.lead)}
-      style={{ left: at.x, top: at.y, width: count > 0 ? CARD_W : SOLO_W }}
-      className={`group absolute rounded-xl border bg-card/75 shadow-lg backdrop-blur-md ${awaitingCount > 0 ? 'border-warning/70' : 'border-border'} ${live ? 'z-20' : ''}`}
+      style={windowed ? { width: count > 0 ? CARD_W : SOLO_W } : { left: at.x, top: at.y, width: count > 0 ? CARD_W : SOLO_W }}
+      // A native team window has no shadow of its own and is the card's size, so the card draws none either.
+      className={`group rounded-xl border bg-card/75 backdrop-blur-md ${windowed ? 'relative' : 'absolute shadow-lg'} ${awaitingCount > 0 ? 'border-warning/70' : 'border-border'} ${live ? 'z-20' : ''}`}
     >
-      <div onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
-        className={`flex touch-none items-center gap-2 p-2 ${live ? 'cursor-grabbing' : 'cursor-grab'}`}>
+      <div {...dragRegion} {...(windowed ? {} : { onPointerDown: onDown, onPointerMove: onMove, onPointerUp: onUp, onPointerCancel: onUp })}
+        className={`flex touch-none items-center gap-2 p-2 ${windowed ? '' : live ? 'cursor-grabbing' : 'cursor-grab'}`}>
         {leadHidden ? (
           <>
             <span className="grid size-10 shrink-0 place-items-center rounded-lg border border-dashed border-border text-muted-foreground" aria-hidden>
               <Users className="size-5" />
             </span>
-            <div className="min-w-0 flex-1 select-none">
-              <p className="m-0 truncate text-sm font-semibold">{t('team.placeholder')}</p>
-              <p className="m-0 truncate font-mono text-[10px] text-muted-foreground">
+            <div {...dragRegion} className="min-w-0 flex-1 select-none">
+              <p {...dragRegion} className="m-0 truncate text-sm font-semibold">{t('team.placeholder')}</p>
+              <p {...dragRegion} className="m-0 truncate font-mono text-[10px] text-muted-foreground">
                 {[subagents, hidden].filter((part): part is string => part !== null).join(' · ')}
               </p>
             </div>
@@ -195,9 +224,9 @@ function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unread
             <CompanionButton soul={team.lead} size={40} paused={paused} unread={unreadOf?.(team.lead) ?? 0}
               selected={selectedKey === key} onOpen={onOpen} bare team={count > 0 ? teamKeys(team) : undefined}
               badges={badges} onArchive={onArchive} status={status} lead={null} subagents={count} />
-            <div className="min-w-0 flex-1 select-none">
-              <p className="m-0 truncate text-sm font-semibold">{displayName(team.lead)}</p>
-              <p className="m-0 truncate font-mono text-[10px] text-muted-foreground">
+            <div {...dragRegion} className="min-w-0 flex-1 select-none">
+              <p {...dragRegion} className="m-0 truncate text-sm font-semibold">{displayName(team.lead)}</p>
+              <p {...dragRegion} className="m-0 truncate font-mono text-[10px] text-muted-foreground">
                 {displayRole(team.lead)}{subagents && <> · {subagents}</>}
               </p>
             </div>
@@ -267,6 +296,25 @@ function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unread
         </ul>
       )}
     </section>
+  );
+}
+
+/**
+ * One team's card as a whole page: the native team window's content (#223),
+ * the same card the in-window desktop draws.
+ */
+export function TeamCard({ team, layout, paused, unreadOf, onOpen, badges = noBadges, onArchive, awaiting = none, fleetPaused = false, cardRef }: {
+  team: Team; layout: DesktopLayout; paused: boolean; unreadOf?: (soul: CensusRow) => number;
+  onOpen: (soul: CensusRow) => void; badges?: SoulBadges; onArchive?: (soul: CensusRow) => void;
+  awaiting?: ReadonlySet<string>; fleetPaused?: boolean; cardRef?: Ref<HTMLElement>;
+}) {
+  const { visible, collapsed, leadHidden } = teamCard(team, layout);
+  const status = useMemo<StatusInputs>(() => ({ busy: badges.busy, computerUse: badges.computerUse, awaiting, fleetPaused }),
+    [badges, awaiting, fleetPaused]);
+  return (
+    <TeamCluster team={team} visible={visible} collapsed={collapsed} leadHidden={leadHidden} pos={{ x: 0, y: 0 }}
+      paused={paused} unreadOf={unreadOf} selectedKey={null} onOpen={onOpen} badges={badges} onArchive={onArchive}
+      status={status} windowed cardRef={cardRef} />
   );
 }
 
@@ -386,6 +434,12 @@ function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = 
   const [customizing, setCustomizing] = useState(false);
   // Customize… reads agent-bot's profile; no source (a plain browser) offers none.
   const customizable = useContext(ProfileSourceContext) !== null;
+  // In the app it opens in its own window (#223); without one, the dialog here.
+  const openSurface = useContext(SurfaceOpenerContext);
+  const customize = () => {
+    if (!openSurface) { setCustomizing(true); return; }
+    openSurface({ surface: 'customize', soul: soulKey(soul) }).catch(() => setCustomizing(true));
+  };
   const button = useRef<HTMLButtonElement>(null);
   const card = useHoverCard(menu === false && !customizing);
   const cardId = useId();
@@ -445,7 +499,7 @@ function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = 
       {card.open && <CompanionHoverCard id={cardId} soul={soul} status={state} statusText={said} lead={lead} subagents={subagents} />}
       {menu !== false && (
         <SoulMenu soul={soul} team={team} onOpen={onOpen} onArchive={onArchive} at={menu ?? undefined}
-          onCustomize={customizable ? () => setCustomizing(true) : undefined}
+          onCustomize={customizable ? customize : undefined}
           onClose={() => { setMenu(false); button.current?.focus(); }} done={() => setMenu(false)} />
       )}
       {customizing && <CustomizeDialog soul={soul} state={state === 'awaiting' || state === 'working' ? state : undefined}
@@ -454,11 +508,52 @@ function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = 
   );
 }
 
+/** Marks an element the native window drags by (#223); only marked elements start a drag. */
+const dragRegionOf = (native: boolean) => (native ? { 'data-tauri-drag-region': '' } : {});
+
+/**
+ * A native window's page (#223) with the same chrome: no close dot (the
+ * window's own traffic lights float over the header's left 72 px), the
+ * header drags the window, and Escape anywhere outside a field or an inner
+ * dialog closes it.
+ */
+function NativeWindow({ head, titleId, onClose, children }: {
+  head: ReactNode; titleId: string; onClose: () => void; children: ReactNode;
+}) {
+  const root = useRef<HTMLElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    // On the document: with no close button, focus may rest on the body.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && root.current && !escapeStaysInside(e.target, root.current)) close.current();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+  return (
+    <section ref={root} aria-labelledby={titleId} className="flex h-full flex-col overflow-hidden bg-card">
+      <div data-tauri-drag-region="" className="flex min-h-10 items-center gap-2 border-b border-border bg-sidebar py-2 pr-3 pl-[72px] select-none">
+        {head}
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+    </section>
+  );
+}
+
 /**
  * A movable window over the desktop with the design's chrome: a close dot,
- * then `head` (the title and its controls), then the body.
+ * then `head` (the title and its controls), then the body. `native` is the
+ * page of a window of its own (#223).
  */
-function DesktopWindow({ head, titleId, onClose, children }: {
+function DesktopWindow({ head, titleId, onClose, native = false, children }: {
+  head: ReactNode; titleId: string; onClose: () => void; native?: boolean; children: ReactNode;
+}) {
+  if (native) return <NativeWindow head={head} titleId={titleId} onClose={onClose}>{children}</NativeWindow>;
+  return <FloatingWindow head={head} titleId={titleId} onClose={onClose}>{children}</FloatingWindow>;
+}
+
+function FloatingWindow({ head, titleId, onClose, children }: {
   head: ReactNode; titleId: string; onClose: () => void; children: ReactNode;
 }) {
   const { t } = useI18n();
@@ -504,8 +599,10 @@ function DesktopWindow({ head, titleId, onClose, children }: {
  * the design's chrome: a close dot, the Dudle, the mono name and its role · harness line,
  * and a pill for the census's hardened flag when it is known.
  */
-export function CompanionWindow({ soul, paused, onClose, actions, state, children }: {
+export function CompanionWindow({ soul, paused, onClose, actions, state, native = false, children }: {
   soul: CensusRow; paused: boolean; onClose: () => void;
+  /** The session's own native window (#223): no close dot, the header drags it. */
+  native?: boolean;
   /** The title Dudle's face (the design's `state={c.presence}`): awaiting, working or idle. */
   state?: DudleState;
   /** The chrome's right-hand controls after the pill, such as ⓘ. */
@@ -516,11 +613,11 @@ export function CompanionWindow({ soul, paused, onClose, actions, state, childre
   const title = displayName(soul);
   const titleId = useId();
   return (
-    <DesktopWindow titleId={titleId} onClose={onClose} head={(
+    <DesktopWindow titleId={titleId} onClose={onClose} native={native} head={(
       <>
         <SoulDudle soul={soul} size={20} paused={paused} state={state} />
-        <h2 id={titleId} className="m-0 truncate font-mono text-xs font-semibold text-foreground">{title}</h2>
-        <span className="mr-auto truncate text-[11px] text-muted-foreground">{roleAndHarness(soul)}</span>
+        <h2 id={titleId} {...dragRegionOf(native)} className="m-0 truncate font-mono text-xs font-semibold text-foreground">{title}</h2>
+        <span {...dragRegionOf(native)} className="mr-auto truncate text-[11px] text-muted-foreground">{roleAndHarness(soul)}</span>
         {typeof soul.hardened === 'boolean' && (
           <span className={`flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${soul.hardened ? 'border-success/50 text-success' : 'border-border text-muted-foreground'}`}>
             {soul.hardened ? <Shield className="size-3" aria-hidden /> : <ShieldOff className="size-3" aria-hidden />}
@@ -539,19 +636,26 @@ export function CompanionWindow({ soul, paused, onClose, actions, state, childre
  * Window mode's Audit log (Lovable route /audit): the companion window's
  * chrome around the design's page, its heading then every companion's records.
  */
-export function AuditWindow({ roster, onClose }: { roster: readonly CensusRow[]; onClose: () => void }) {
+export function AuditWindow({ roster, onClose, native = false, soul = null }: {
+  roster: readonly CensusRow[]; onClose: () => void;
+  /** The audit log's own native window (#223): no close dot, the header drags it. */
+  native?: boolean;
+  /** One companion's records (the native `audit-<slug>` window); null is all activity. */
+  soul?: Pick<CensusRow, 'agentId' | 'name'> | null;
+}) {
   const { t } = useI18n();
   const titleId = useId();
+  const who = soul ? displayName(soul) : t('allActivity');
   return (
-    <DesktopWindow titleId={titleId} onClose={onClose} head={(
+    <DesktopWindow titleId={titleId} onClose={onClose} native={native} head={(
       <>
         <History className="size-4 text-muted-foreground" aria-hidden />
-        <h2 id={titleId} className="m-0 mr-auto truncate font-mono text-xs font-semibold text-foreground">{t('auditTitle')}</h2>
+        <h2 id={titleId} {...dragRegionOf(native)} className="m-0 mr-auto truncate font-mono text-xs font-semibold text-foreground">{t('auditTitle')}</h2>
       </>
     )}>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <h1 className="m-0 px-4 pt-6 text-lg font-semibold md:px-6">{t('auditTitle')} · <span className="text-muted-foreground">{t('allActivity')}</span></h1>
-        <AuditLog agentId={null} roster={roster} />
+        <h1 className="m-0 px-4 pt-6 text-lg font-semibold md:px-6">{t('auditTitle')} · <span className="text-muted-foreground">{who}</span></h1>
+        <AuditLog agentId={soul?.agentId ?? null} roster={roster} />
       </div>
     </DesktopWindow>
   );

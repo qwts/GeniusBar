@@ -7,6 +7,8 @@ import type { CliToolsApi } from './components/CliTools';
 import type { DevTools, HarnessAuth, Starter } from './components/FirstLaunch';
 import { inApp, openDesktop } from './bridge';
 import { menuApprovals } from './model/approvals';
+import { parseSurface } from './model/surface';
+import { LiveSurface } from './surfaces/LiveSurface';
 import { useCensus } from './useCensus';
 import { useChat } from './useChat';
 import { useLaunch } from './useLaunch';
@@ -116,8 +118,13 @@ function Live({ snapshot }: { snapshot: SnapshotOptions | null }) {
 
 // The shell says before the first render whether this is a snapshot.
 const snapshot = inApp() ? await invoke<SnapshotOptions | null>('snapshot_options').catch(() => null) : null;
+// Which window this is (#223): the popup and the --window desktop are
+// today's Live; a team card, a session, the audit log, Customize and
+// Launch are native windows of their own.
+const query = parseSurface(location.search);
+const native = query.surface !== null && query.surface !== 'tray' && query.surface !== 'window';
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <Live snapshot={snapshot} />
+    {native ? <LiveSurface query={query} snapshot={Boolean(snapshot)} /> : <Live snapshot={snapshot} />}
   </StrictMode>,
 );

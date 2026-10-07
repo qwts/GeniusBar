@@ -22,6 +22,8 @@ import {
   emptyComposer,
   fromStored,
   markRead,
+  mergeStored,
+  normalizeApprovals,
   toStored,
   mergeIncoming,
   sendFailed,
@@ -94,6 +96,11 @@ export async function sendMessage(callImpl: typeof call, to: string, body: strin
 /** Where chat history is kept; the app's web view local storage by default. */
 export type ChatStorage = Pick<Storage, 'getItem' | 'setItem'>;
 export const CHAT_STORAGE_KEY = 'geniusbar.chat';
+/**
+ * The last pending-approvals list any window read (#223), so a window that
+ * does not poll (a native team card) still shows who waits on the owner.
+ */
+export const APPROVALS_STORAGE_KEY = 'geniusbar.approvals';
 
 function defaultStorage(): ChatStorage | null {
   try { return typeof localStorage === 'undefined' ? null : localStorage; } catch { return null; }
@@ -216,9 +223,14 @@ export function useChat({
   // agent-bot's view of the open soul: its aside journal, the pending
   // proposals, and decisions made here.
   const asideLog = useRef(new Map<string, AsideRecord[]>());
-  const pending = useRef<ApprovalRecord[]>([]);
+  // A window that does not poll starts from the list the others last read.
+  const [initialApprovals] = useState<ApprovalRecord[]>(() => {
+    if (enabled) return [];
+    try { return normalizeApprovals(JSON.parse(storage?.getItem(APPROVALS_STORAGE_KEY) ?? 'null')) ?? []; } catch { return []; }
+  });
+  const pending = useRef<ApprovalRecord[]>(initialApprovals);
   const local = useRef(new Map<string, LocalApproval>());
-  const [approvals, setApprovals] = useState<PendingApprovals>(() => ({ records: [], local: new Map() }));
+  const [approvals, setApprovals] = useState<PendingApprovals>(() => ({ records: initialApprovals, local: new Map() }));
   const publishApprovals = useCallback(() => {
     setApprovals({ records: pending.current, local: new Map(local.current) });
   }, []);
@@ -258,6 +270,7 @@ export function useChat({
       if (approvals && JSON.stringify(approvals) !== JSON.stringify(pending.current)) {
         pending.current = approvals;
         publishApprovals();
+        try { saved.current?.setItem(APPROVALS_STORAGE_KEY, JSON.stringify({ approvals })); } catch { /* this window only */ }
       }
       if (key !== null) showSide(key);
     } finally {
@@ -295,6 +308,31 @@ export function useChat({
     const timer = setInterval(() => { void poll(); void pollSide(); }, intervalMs);
     return () => clearInterval(timer);
   }, [enabled, intervalMs, poll, pollSide]);
+
+  // The app's windows share this storage (#223): what another window stored
+  // or acked, and the approvals it read, show here too. The storage event
+  // fires in every web view but the one that wrote.
+  useEffect(() => {
+    if (!saved.current || typeof window === 'undefined') return;
+    const onStorage = (e: StorageEvent) => {
+      if (e.newValue === null) return;
+      if (e.key === CHAT_STORAGE_KEY) {
+        const merged = mergeStored(store.current, fromStored(e.newValue), openKey.current);
+        if (merged.ahead) update(() => merged.state);
+        else if (merged.state !== store.current) { store.current = merged.state; setChat(merged.state); }
+      } else if (e.key === APPROVALS_STORAGE_KEY) {
+        let records: ApprovalRecord[] | null = null;
+        try { records = normalizeApprovals(JSON.parse(e.newValue)); } catch { /* malformed: keep ours */ }
+        if (records && JSON.stringify(records) !== JSON.stringify(pending.current)) {
+          pending.current = records;
+          publishApprovals();
+          if (openKey.current !== null) showSide(openKey.current);
+        }
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [update, publishApprovals, showSide]);
 
   const open = useCallback((key: string | null) => {
     openKey.current = key;
