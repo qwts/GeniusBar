@@ -512,8 +512,11 @@ pub fn refresh_services<R: Runtime>(app: AppHandle<R>) {
             return;
         }
         match run_services(&app, "refresh").await {
-            Ok(result) => eprintln!("services: {result}"),
-            Err(error) => eprintln!("services: refresh failed: {} {}", error.code, error.message),
+            Ok(result) => crate::windows::log_line(&app, &format!("services: {result}")),
+            Err(error) => crate::windows::log_line(
+                &app,
+                &format!("services: refresh failed: {} {}", error.code, error.message),
+            ),
         }
         state.setting_up.store(false, Ordering::SeqCst);
         // Command-line wrappers the user installed follow the app if it moved (#41).

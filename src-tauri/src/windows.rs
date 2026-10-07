@@ -294,15 +294,25 @@ pub async fn sync_team_windows(
     }
     let open: Vec<String> = app.webview_windows().keys().cloned().collect();
     let (create, close) = plan(&open, &teams);
+    let placed = open
+        .iter()
+        .filter(|label| label.starts_with(TEAM_PREFIX))
+        .count();
+    log_line(
+        &app,
+        &format!(
+            "sync_team_windows: {} asked, {} open, create {}, close {}",
+            teams.len(),
+            placed,
+            create.len(),
+            close.len()
+        ),
+    );
     for label in close {
         if let Some(window) = app.get_webview_window(&label) {
             let _ = window.close();
         }
     }
-    let placed = open
-        .iter()
-        .filter(|label| label.starts_with(TEAM_PREFIX))
-        .count();
     let mut failed: Vec<String> = Vec::new();
     for (index, team) in create.into_iter().enumerate() {
         let label = format!("{TEAM_PREFIX}{}", slug(&team.key));
@@ -330,8 +340,17 @@ pub async fn sync_team_windows(
         // One card that cannot be made (the app still settling right after an
         // update, a window server refusal) never costs the others: it is noted
         // and the popup asks again shortly.
-        if let Err(e) = builder.build() {
-            failed.push(format!("{}: {e}", team.key));
+        match builder.build() {
+            Ok(window) => {
+                let handle = app.clone();
+                let gone = label.clone();
+                window.on_window_event(move |event| {
+                    if let WindowEvent::Destroyed = event {
+                        log_line(&handle, &format!("team window {gone} destroyed"));
+                    }
+                });
+            }
+            Err(e) => failed.push(format!("{}: {e}", team.key)),
         }
     }
     // A window already open keeps its size and place: its page fits itself
@@ -345,10 +364,17 @@ pub async fn sync_team_windows(
     }
 }
 
+/// A line from the popup's coordinator for `shell.log` (#223): the shell
+/// has no other view of why the page did or did not ask for windows.
+#[tauri::command]
+pub fn shell_log(app: tauri::AppHandle, message: String) {
+    log_line(&app, &format!("ui {message}"));
+}
+
 /// Appends one line to `shell.log` in the app's log folder
 /// (`~/Library/Logs/app.geniusbar` on macOS): the only trace a tray app
 /// launched by LaunchServices leaves. Failures to log are ignored.
-pub fn log_line(app: &tauri::AppHandle, message: &str) {
+pub fn log_line<R: tauri::Runtime>(app: &tauri::AppHandle<R>, message: &str) {
     use std::io::Write;
     let Ok(dir) = app.path().app_log_dir() else {
         return;

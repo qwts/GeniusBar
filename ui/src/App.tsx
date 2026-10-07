@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { History, Plus, Volume2, VolumeX, X } from 'lucide-react';
 import { ApprovalCounts, ApprovalsList } from './components/ApprovalsList';
 import { ArchiveDialog, ArchivedNotice, liveArchiver, type Archiver } from './components/ArchiveDialog';
-import { currentWindow, inApp, listSoulTemplates, liveComputerUse, openSurface, popupVisible, soulStopSupported, stopSoul, syncTeamWindows, type ComputerUseSwitch, type RemovedSoul, type SurfaceRequest, type TeamWindowSpec } from './bridge';
+import { currentWindow, inApp, listSoulTemplates, liveComputerUse, openSurface, popupVisible, soulStopSupported, stopSoul, syncTeamWindows, type ComputerUseSwitch, type RemovedSoul, type SurfaceRequest, type TeamWindowSpec, shellLog } from './bridge';
 import { FooterMenu } from './components/FooterMenu';
 import { CompanionSession, ComputerUseContext, InfoButton, type SessionTab } from './components/CompanionSession';
 import { AuditWindow, CompanionWindow, Desktop } from './components/Desktop';
@@ -268,6 +268,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const empty = emptyRosterText(connection, t);
   const footer = footerStatus(connection, t, lang);
   const showSetup = Boolean(setup && onSetup && (setup.running || needsSetup(connection)));
+  useEffect(() => { shellLog(`setup view ${showSetup ? 'shown' : 'hidden'}`); }, [showSetup]);
   const [launchingPackage, setLaunchingPackage] = useState(false);
   // A Finder-opened package fills the form until it is closed; after that a
   // manual launch starts empty rather than reusing its path and error.

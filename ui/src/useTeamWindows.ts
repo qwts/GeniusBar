@@ -4,7 +4,7 @@
 // layout, so it tells the shell which team windows should exist, where, and
 // how big; the shell creates, moves and closes them.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { syncTeamWindows, type TeamWindowSpec } from './bridge';
+import { shellLog, syncTeamWindows, type TeamWindowSpec } from './bridge';
 import { teamCard } from './components/Desktop';
 import { soulKey, type SoulNode } from './model/census';
 import { teamsOf } from './model/fleet';
@@ -59,18 +59,29 @@ export function useTeamWindows(forest: readonly SoulNode[], layout: DesktopLayou
   const [attempt, setAttempt] = useState(0);
   const call = useRef(sync);
   call.current = sync;
+  const wasEnabled = useRef<boolean | null>(null);
   useEffect(() => {
+    if (wasEnabled.current !== enabled) {
+      wasEnabled.current = enabled;
+      shellLog(`team sync ${enabled ? 'enabled' : 'disabled'}`);
+    }
     if (!enabled || off.current || signature === sent.current) return;
     const wait = failures.current === 0 ? delayMs : Math.min(TEAM_RETRY_MAX_MS, retryMs * 2 ** (failures.current - 1));
     let stale = false;
     const timer = setTimeout(() => {
       sent.current = signature;
-      call.current(JSON.parse(signature) as TeamWindowSpec[]).then(
+      const teams = JSON.parse(signature) as TeamWindowSpec[];
+      shellLog(`team sync: ${teams.length} teams${failures.current ? ` (retry ${failures.current})` : ''}`);
+      call.current(teams).then(
         (used) => {
           failures.current = 0;
-          if (!used) off.current = true;
+          if (!used) {
+            off.current = true;
+            shellLog('team sync: the shell declined; off for this run');
+          }
         },
-        () => {
+        (error: unknown) => {
+          shellLog(`team sync failed: ${error instanceof Error ? error.message : String(error)}`);
           if (stale) return;
           // Forget this list was sent, so the next change or the retry resends it.
           failures.current += 1;

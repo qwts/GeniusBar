@@ -651,6 +651,16 @@ export interface TeamWindowSpec {
  * a `sync-failed` BridgeError, so the coordinator tries again later rather
  * than giving up on the desktop for the rest of the run.
  */
+/**
+ * One line for the shell's `shell.log` (#223), from the popup's coordinator:
+ * the shell cannot otherwise tell why the page did or did not ask for
+ * windows. Never throws; nothing outside the app.
+ */
+export function shellLog(message: string, invokeImpl: typeof invoke = invoke): void {
+  if (!inApp() && invokeImpl === invoke) return;
+  void invokeImpl('shell_log', { message }).catch(() => {});
+}
+
 export async function syncTeamWindows(teams: readonly TeamWindowSpec[], invokeImpl: typeof invoke = invoke): Promise<boolean> {
   if (!inApp() && invokeImpl === invoke) return false;
   try {
