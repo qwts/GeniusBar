@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, Circle, Loader2 } from 'lucide-react';
 import { displayName, type CensusRow } from '../model/census';
 import { savedBrief } from '../bridge';
-import { canLaunch, harnessOptions, MAX_BRIEF, MAX_HARNESS, normalPackagePath, preferredHarness, prefillHarness, suggestedName, type LaunchState } from '../model/launch';
+import { canLaunch, harnessOptions, MAX_BRIEF, MAX_HARNESS, normalPackagePath, preferredHarness, prefillHarness, suggestedName, type LaunchStage, type LaunchState } from '../model/launch';
 import { useI18n } from '../lib/i18n';
 import { radioGroupKeys } from '../lib/radioGroup';
 import { chosenTemplate, CUSTOM_SOUL, initialChoice } from '../model/templates';
@@ -100,15 +100,22 @@ export function LaunchStatus({ state }: { state: LaunchState }) {
 
 const PROGRESS = ['launch.progress.request', 'launch.progress.daemon', 'launch.progress.joined'] as const;
 
+/** The daemon's stages that mean it is past starting and joining the companion. */
+const JOINING_STAGES: readonly LaunchStage[] = ['joining', 'harness', 'session'];
+
 /**
  * The design's launch progress (Lovable launch dialog while busy): the
  * request, the daemon starting it, and the companion joining, each done,
- * running or waiting. GeniusBar knows only the request and the daemon's
- * answer, so "Joined" turns when the daemon reports the launch.
+ * running or waiting. The daemon's reported stage (agent-bot-identity
+ * #536) moves the list: `checking` and `account` are the daemon starting
+ * it, `joining` onwards is the companion joining; with no report the list
+ * waits on the daemon until it answers.
  */
 export function LaunchProgress({ state }: { state: LaunchState }) {
   const { t } = useI18n();
-  const step = state.phase === 'requesting' ? 0 : state.phase === 'pending' ? 1 : 3;
+  const step = state.phase === 'requesting' ? 0
+    : state.phase === 'pending' ? (state.stage && JOINING_STAGES.includes(state.stage) ? 2 : 1)
+    : 3;
   return (
     <div className="grid gap-2">
       <ol className="m-0 grid list-none gap-2 p-0 text-sm" aria-live="polite" aria-label={t('launch.progress')}>
@@ -125,6 +132,7 @@ export function LaunchProgress({ state }: { state: LaunchState }) {
       {state.phase === 'pending' && (
         <p className="m-0 font-mono text-[11px] text-muted-foreground">
           <span className="selectable">{state.requestId}</span>
+          {state.stage && <span> · {state.stage}</span>}
           {state.note && <span className="block font-sans">{state.note}</span>}
         </p>
       )}

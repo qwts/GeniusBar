@@ -618,7 +618,7 @@ describe('App window mode', () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     const { rerender } = render(<App mode="window" census={sampleCensus} connection={sampleConnection} launcher={launcher} isStatic />);
     fireEvent.click(within(desktop()).getByRole('button', { name: 'Launch companion' }));
-    const pending: LaunchApi = { ...launcher, state: { phase: 'pending', requestId: 'r1', note: null } };
+    const pending: LaunchApi = { ...launcher, state: { phase: 'pending', requestId: 'r1', note: null, stage: null } };
     rerender(<App mode="window" census={sampleCensus} connection={sampleConnection} launcher={pending} isStatic />);
     fireEvent.keyDown(screen.getByLabelText('Package'), { key: 'Escape' });
     fireEvent.keyDown(document.body, { key: 'Escape' });

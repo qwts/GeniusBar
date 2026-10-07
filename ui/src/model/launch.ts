@@ -149,13 +149,25 @@ export function launchParams(request: LaunchRequest): Record<string, string | bo
   return params;
 }
 
+/**
+ * The stages a daemon reports while a launch is pending (agent-comms
+ * `launch-progress`, agent-bot-identity #536), in order. An older daemon
+ * reports none.
+ */
+export const LAUNCH_STAGES = ['checking', 'account', 'joining', 'harness', 'session'] as const;
+export type LaunchStage = (typeof LAUNCH_STAGES)[number];
+
 export type LaunchState =
   | { phase: 'idle' }
   | { phase: 'requesting' }
-  /** Accepted; `note` explains a status check that could not complete. */
-  | { phase: 'pending'; requestId: string; note: string | null }
+  /**
+   * Accepted; `note` explains a status check that could not complete and
+   * `stage` is the daemon's latest report, null until it says.
+   */
+  | { phase: 'pending'; requestId: string; note: string | null; stage: LaunchStage | null }
   | { phase: 'launched'; requestId: string; agentId: string | null }
-  | { phase: 'failed'; requestId: string; agentId: string | null; detail: string | null }
+  /** `stage` says where the daemon stopped, when it reported stages. */
+  | { phase: 'failed'; requestId: string; agentId: string | null; detail: string | null; stage?: LaunchStage | null }
   /** The launch was refused, or its status can no longer be read. */
   | { phase: 'error'; requestId: string | null; text: string };
 
@@ -169,14 +181,22 @@ export function canLaunch(state: LaunchState): boolean {
 /** The state after one `launchStatus` result; unknown statuses stay pending. */
 export function applyStatus(state: LaunchState, result: unknown): LaunchState {
   if (state.phase !== 'pending') return state;
-  const r = (result ?? {}) as { status?: unknown; agentId?: unknown; detail?: unknown };
+  const r = (result ?? {}) as { status?: unknown; agentId?: unknown; detail?: unknown; stage?: unknown };
   const agentId = typeof r.agentId === 'string' ? r.agentId : null;
+  const stage = laterStage(state.stage, r.stage);
   if (r.status === 'launched') return { phase: 'launched', requestId: state.requestId, agentId };
   if (r.status === 'failed') {
     const detail = typeof r.detail === 'string' && r.detail.trim() !== '' ? r.detail : null;
-    return { phase: 'failed', requestId: state.requestId, agentId, detail };
+    return { phase: 'failed', requestId: state.requestId, agentId, detail, ...(stage ? { stage } : {}) };
   }
-  return { ...state, note: null };
+  return { ...state, note: null, stage };
+}
+
+/** The reported stage when it is a known one past the current; stages never go back. */
+function laterStage(current: LaunchStage | null, reported: unknown): LaunchStage | null {
+  if (!LAUNCH_STAGES.includes(reported as LaunchStage)) return current;
+  const next = reported as LaunchStage;
+  return current === null || LAUNCH_STAGES.indexOf(next) > LAUNCH_STAGES.indexOf(current) ? next : current;
 }
 
 /** Status-read errors that end polling; anything else is retried. */

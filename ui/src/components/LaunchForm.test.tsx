@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { I18nProvider } from '../lib/i18n';
 import type { CensusRow } from '../model/census';
@@ -21,6 +21,22 @@ function form(launcher: LaunchApi, extra: Partial<Parameters<typeof LaunchForm>[
 }
 const launchButton = () => screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement;
 
+describe('LaunchForm progress stages (agent-bot-identity#536)', () => {
+  it('moves the progress list with the daemon\'s stage and shows the stage next to the request id', () => {
+    const idle = launcherIn({ phase: 'idle' });
+    const { rerender } = render(form(idle, { initialPackagePath: '/souls/helper.soul' }));
+    fireEvent.submit(screen.getByRole('form'));
+    rerender(form({ ...idle, state: { phase: 'pending', requestId: 'r1', note: null, stage: 'account' } }, { initialPackagePath: '/souls/helper.soul' }));
+    let items = within(screen.getByRole('list', { name: 'Launch progress' })).getAllByRole('listitem').map((li) => li.textContent);
+    expect(items).toEqual(['Request sentdone', 'Daemon starting itin progress', 'Joined']);
+    expect(screen.getByText('· account')).toBeTruthy();
+    rerender(form({ ...idle, state: { phase: 'pending', requestId: 'r1', note: null, stage: 'joining' } }, { initialPackagePath: '/souls/helper.soul' }));
+    items = within(screen.getByRole('list', { name: 'Launch progress' })).getAllByRole('listitem').map((li) => li.textContent);
+    expect(items).toEqual(['Request sentdone', 'Daemon starting itdone', 'Joinedin progress']);
+    expect(screen.getByText('· joining')).toBeTruthy();
+  });
+});
+
 describe('LaunchForm after a launch (#116)', () => {
   it('reports the launched agent once and never arms Launch again in the dialog', () => {
     const onLaunched = vi.fn();
@@ -28,7 +44,7 @@ describe('LaunchForm after a launch (#116)', () => {
     const { rerender } = render(form(idle, { initialPackagePath: '/souls/helper.soul', onLaunched }));
     fireEvent.submit(screen.getByRole('form'));
     expect(idle.launch).toHaveBeenCalledOnce();
-    rerender(form({ ...idle, state: { phase: 'pending', requestId: 'r1', note: null } }, { initialPackagePath: '/souls/helper.soul', onLaunched }));
+    rerender(form({ ...idle, state: { phase: 'pending', requestId: 'r1', note: null, stage: null } }, { initialPackagePath: '/souls/helper.soul', onLaunched }));
     // While it runs, the design shows only the progress: no Launch to press again.
     expect(screen.queryByRole('button', { name: 'Launch' })).toBeNull();
     expect(screen.getByRole('list', { name: 'Launch progress' }).textContent).toContain('Daemon starting it');
