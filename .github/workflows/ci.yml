@@ -57,6 +57,15 @@ jobs:
         run: cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked
       - name: Build agent-bot-keyd sidecar
         run: node scripts/build-keyd.mjs
+      # The bundled git (#102) is a Tauri sidecar, so the Rust build needs it
+      # present; it is built from the pinned tarball and kept by its pin.
+      - name: Restore the bundled git build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/git
+          key: git-${{ runner.arch }}-${{ hashFiles('components.json') }}
+      - name: Build bundled git
+        run: node scripts/build-git.mjs
       - name: Bridge tests
         run: node --test 'bridge/*.test.mjs' 'scripts/*.test.mjs'
       - name: UI typecheck and tests

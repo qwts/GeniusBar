@@ -114,7 +114,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .cache/git
-          key: git-${{ hashFiles('components.json') }}
+          key: git-${{ runner.arch }}-${{ hashFiles('components.json') }}
       - name: Build bundled git
         run: node scripts/build-git.mjs --target universal-apple-darwin
 
