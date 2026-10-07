@@ -41,7 +41,7 @@ export function useCensus(enabled: boolean = inApp(), population: () => Promise<
   const [connection, setConnection] = useState<ConnectionSnapshot>(disconnected);
   const inFlight = useRef(false);
   // The last census and population outcomes, so `shell.log` gets each change once (#223).
-  const logged = useRef<{ census: string | null; population: string | null }>({ census: null, population: null });
+  const logged = useRef<{ census: string | null; population: string | null; skipped: number; startedAt: number }>({ census: null, population: null, skipped: 0, startedAt: 0 });
   const readPopulation = useRef(population);
   readPopulation.current = population;
 
@@ -49,7 +49,14 @@ export function useCensus(enabled: boolean = inApp(), population: () => Promise<
   // agent-bot has archived (#196). An explicit refresh, such as after an
   // archive, reads both so the row goes at once.
   const refresh = useCallback(async ({ archived = true }: { archived?: boolean } = {}) => {
-    if (inFlight.current) return;
+    if (inFlight.current) {
+      // A read that never comes back would stop every later one (#223): say so.
+      logged.current.skipped += 1;
+      if (logged.current.skipped === 3) shellLog(`census: a refresh from ${Date.now() - logged.current.startedAt} ms ago is still in flight`);
+      return;
+    }
+    logged.current.skipped = 0;
+    logged.current.startedAt = Date.now();
     inFlight.current = true;
     try {
       const outcome = await fetchCensus();
@@ -76,6 +83,8 @@ export function useCensus(enabled: boolean = inApp(), population: () => Promise<
     let ticks = 0;
     const timer = setInterval(() => {
       ticks += 1;
+      // A heartbeat (#223): the outcome lines above say only what changed.
+      if (ticks % 6 === 0) shellLog(`census tick ${ticks}: ${logged.current.census ?? 'no outcome yet'}`);
       void refresh({ archived: ticks % Math.max(1, Math.round(POPULATION_INTERVAL_MS / CENSUS_INTERVAL_MS)) === 0 });
     }, CENSUS_INTERVAL_MS);
     return () => clearInterval(timer);

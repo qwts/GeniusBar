@@ -1,11 +1,11 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { StrictMode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Component, StrictMode, useCallback, useEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App, type AppMode } from './App';
 import type { CliToolsApi } from './components/CliTools';
 import type { DevTools, HarnessAuth, Starter } from './components/FirstLaunch';
-import { currentWindow, inApp, openDesktop, openSurface } from './bridge';
+import { currentWindow, inApp, openDesktop, openSurface, shellLog } from './bridge';
 import { DropCue } from './components/DropCue';
 import { menuApprovals } from './model/approvals';
 import { parseSurface } from './model/surface';
@@ -106,6 +106,32 @@ function Live({ snapshot }: { snapshot: SnapshotOptions | null }) {
   );
 }
 
+/**
+ * A page that dies says so in `shell.log` (#223): an uncaught error, a
+ * rejected promise nobody handled, or a render error, which would otherwise
+ * unmount the whole popup and leave it blank and silent, polling nothing.
+ */
+const describe = (error: unknown) => (error instanceof Error ? `${error.message} ${error.stack ?? ''}` : String(error)).replace(/\s+/g, ' ').slice(0, 600);
+window.addEventListener('error', (event) => { shellLog(`page error: ${describe(event.error ?? event.message)}`); });
+window.addEventListener('unhandledrejection', (event) => { shellLog(`unhandled rejection: ${describe(event.reason)}`); });
+
+class LogBoundary extends Component<{ children: ReactNode }, { failed: string | null }> {
+  state: { failed: string | null } = { failed: null };
+  static getDerivedStateFromError(error: unknown) { return { failed: error instanceof Error ? error.message : String(error) }; }
+  componentDidCatch(error: unknown, info: ErrorInfo) {
+    shellLog(`render error: ${describe(error)} in ${(info.componentStack ?? '').replace(/\s+/g, ' ').slice(0, 400)}`);
+  }
+  render() {
+    if (this.state.failed === null) return this.props.children;
+    return (
+      <div className="gb p-4 text-sm">
+        <p>GeniusBar hit an error: {this.state.failed}</p>
+        <button type="button" className="mt-2 underline" onClick={() => location.reload()}>Reload</button>
+      </div>
+    );
+  }
+}
+
 // The shell says before the first render whether this is a snapshot.
 const snapshot = inApp() ? await invoke<SnapshotOptions | null>('snapshot_options').catch(() => null) : null;
 // Which window this is (#223): the popup and the --window desktop are
@@ -115,6 +141,8 @@ const query = parseSurface(location.search);
 const native = query.surface !== null && query.surface !== 'tray' && query.surface !== 'window';
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {native ? <LiveSurface query={query} snapshot={Boolean(snapshot)} /> : <Live snapshot={snapshot} />}
+    <LogBoundary>
+      {native ? <LiveSurface query={query} snapshot={Boolean(snapshot)} /> : <Live snapshot={snapshot} />}
+    </LogBoundary>
   </StrictMode>,
 );

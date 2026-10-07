@@ -92,6 +92,8 @@ pub struct Bridge {
     setting_up: AtomicBool,
     child: Mutex<Option<CommandChild>>,
     pending: Mutex<HashMap<u64, oneshot::Sender<Reply>>>,
+    /// Requests seen per method, so `shell.log` shows the page still asking (#223).
+    calls: Mutex<HashMap<String, u64>>,
 }
 
 impl Bridge {
@@ -190,10 +192,20 @@ pub fn start<R: Runtime>(app: AppHandle<R>) {
                         }
                     }
                 }
-                Err(error) => eprintln!("bridge failed to start: {error}"),
+                Err(error) => {
+                    crate::windows::log_line(&app, &format!("bridge failed to start: {error}"))
+                }
             }
             let bridge = app.state::<Bridge>();
             bridge.child.lock().unwrap().take();
+            crate::windows::log_line(
+                &app,
+                &format!(
+                    "bridge exited after {} s; restarting in {} s",
+                    started.elapsed().as_secs(),
+                    backoff.as_secs()
+                ),
+            );
             bridge.fail_all(&BridgeError::new("bridge-restarting", "the bridge exited"));
             if started.elapsed() >= HEALTHY_RUN {
                 backoff = RESTART_MIN;
@@ -206,7 +218,8 @@ pub fn start<R: Runtime>(app: AppHandle<R>) {
 
 /// The web view's single entry point: `invoke('bridge', { method, params })`.
 #[tauri::command]
-pub async fn bridge(
+pub async fn bridge<R: Runtime>(
+    app: AppHandle<R>,
     state: State<'_, Bridge>,
     method: String,
     params: Option<Value>,
@@ -215,6 +228,15 @@ pub async fn bridge(
         return Err(BridgeError::new("bad-request", "unknown method"));
     }
     let id = state.next_id.fetch_add(1, Ordering::Relaxed) + 1;
+    let seen = {
+        let mut calls = state.calls.lock().unwrap();
+        let count = calls.entry(method.clone()).or_insert(0);
+        *count += 1;
+        *count
+    };
+    if seen == 1 || seen % 12 == 0 {
+        crate::windows::log_line(&app, &format!("bridge {method} x{seen}"));
+    }
     let (sender, receiver) = oneshot::channel();
     state.pending.lock().unwrap().insert(id, sender);
     let line = format!(
@@ -227,6 +249,7 @@ pub async fn bridge(
     };
     if !written {
         state.pending.lock().unwrap().remove(&id);
+        crate::windows::log_line(&app, &format!("bridge {method}: the bridge is not running"));
         return Err(BridgeError::new(
             "bridge-unavailable",
             "the bridge is not running",
@@ -237,6 +260,13 @@ pub async fn bridge(
         Ok(Err(_)) => Err(BridgeError::new("bridge-restarting", "the bridge exited")),
         Err(_) => {
             state.pending.lock().unwrap().remove(&id);
+            crate::windows::log_line(
+                &app,
+                &format!(
+                    "bridge {method}: no answer in {} s",
+                    REQUEST_TIMEOUT.as_secs()
+                ),
+            );
             Err(BridgeError::new(
                 "bridge-timeout",
                 "the bridge did not answer",
