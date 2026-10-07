@@ -129,7 +129,7 @@ export function AgentAside({ e }: { e: AsideEntry }) {
         <ChevronRight className={`size-3 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`} aria-hidden />
         <span className="font-mono font-semibold">{t('asideLabel', { from: e.from, to: e.to })}</span>
         <span className="text-muted-foreground">· {t('asideHint')}</span>
-        {e.team && <span className="ml-auto rounded-full border border-info/40 px-1.5 font-mono text-[11px]">{t('aside.team', { team: e.team })}</span>}
+        {e.team && <span className="ml-auto rounded-full border border-info/40 px-1.5 font-mono text-[10px]">{t('aside.team', { team: e.team })}</span>}
       </button>
       {open && (
         <div id={contentId} className="space-y-1 py-1 text-xs">

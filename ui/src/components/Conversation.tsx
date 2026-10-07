@@ -83,7 +83,7 @@ export function Conversation({ name, entries, composer, onDraft, onSend, dudle, 
                     {mine ? t('you') : name}
                   </span>
                   <MessageBody body={entry.body} className="chat-body selectable text-sm leading-relaxed [overflow-wrap:anywhere]" />
-                  <time className={`mt-0.5 block text-[11px] ${mine ? 'text-primary-foreground' : 'text-muted-foreground'}`} dateTime={new Date(entry.at).toISOString()}>
+                  <time className={`mt-0.5 block text-[10px] ${mine ? 'text-primary-foreground' : 'text-muted-foreground'}`} dateTime={new Date(entry.at).toISOString()}>
                     {clock.format(new Date(entry.at))}
                   </time>
                 </div>
@@ -111,8 +111,9 @@ export function Conversation({ name, entries, composer, onDraft, onSend, dudle, 
             value={composer.draft}
             onChange={(e) => onDraft(e.target.value)}
             onKeyDown={(e) => {
-              // Cmd/Ctrl+Enter sends; Enter alone is a newline.
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+              // As the design: Enter sends and Shift+Enter is a newline;
+              // Cmd/Ctrl+Enter still sends. Never mid-IME composition.
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 if (ready) onSend();
               }

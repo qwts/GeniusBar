@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { BridgeError, call, openDesktop, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, normalizeAppearance, savedBrief, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported, normalizeSoulComputerUse, soulComputerUse, soulComputerUseSupported, liveComputerUse, listSoulTemplates, normalizeSoulTemplates, normalizeSoulProfile, soulProfile, soulProfileFile, popupVisible } from './bridge';
+import { describe, expect, it, vi } from 'vitest';
+import { BridgeError, call, openDesktop, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, exportAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, normalizeAppearance, savedBrief, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported, normalizeSoulComputerUse, soulComputerUse, soulComputerUseSupported, liveComputerUse, listSoulTemplates, normalizeSoulTemplates, normalizeSoulProfile, soulProfile, soulProfileFile, popupVisible } from './bridge';
 
 describe('bridge', () => {
   it('invokes the shell command with the method and params', async () => {
@@ -14,6 +14,29 @@ describe('bridge', () => {
     const error = await call('census', {}, fake).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(BridgeError);
     expect(error).toMatchObject({ code: 'broker-unreachable', message: 'down' });
+  });
+
+  it('exports the audit log through the bridge and returns where it went', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); return { path: '/Users/me/Downloads/geniusbar-audit-x.json' }; }) as never;
+    await expect(exportAudit('[]', fake)).resolves.toEqual({ path: '/Users/me/Downloads/geniusbar-audit-x.json' });
+    expect(calls).toEqual([['bridge', { method: 'auditExport', params: { contents: '[]' } }]]);
+    const failing = (async () => { throw { code: 'export-failed', message: 'disk full' }; }) as never;
+    await expect(exportAudit('[]', failing)).rejects.toMatchObject({ code: 'export-failed' });
+  });
+
+  it('outside the app, exports the audit log as the design does: a Blob download', async () => {
+    const createObjectURL = vi.fn(() => 'blob:audit');
+    const revokeObjectURL = vi.fn();
+    Object.assign(URL, { createObjectURL, revokeObjectURL });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      expect(this.download).toMatch(/^geniusbar-audit-\d+\.json$/);
+      expect(this.href).toBe('blob:audit');
+    });
+    await expect(exportAudit('[{"a":1}]')).resolves.toEqual({ path: null });
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:audit');
+    click.mockRestore();
   });
 
   it('is not in the app under test', () => {

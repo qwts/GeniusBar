@@ -192,7 +192,7 @@ function CustomizeBody({ soul, onClose, save, onReload }: { soul: CensusRow; onC
         {/* The chosen colour, live, as the design's title. */}
         <SoulDudle soul={hue === null ? { ...soul, hue: undefined } : { ...soul, hue }} size={36} paused={false} />
         <h2 id={titleId} className="m-0 truncate text-lg leading-none font-semibold tracking-tight">{name.trim() || baseName}</h2>
-        <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">{harness}</span>
+        <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">{harness}</span>
       </div>
       {/* The session's segmented tabs, as the design's. */}
       <div role="tablist" aria-label={t('edit.title')} className="flex w-fit gap-0.5 rounded-lg bg-muted p-1"

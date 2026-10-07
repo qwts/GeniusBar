@@ -5,7 +5,7 @@ import { Window } from '@tauri-apps/api/window';
 import { normalizeAudit, type AuditRecord } from './model/audit';
 import { normalizeApproval, normalizeApprovals, normalizeAsides, type ApprovalRecord, type AsideRecord } from './model/chat';
 
-export type BridgeMethod = 'census' | 'send' | 'inbox' | 'ack' | 'launch' | 'launchStatus';
+export type BridgeMethod = 'census' | 'send' | 'inbox' | 'ack' | 'launch' | 'launchStatus' | 'auditExport';
 
 /** An error from the bridge, the shell, or agent-comms, with its stable code. */
 export class BridgeError extends Error {
@@ -457,6 +457,26 @@ export async function listAudit(agentId: string | null, invokeImpl: typeof invok
   } catch {
     return null;
   }
+}
+
+/**
+ * Saves the audit log as a file (Lovable `AuditLog` Export JSON). In the app
+ * the bridge writes ~/Downloads/geniusbar-audit-<time>.json and says where;
+ * in a plain browser (the preview) it downloads through a Blob link, as the
+ * design does. Throws a BridgeError when the save fails.
+ */
+export async function exportAudit(contents: string, invokeImpl: typeof invoke = invoke): Promise<{ path: string | null }> {
+  if (!inApp() && invokeImpl === invoke) {
+    const blob = new Blob([contents], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `geniusbar-audit-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    return { path: null };
+  }
+  const result = await call<{ path?: unknown }>('auditExport', { contents }, invokeImpl);
+  return { path: typeof result?.path === 'string' ? result.path : null };
 }
 
 /** How far an approval reaches: this call only, or the soul's current harness session. */

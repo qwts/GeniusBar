@@ -21,9 +21,18 @@ use tauri_plugin_shell::{
 };
 use tokio::sync::oneshot;
 
-/// The principal operations the web view may call; bridge.mjs holds the
-/// same list and checks it again.
-pub const METHODS: &[&str] = &["census", "send", "inbox", "ack", "launch", "launchStatus"];
+/// The principal operations the web view may call, plus `auditExport` (local
+/// glue that saves the audit JSON to ~/Downloads); bridge.mjs holds the same
+/// list and checks it again.
+pub const METHODS: &[&str] = &[
+    "census",
+    "send",
+    "inbox",
+    "ack",
+    "launch",
+    "launchStatus",
+    "auditExport",
+];
 
 /// GeniusBar's own agent-comms and agent-bot names (ADR-0004 decision 8,
 /// agent-comms ADR-0059, agent-bot #302): the bridge, setup and the

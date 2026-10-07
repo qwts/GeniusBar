@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Archive, Eye, EyeOff, Search, Users } from 'lucide-react';
+import { Archive, Eye, EyeOff, Search } from 'lucide-react';
 import { availabilityNote, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
 import { soulHarnessLabel } from '../model/launch';
 import { dudleFor } from '../model/dudle';
@@ -65,7 +65,8 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty, onA
   const teamOf = useMemo(() => new Map(teams.filter((team) => team.members.length > 0)
     .map((team) => [soulKey(team.lead), teamKeys(team)])), [teams]);
 
-  // Everyone keeps their own eye; a lead with subagents also gets one for the whole team.
+  // One eye per row, as the design: a lead with subagents hides or shows its
+  // whole team; anyone else only themselves.
   const row = (soul: CensusRow, depth: number, team: readonly string[] | null = null) => {
     const key = soulKey(soul);
     const unread = unreadOf?.(soul) ?? 0;
@@ -89,7 +90,7 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty, onA
             <span className="truncate">{name}</span>
             {note && <span className="truncate text-[11px] text-muted-foreground">{note}</span>}
           </span>
-          <span className="truncate font-mono text-[11px] text-muted-foreground">{soulHarnessLabel(soul)}</span>
+          <span className="truncate font-mono text-[10px] text-muted-foreground">{soulHarnessLabel(soul)}</span>
           <span className="ml-auto flex shrink-0 items-center gap-1.5">
             {unread > 0 && (
               <span className="rounded-full bg-primary px-1.5 font-mono text-[11px] font-semibold text-primary-foreground">
@@ -105,27 +106,13 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty, onA
           <button
             type="button"
             className="rounded p-1 text-muted-foreground hover:text-foreground"
-            aria-label={`${hidden ? t('bar.show') : t('bar.hide')}: ${name}`}
+            aria-label={`${team ? (hidden ? t('bar.showTeam') : t('bar.hideTeam')) : hidden ? t('bar.show') : t('bar.hide')}: ${name}`}
             aria-pressed={!hidden}
-            onClick={() => hiding.onToggle(key, !hidden)}
+            onClick={() => (team ? hiding.onToggleTeam(team, !hidden) : hiding.onToggle(key, !hidden))}
           >
             {hidden ? <EyeOff className="size-3.5" aria-hidden /> : <Eye className="size-3.5 opacity-40 group-hover:opacity-100" aria-hidden />}
           </button>
         )}
-        {hiding && team && (() => {
-          const teamHidden = team.every((k) => hiding.hidden.includes(k));
-          return (
-            <button
-              type="button"
-              className="rounded p-1 text-muted-foreground hover:text-foreground"
-              aria-label={`${teamHidden ? t('bar.showTeam') : t('bar.hideTeam')}: ${name}`}
-              aria-pressed={!teamHidden}
-              onClick={() => hiding.onToggleTeam(team, !teamHidden)}
-            >
-              <Users className={`size-3.5 ${teamHidden ? '' : 'opacity-40 group-hover:opacity-100'}`} aria-hidden />
-            </button>
-          );
-        })()}
         {onArchive && (
           <button
             type="button"
@@ -162,7 +149,7 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty, onA
             {ordered.map((team, i) => (
               <li key={soulKey(team.lead)}>
                 {(team.members.length > 0 || i === firstSolo) && (
-                  <p className="m-0 px-3 pt-2 pb-0.5 font-mono text-[11px] tracking-wider text-muted-foreground uppercase" aria-hidden>
+                  <p className="m-0 px-3 pt-2 pb-0.5 font-mono text-[10px] tracking-wider text-muted-foreground uppercase" aria-hidden>
                     {team.members.length > 0 ? displayName(team.lead) : t('team.none')}
                   </p>
                 )}
