@@ -190,6 +190,28 @@ describe('SandboxChip', () => {
     expect(within(menu).getByRole('alert').className).toContain('text-destructive');
   });
 
+  it('focuses the first item on open, moves with Up / Down / Home / End, and Escape hands focus back to the pill (X10)', async () => {
+    withSandbox(fakeSource(status()), <SandboxChip soul={luna} />);
+    const pill = await screen.findByRole('button', { name: 'Sandbox for luna: Unrestricted' });
+    fireEvent.click(pill);
+    const menu = screen.getByRole('menu', { name: 'Sandboxing' });
+    const [inherit, always, never] = within(menu).getAllByRole('menuitemradio');
+    expect(document.activeElement).toBe(inherit);
+    fireEvent.keyDown(menu, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(always);
+    fireEvent.keyDown(menu, { key: 'End' });
+    expect(document.activeElement).toBe(never);
+    fireEvent.keyDown(menu, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(inherit);
+    fireEvent.keyDown(menu, { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(never);
+    fireEvent.keyDown(menu, { key: 'Home' });
+    expect(document.activeElement).toBe(inherit);
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(screen.queryByRole('menu', { name: 'Sandboxing' })).toBeNull();
+    expect(document.activeElement).toBe(pill);
+  });
+
   it('is absent for a soul agent-bot has no row for', async () => {
     const source = fakeSource(status({ souls: [] }));
     const { container } = withSandbox(source, <SandboxChip soul={luna} />);

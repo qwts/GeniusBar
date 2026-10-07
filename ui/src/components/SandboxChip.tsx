@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Shield, ShieldOff } from 'lucide-react';
 import { useI18n, type Translate } from '../lib/i18n';
+import { menuKeys } from '../lib/keys';
 import { displayName, type CensusRow } from '../model/census';
 import { useSandbox, type SandboxOverride, type SandboxSoul } from './Sandbox';
 
@@ -15,6 +16,8 @@ export function runsAsText(row: SandboxSoul, t: Translate): string {
  * with "Runs as …" and the three overrides. A change goes to agent-bot
  * (`sandbox override`), which asks the owner, then the status is read
  * again. Absent while agent-bot has no `sandbox` or no row for the soul.
+ * As Radix DropdownMenu: the open menu focuses its first item, Up / Down /
+ * Home / End move between the items, Escape hands focus back to the pill.
  */
 export function SandboxChip({ soul }: { soul: CensusRow }) {
   const { t } = useI18n();
@@ -23,6 +26,7 @@ export function SandboxChip({ soul }: { soul: CensusRow }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
   useEffect(() => { reload(); }, [reload, soul.agentId]);
   useEffect(() => {
     if (!open) return;
@@ -30,6 +34,7 @@ export function SandboxChip({ soul }: { soul: CensusRow }) {
     document.addEventListener('pointerdown', away);
     return () => document.removeEventListener('pointerdown', away);
   }, [open]);
+  useEffect(() => { if (open) menu.current?.querySelector<HTMLElement>('[role^="menuitem"]')?.focus(); }, [open]);
   const failure = sb.failure?.scope === soul.agentId ? sb.failure.message : null;
   // A refusal reopens the menu to say why the override stayed.
   useEffect(() => { if (failure) setOpen(true); }, [failure]);
@@ -61,7 +66,7 @@ export function SandboxChip({ soul }: { soul: CensusRow }) {
         {on ? t('sandbox.on') : t('sandbox.off')}
       </button>
       {open && (
-        <div role="menu" aria-label={t('sandbox.title')}
+        <div ref={menu} role="menu" aria-label={t('sandbox.title')} onKeyDown={menuKeys}
           className="absolute top-full right-0 z-50 mt-1 w-64 rounded-md border border-border bg-popover p-1 shadow-md">
           <p className="m-0 px-2 py-1.5 text-xs text-muted-foreground">{runsAsText(row, t)}</p>
           {failure && <p role="alert" className="m-0 px-2 pb-1.5 text-[11px] text-destructive">{t('sandbox.failed', { message: failure })}</p>}

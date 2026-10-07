@@ -428,6 +428,11 @@ describe('MenuBar pass 6 (M1, M2, M3, P10, P19)', () => {
     expect(container.querySelector('time')?.className.split(' ')).toEqual(expect.arrayContaining(['hidden', 'sm:inline']));
   });
 
+  it('sets the View trigger in font-medium, as MenubarTrigger (X9)', () => {
+    render(plain());
+    expect(screen.getByRole('button', { name: 'View' }).className.split(' ')).toContain('font-medium');
+  });
+
   it('keeps a plain mark without a home action', () => {
     render(plain());
     expect(screen.queryByRole('button', { name: 'GeniusBar' })).toBeNull();
@@ -459,12 +464,41 @@ describe('MenuBar pass 6 (M1, M2, M3, P10, P19)', () => {
     expect(document.activeElement).toBe(within(screen.getByRole('menu', { name: 'View' })).getAllByRole('menuitem')[0]);
   });
 
-  it('gives the palette rows the cmdk height, py-1.5 (P19)', () => {
+  it('gives the palette rows CommandDialog’s py-3 and 20px Dudles (P19)', () => {
     render(plain());
     fireEvent.keyDown(window, { key: 'k', metaKey: true });
     const option = within(screen.getByRole('listbox')).getAllByRole('option')[0];
-    expect(option.className.split(' ')).toContain('py-1.5');
-    expect(option.className.split(' ')).not.toContain('py-3');
+    expect(option.className.split(' ')).toContain('py-3');
+    expect(option.className.split(' ')).not.toContain('py-1.5');
+    expect(option.querySelector('svg.dudle')?.getAttribute('width')).toBe('20');
+  });
+});
+
+describe('the palette’s live state (X1)', () => {
+  const live = (awaiting?: ReadonlySet<string>, busy?: ReadonlySet<string>) => (
+    <MenuBar open={false} onOpenChange={vi.fn()} tone="ok" title="t" onReset={vi.fn()} unread={0}
+      forest={buildSoulForest(sampleCensus)} paused onJump={vi.fn()} awaiting={awaiting} busy={busy}>menu</MenuBar>
+  );
+  const rowOf = (name: string) => within(screen.getByRole('listbox')).getAllByRole('option').find((o) => o.textContent?.startsWith(name))!;
+
+  it('animates the Dudle and says Waiting for you / Working, as the design’s state={c.presence}', () => {
+    render(live(new Set(['agent_p']), new Set(['agent_c'])));
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    const luna = rowOf('luna');
+    expect(luna.querySelector('svg.dudle')?.getAttribute('data-state')).toBe('awaiting');
+    expect(luna.textContent).toContain('Waiting for you');
+    const busy = within(screen.getByRole('listbox')).getAllByRole('option')
+      .find((o) => o.querySelector('svg.dudle')?.getAttribute('data-state') === 'working');
+    expect(busy?.textContent).toContain('Working');
+  });
+
+  it('keeps the census presence and an idle face without live state', () => {
+    render(live());
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    const states = within(screen.getByRole('listbox')).getAllByRole('option')
+      .map((o) => o.querySelector('svg.dudle')?.getAttribute('data-state'));
+    expect(states.every((s) => s === 'idle' || s === 'offline')).toBe(true);
+    expect(rowOf('luna').textContent).not.toContain('Waiting for you');
   });
 });
 

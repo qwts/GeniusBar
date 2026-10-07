@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BridgeError, runtimeMetrics, setSoulComms, soulComms, type ComputerUseSwitch, type RuntimeMetrics, type SoulMode, type SoulModel, type SoulPopulation } from '../bridge';
 import { buildSoulForest } from '../model/census';
@@ -7,6 +8,7 @@ import type { LaunchRequest } from '../model/launch';
 import { sampleCensus, sampleProfile } from '../model/fixtures';
 import { ProfileSourceContext, type ProfileSource } from '../useSoulProfile';
 import { CommsRow, CompanionDetails, CompanionSession, ComputerUseContext, ComputerUseRow, ModelRow, ModeRow, WakeRow } from './CompanionSession';
+import { CompanionWindow } from './Desktop';
 import { SoulSourceContext, type SoulSource } from './SoulNotices';
 
 afterEach(cleanup);
@@ -229,6 +231,23 @@ describe('CompanionDetails', () => {
   });
 });
 
+describe('the Details Presence row (X2)', () => {
+  it('shows the live presence, as the design: Waiting for you, then Working…, else the census', () => {
+    const { rerender } = render(<CompanionDetails soul={child} awaiting={new Set([child.agentId])} busy={new Set([child.agentId])} />);
+    expect(field('Presence')).toBe('Waiting for you');
+    rerender(<CompanionDetails soul={child} busy={new Set([child.agentId])} />);
+    expect(field('Presence')).toBe('Working…');
+    rerender(<CompanionDetails soul={child} />);
+    expect(field('Presence')).toBe('Starting');
+  });
+
+  it('passes the session’s live state through to the Details tab', () => {
+    render(<CompanionSession soul={child} forest={forest} roster={sampleCensus} paused onOpen={() => {}} onClose={() => {}}
+      awaiting={new Set([child.agentId])} initialTab="details" />);
+    expect(field('Presence')).toBe('Waiting for you');
+  });
+});
+
 describe('the read-only Details tab (N10)', () => {
   it('shows every setting as text, with the controls only in the ⓘ sheet, which both modes reach', async () => {
     const { InfoButton } = await import('./CompanionSession');
@@ -333,6 +352,35 @@ describe('CompanionSession', () => {
     fireEvent.click(back);
     fireEvent.keyDown(back, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a draft when Escape is pressed in the composer, and closes on Escape elsewhere (X11)', () => {
+    const onClose = vi.fn();
+    function Session() {
+      const [draft, setDraft] = useState('');
+      const chat = { entries: [], composer: { ...emptyComposer, draft }, onDraft: setDraft, onSend: () => {} };
+      return (
+        <CompanionWindow soul={luna} paused onClose={onClose}>
+          <CompanionSession soul={luna} forest={forest} roster={sampleCensus} paused chat={chat} onOpen={() => {}} onClose={onClose} />
+        </CompanionWindow>
+      );
+    }
+    render(<Session />);
+    const box = screen.getByRole('textbox', { name: 'Message luna' }) as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: 'half a thought' } });
+    fireEvent.keyDown(box, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+    expect((screen.getByRole('textbox', { name: 'Message luna' }) as HTMLTextAreaElement).value).toBe('half a thought');
+    // A dialog opened inside the window keeps its Escape too.
+    const inner = document.createElement('div');
+    inner.setAttribute('role', 'dialog');
+    screen.getByRole('tabpanel').appendChild(inner);
+    fireEvent.keyDown(inner, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+    inner.remove();
+    // Anywhere else in the window, Escape still closes it.
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Chat' }), { key: 'Escape' });
+    expect(onClose).toHaveBeenCalled();
   });
 
   it('animates the header Dudle and says Waiting for you / Working… from the live state (S1, S2)', () => {

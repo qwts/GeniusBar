@@ -205,6 +205,37 @@ describe('Desktop hide and restore', () => {
     expect(useLayoutSnapshot().hidden).toEqual(['user/agent_c']);
   });
 
+  it('opens the right-click menu at the pointer, kept inside the viewport, and under the avatar from the keyboard (X12)', () => {
+    render(<Live />);
+    const sub = avatar(/^agent_c,/);
+    fireEvent.contextMenu(sub, { clientX: 200, clientY: 150 });
+    let menu = screen.getByRole('menu', { name: 'agent_c' });
+    expect([menu.style.left, menu.style.top]).toEqual(['200px', '150px']);
+    expect(menu.className).not.toContain('top-full');
+    expect(document.activeElement).toBe(within(menu).getAllByRole('menuitem')[0]);
+    fireEvent.keyDown(menu, { key: 'Escape' });
+    // Near the bottom-right corner, the menu's size keeps it on screen.
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.getAttribute('role') === 'menu'
+        ? { width: 128, height: 100, left: 0, top: 0, right: 128, bottom: 100, x: 0, y: 0, toJSON: () => ({}) } as DOMRect
+        : { width: 0, height: 0, left: 0, top: 0, right: 0, bottom: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+    });
+    fireEvent.contextMenu(sub, { clientX: window.innerWidth - 10, clientY: window.innerHeight - 10 });
+    menu = screen.getByRole('menu', { name: 'agent_c' });
+    expect([menu.style.left, menu.style.top]).toEqual([`${window.innerWidth - 128}px`, `${window.innerHeight - 100}px`]);
+    fireEvent.keyDown(menu, { key: 'Escape' });
+    rect.mockRestore();
+    // Shift+F10 and the ContextMenu key: anchored under the avatar.
+    for (const key of [{ key: 'F10', shiftKey: true }, { key: 'ContextMenu' }]) {
+      fireEvent.keyDown(sub, key);
+      menu = screen.getByRole('menu', { name: 'agent_c' });
+      expect(menu.style.left).toBe('');
+      expect(menu.className).toContain('top-full');
+      fireEvent.keyDown(menu, { key: 'Escape' });
+      expect(document.activeElement).toBe(sub);
+    }
+  });
+
   it('moves through the menu with Up, Down, Home and End, and Escape gives focus back to ⋯ (D6)', () => {
     render(<Live />);
     const more = screen.getByRole('button', { name: 'More for luna' });

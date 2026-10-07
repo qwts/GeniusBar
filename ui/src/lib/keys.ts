@@ -35,3 +35,16 @@ export function menuKeys(e: KeyboardEvent<HTMLElement>) {
     : e.key === 'ArrowDown' ? (i + 1) % n : i <= 0 ? n - 1 : i - 1;
   items[next]?.focus();
 }
+
+/**
+ * Whether an Escape from `target` belongs to what it was pressed in rather
+ * than to the window `root` it bubbled up to, as Lovable's AppShell: a text
+ * field, a select, or a dialog opened inside `root` keeps it, so a draft in
+ * the composer survives. Anywhere else, Escape closes the window.
+ */
+export function escapeStaysInside(target: EventTarget | null, root: Element): boolean {
+  if (!(target instanceof Element)) return false;
+  if (target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return true;
+  const dialog = target.closest('[role="dialog"], [role="alertdialog"], dialog');
+  return Boolean(dialog && dialog !== root && root.contains(dialog));
+}

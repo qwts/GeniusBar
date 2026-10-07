@@ -22,8 +22,10 @@ describe('Conversation', () => {
 
   it('lists messages oldest first and renders bodies as safe Markdown, never HTML (#117)', () => {
     render(<Conversation name="luna" entries={entries} composer={emptyComposer} onDraft={() => {}} onSend={() => {}} />);
-    const items = screen.getByRole('list', { name: 'Conversation with luna' }).querySelectorAll(':scope > li');
+    // role="log" as the design's message list (X14).
+    const items = screen.getByRole('log', { name: 'Conversation with luna' }).querySelectorAll(':scope > li');
     expect(items).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Send' }).className.split(' ')).toEqual(expect.arrayContaining(['outline-none', 'focus-visible:ring-2', 'focus-visible:ring-ring']));
     expect(items[1].textContent).toContain('You');
     const body = items[0].querySelector('.chat-body')!;
     expect(body.textContent).toBe('<b>bold</b> not markdown\n  indented');
@@ -48,7 +50,7 @@ describe('Conversation', () => {
       { id: 's', kind: 'aside', from: 'luna', to: 'scout', body: 'CI?', reply: 'Green.', team: 'luna', at: 4, seq: null },
     ];
     render(<Conversation name="luna" entries={mixed} composer={emptyComposer} onDraft={() => {}} onSend={() => {}} />);
-    const items = screen.getByRole('list', { name: 'Conversation with luna' }).querySelectorAll(':scope > li');
+    const items = screen.getByRole('log', { name: 'Conversation with luna' }).querySelectorAll(':scope > li');
     expect(items).toHaveLength(4);
     expect(screen.getByRole('group', { name: 'Tool call: terminal — Running' })).toBeTruthy();
     expect(screen.getByRole('alert').textContent).toContain('luna wants to run terminal');

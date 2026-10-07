@@ -1,9 +1,9 @@
-import { useContext, useEffect, useId, useMemo, useRef, useState, type PointerEvent, type ReactNode, type RefObject } from 'react';
+import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode, type RefObject } from 'react';
 import { Archive, ChevronDown, Eye, EyeOff, History, Monitor, MoreHorizontal, Palette, Plus, Radio, Shield, ShieldOff, Users, X } from 'lucide-react';
 import { displayName, displayRole, roleAndHarness, soulKey, type CensusRow, type SoulNode } from '../model/census';
 import { companionLabel, teamKeys, teamsOf, type Team } from '../model/fleet';
 import { useI18n } from '../lib/i18n';
-import { menuKeys } from '../lib/keys';
+import { escapeStaysInside, menuKeys } from '../lib/keys';
 import { noBadges, type SoulBadges } from '../model/refresh';
 import { layoutActions, type DesktopLayout } from '../state/layout';
 import { ProfileSourceContext } from '../useSoulProfile';
@@ -220,7 +220,7 @@ function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unread
             // As the design, whose header ends with the pills and the chevron: shown on hover
             // and focus only, so keyboard users keep it. A hidden lead's placeholder keeps it
             // visible, since it is that card's only control.
-            className={`rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground ${leadHidden ? '' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100'}`}>
+            className={`rounded p-1 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring ${leadHidden ? '' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100'}`}>
             <MoreHorizontal className="size-4" aria-hidden />
           </button>
           {more && (leadHidden ? (
@@ -249,7 +249,7 @@ function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unread
             aria-label={collapsed ? t('team.expand') : t('team.collapse')}
             aria-expanded={!collapsed}
             onClick={() => layoutActions.setCollapsed(key, !collapsed)}
-            className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="rounded p-1 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
           >
             <ChevronDown className={`size-4 transition-transform ${collapsed ? '-rotate-90' : ''}`} aria-hidden />
           </button>
@@ -272,20 +272,39 @@ function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unread
 
 const menuItem = 'flex items-center gap-2 rounded-sm px-2 py-1.5 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-none';
 
+/** Where a right-click happened, in viewport pixels (the contextmenu event's clientX / clientY). */
+type Point = { x: number; y: number };
+
 /**
  * A small menu that takes focus, moves it with Up / Down / Home / End (as
  * Radix ContextMenu), and closes on Escape or when focus leaves it; its
- * owner hands focus back to the trigger.
+ * owner hands focus back to the trigger. Given `at`, it opens at that
+ * pointer position, kept inside the viewport, as Radix ContextMenu does;
+ * otherwise it hangs under its trigger.
  */
-function MenuBox({ label, onClose, align = 'center', children }: {
-  label: string; onClose: () => void; align?: 'center' | 'right';
+function MenuBox({ label, onClose, align = 'center', at, children }: {
+  label: string; onClose: () => void; align?: 'center' | 'right'; at?: Point;
   children: (first: RefObject<HTMLButtonElement | null>) => ReactNode;
 }) {
   const first = useRef<HTMLButtonElement>(null);
-  useEffect(() => { first.current?.focus(); }, []);
+  const box = useRef<HTMLDivElement>(null);
+  const [place, setPlace] = useState<{ left: number; top: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!at || !el) return;
+    // Relative to the positioned wrapper, so a moved card or window still lines up.
+    const origin = el.parentElement?.getBoundingClientRect() ?? { left: 0, top: 0 };
+    const { width, height } = el.getBoundingClientRect();
+    const x = Math.max(0, Math.min(at.x, window.innerWidth - width));
+    const y = Math.max(0, Math.min(at.y, window.innerHeight - height));
+    setPlace({ left: x - origin.left, top: y - origin.top });
+  }, [at]);
+  useEffect(() => { first.current?.focus(); }, [place]);
+  const anchored = align === 'right' ? 'top-full mt-1 right-0' : 'top-full mt-1 left-1/2 -translate-x-1/2';
   return (
-    <div role="menu" aria-label={label}
-      className={`absolute top-full z-30 mt-1 grid min-w-[8rem] rounded-md border border-border bg-popover p-1 text-sm shadow-md ${align === 'right' ? 'right-0' : 'left-1/2 -translate-x-1/2'}`}
+    <div ref={box} role="menu" aria-label={label}
+      style={at ? { left: place?.left ?? 0, top: place?.top ?? 0, visibility: place ? undefined : 'hidden' } : undefined}
+      className={`absolute z-30 grid min-w-[8rem] rounded-md border border-border bg-popover p-1 text-sm shadow-md ${at ? '' : anchored}`}
       onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } else menuKeys(e); }}
       onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onClose(); }}>
       {children(first)}
@@ -298,7 +317,7 @@ function MenuBox({ label, onClose, align = 'center', children }: {
  * Remove… for one companion: its right-click menu and its team's ⋯. As the
  * design, Hide on a team's lead hides the whole team; Hide team stays.
  */
-function SoulMenu({ soul, team, onOpen, onCustomize, onArchive, onClose, done, align }: {
+function SoulMenu({ soul, team, onOpen, onCustomize, onArchive, onClose, done, align, at }: {
   soul: CensusRow; team?: readonly string[]; onOpen: (soul: CensusRow) => void; onArchive?: (soul: CensusRow) => void;
   /** Opens the Customize dialog (#64); without it the menu has no Customize…. */
   onCustomize?: () => void;
@@ -307,10 +326,12 @@ function SoulMenu({ soul, team, onOpen, onCustomize, onArchive, onClose, done, a
   /** An item ran: close without moving focus. */
   done: () => void;
   align?: 'center' | 'right';
+  /** A right-click's pointer position: the menu opens there. */
+  at?: Point;
 }) {
   const { t } = useI18n();
   return (
-    <MenuBox label={displayName(soul)} onClose={onClose} align={align}>
+    <MenuBox label={displayName(soul)} onClose={onClose} align={align} at={at}>
       {(first) => (
         <>
           <button ref={first} type="button" role="menuitem" className={menuItem}
@@ -360,12 +381,13 @@ function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = 
   subagents: number;
 }) {
   const { t } = useI18n();
-  const [menu, setMenu] = useState(false);
+  // Open, and where: a right-click's pointer position, or null under the avatar (keyboard).
+  const [menu, setMenu] = useState<false | Point | null>(false);
   const [customizing, setCustomizing] = useState(false);
   // Customize… reads agent-bot's profile; no source (a plain browser) offers none.
   const customizable = useContext(ProfileSourceContext) !== null;
   const button = useRef<HTMLButtonElement>(null);
-  const card = useHoverCard(!menu && !customizing);
+  const card = useHoverCard(menu === false && !customizing);
   const cardId = useId();
   const comms = badges.comms.has(soul.agentId);
   const computer = badges.computerUse.has(soul.agentId);
@@ -385,8 +407,14 @@ function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = 
         aria-current={selected ? 'true' : undefined}
         aria-haspopup="menu"
         onClick={() => onOpen(soul)}
-        onContextMenu={(e) => { e.preventDefault(); setMenu(true); }}
+        // As Radix ContextMenu: a right-click opens at the pointer; Shift+F10 or
+        // the ContextMenu key (no pointer position) keeps it under the avatar.
+        onContextMenu={(e) => { e.preventDefault(); setMenu(e.clientX || e.clientY ? { x: e.clientX, y: e.clientY } : null); }}
         {...card.trigger}
+        onKeyDown={(e) => {
+          card.trigger.onKeyDown(e);
+          if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) { e.preventDefault(); setMenu(null); }
+        }}
         className={`flex flex-col items-center gap-0.5 rounded-lg p-1 outline-none focus-visible:ring-2 focus-visible:ring-ring ${bare ? 'shrink-0' : 'w-full'} ${selected ? 'bg-accent' : 'hover:bg-accent/50'}`}
       >
         <span className="relative">
@@ -415,12 +443,13 @@ function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = 
         )}
       </button>
       {card.open && <CompanionHoverCard id={cardId} soul={soul} status={state} statusText={said} lead={lead} subagents={subagents} />}
-      {menu && (
-        <SoulMenu soul={soul} team={team} onOpen={onOpen} onArchive={onArchive}
+      {menu !== false && (
+        <SoulMenu soul={soul} team={team} onOpen={onOpen} onArchive={onArchive} at={menu ?? undefined}
           onCustomize={customizable ? () => setCustomizing(true) : undefined}
           onClose={() => { setMenu(false); button.current?.focus(); }} done={() => setMenu(false)} />
       )}
-      {customizing && <CustomizeDialog soul={soul} onClose={() => { setCustomizing(false); button.current?.focus(); }} />}
+      {customizing && <CustomizeDialog soul={soul} state={state === 'awaiting' || state === 'working' ? state : undefined}
+        onClose={() => { setCustomizing(false); button.current?.focus(); }} />}
     </div>
   );
 }
@@ -443,7 +472,8 @@ function DesktopWindow({ head, titleId, onClose, children }: {
       aria-labelledby={titleId}
       className="absolute top-1/2 left-1/2 z-30 flex h-[min(660px,calc(100%-3.5rem))] w-[min(780px,calc(100%-1rem))] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
       style={{ transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px))` }}
-      onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
+      // As the design: Escape in the composer, a field or an inner dialog stays there.
+      onKeyDown={(e) => { if (e.key === 'Escape' && !escapeStaysInside(e.target, e.currentTarget)) onClose(); }}
     >
       <div
         className="flex cursor-grab touch-none items-center gap-2 border-b border-border bg-sidebar px-3 py-2 select-none active:cursor-grabbing"
@@ -459,7 +489,7 @@ function DesktopWindow({ head, titleId, onClose, children }: {
         onPointerUp={() => { drag.current = null; }}
       >
         <button ref={close} type="button" onClick={onClose} aria-label={t('closeWindow')} title={t('closeWindow')}
-          className="grid size-4 place-items-center rounded-full bg-destructive/80 text-destructive-foreground hover:bg-destructive">
+          className="grid size-4 place-items-center rounded-full bg-destructive/80 text-destructive-foreground outline-none hover:bg-destructive focus-visible:ring-2 focus-visible:ring-ring">
           <X className="size-2.5" aria-hidden />
         </button>
         {head}

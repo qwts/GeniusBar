@@ -11,6 +11,7 @@ import { derivedHue } from '../model/dudle';
 import { radioGroupKeys } from '../lib/radioGroup';
 import { tabStep } from '../lib/keys';
 import { SoulDudle } from './FleetList';
+import type { DudleState } from './Dudle';
 
 type Tab = 'profile' | 'context';
 const TABS: readonly Tab[] = ['profile', 'context'];
@@ -95,7 +96,11 @@ type Drafts = Record<string, { original: string; current: string }>;
  * read-only viewer.
  * Escape, ×, Close or a backdrop click closes it.
  */
-export function CustomizeDialog({ soul, onClose, save = saveRevision }: { soul: CensusRow; onClose: () => void; save?: SaveRevision }) {
+export function CustomizeDialog({ soul, onClose, save = saveRevision, state }: {
+  soul: CensusRow; onClose: () => void; save?: SaveRevision;
+  /** The title Dudle's face, as the design's `state={c.presence}`: awaiting, working or idle. */
+  state?: DudleState;
+}) {
   // Reload starts over: a fresh read of the profile, the edits dropped.
   const [generation, setGeneration] = useState(0);
   const pressedBackdrop = useRef(false);
@@ -106,13 +111,13 @@ export function CustomizeDialog({ soul, onClose, save = saveRevision }: { soul: 
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4"
       onPointerDown={(e) => { e.stopPropagation(); pressedBackdrop.current = e.target === e.currentTarget; }}
       onClick={(e) => { if (e.target === e.currentTarget && pressedBackdrop.current) onClose(); }}>
-      <CustomizeBody key={generation} soul={soul} onClose={onClose} save={save} onReload={() => setGeneration((g) => g + 1)} />
+      <CustomizeBody key={generation} soul={soul} onClose={onClose} save={save} state={state} onReload={() => setGeneration((g) => g + 1)} />
     </div>,
     document.body,
   );
 }
 
-function CustomizeBody({ soul, onClose, save, onReload }: { soul: CensusRow; onClose: () => void; save: SaveRevision; onReload: () => void }) {
+function CustomizeBody({ soul, onClose, save, onReload, state }: { soul: CensusRow; onClose: () => void; save: SaveRevision; onReload: () => void; state?: DudleState }) {
   const { t } = useI18n();
   const ids = useId();
   const titleId = `${ids}-title`;
@@ -196,7 +201,7 @@ function CustomizeBody({ soul, onClose, save, onReload }: { soul: CensusRow; onC
       </button>
       <div className="flex items-center gap-3 pr-8">
         {/* The chosen colour, live, as the design's title. */}
-        <SoulDudle soul={hue === null ? { ...soul, hue: undefined } : { ...soul, hue }} size={36} paused={false} />
+        <SoulDudle soul={hue === null ? { ...soul, hue: undefined } : { ...soul, hue }} size={36} paused={false} state={state} />
         <h2 id={titleId} className="m-0 truncate text-lg leading-none font-semibold tracking-tight">{name.trim() || baseName}</h2>
         <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">{harness}</span>
       </div>
@@ -213,8 +218,8 @@ function CustomizeBody({ soul, onClose, save, onReload }: { soul: CensusRow; onC
           <button key={id} ref={id === 'profile' ? firstTab : undefined} id={`${ids}-tab-${id}`} type="button" role="tab"
             aria-selected={tab === id} aria-controls={`${ids}-panel`} tabIndex={tab === id ? 0 : -1}
             onClick={() => setTab(id)}
-            className={`rounded-md px-3 py-1 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring ${tab === id
-              ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}>
+            className={`rounded-md px-3 py-1 text-sm font-medium ring-offset-background outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${tab === id
+              ? 'bg-background text-foreground shadow' : 'text-muted-foreground'}`}>
             {t(`edit.${id}`)}
           </button>
         ))}
@@ -273,7 +278,7 @@ function CustomizeBody({ soul, onClose, save, onReload }: { soul: CensusRow; onC
           </p>
           {saveError.code === 'soul-revision-stale' && (
             <button type="button" onClick={onReload}
-              className="min-h-8 shrink-0 rounded-md border border-border px-3 text-sm font-medium text-foreground hover:bg-accent">
+              className="min-h-8 shrink-0 rounded-md border border-border px-3 text-sm font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-accent">
               {t('edit.reload')}
             </button>
           )}
@@ -281,12 +286,12 @@ function CustomizeBody({ soul, onClose, save, onReload }: { soul: CensusRow; onC
       )}
       <div className="flex justify-end gap-2">
         <button type="button" onClick={onClose}
-          className="min-h-8 rounded-md px-4 text-sm font-medium text-foreground hover:bg-accent">
+          className="h-9 rounded-md px-4 text-sm font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-accent">
           {t('cancel')}
         </button>
         {editable && (
           <button type="button" onClick={() => { void onSave(); }} disabled={!dirty || !valid || saving}
-            className="min-h-8 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50">
+            className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-primary/90 disabled:opacity-50">
             {t('edit.save')}
           </button>
         )}

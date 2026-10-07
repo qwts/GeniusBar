@@ -61,6 +61,7 @@ export function Conversation({ name, entries, composer, onDraft, onSend, dudle, 
         </div>
       ) : (
         <ol
+          role="log"
           className="m-0 flex flex-1 list-none flex-col gap-4 overflow-y-auto px-4 py-6 md:px-8"
           ref={list}
           aria-label={t('conversationWith', { name })}
@@ -123,7 +124,7 @@ export function Conversation({ name, entries, composer, onDraft, onSend, dudle, 
             type="submit"
             disabled={!ready}
             aria-label={composer.sending ? t('sending') : t('send')}
-            className={`flex h-9 shrink-0 items-center justify-center gap-1 rounded-md bg-primary text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50 ${composer.sending ? 'px-2 text-xs' : 'w-9'}`}
+            className={`flex h-9 shrink-0 items-center justify-center gap-1 rounded-md bg-primary text-primary-foreground shadow outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-primary/90 disabled:opacity-50 ${composer.sending ? 'px-2 text-xs' : 'w-9'}`}
           >
             {composer.sending && <span>{t('sending')}</span>}
             <ArrowUp className="size-4" aria-hidden />

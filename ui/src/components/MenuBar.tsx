@@ -5,7 +5,7 @@ import { menuKeys } from '../lib/keys';
 import { badgeText } from '../model/approvals';
 import { displayHarness, displayName, displayRole, soulKey, type CensusRow, type SoulNode } from '../model/census';
 import { teamsOf } from '../model/fleet';
-import { SoulDudle } from './FleetList';
+import { liveState, presenceText, SoulDudle } from './FleetList';
 
 /** Closes on a pointer down outside `ref` while `open`. */
 function useClickAway(ref: RefObject<HTMLElement | null>, open: boolean, close: () => void) {
@@ -27,7 +27,7 @@ function useClickAway(ref: RefObject<HTMLElement | null>, open: boolean, close: 
  * Auto-Pilot the G turns amber and a warning bar under the menu bar says so,
  * with Turn off.
  */
-export function MenuBar({ open, onOpenChange, tone, title, attention = null, onReset, unread, approvals = 0, working = 0, autopilot = false, onAutopilotOff, onAudit, forest, paused, onJump, fleetPaused = false, onResume, onLaunch, hiddenCount = 0, onShowAll, onHome, children }: {
+export function MenuBar({ open, onOpenChange, tone, title, attention = null, onReset, unread, approvals = 0, working = 0, autopilot = false, onAutopilotOff, onAudit, forest, paused, onJump, fleetPaused = false, onResume, onLaunch, hiddenCount = 0, onShowAll, onHome, awaiting, busy, children }: {
   open: boolean; onOpenChange: (open: boolean) => void; tone: string; title: string;
   attention?: { text: string; isError: boolean } | null; onReset: () => void;
   /** Unread messages across the fleet, badged on the GeniusBar item. */
@@ -54,6 +54,10 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
   onShowAll?: () => void;
   /** The "G GeniusBar" mark as the design's home link: closes the open window, back to the desktop. */
   onHome?: () => void;
+  /** Agent IDs with a proposal waiting on the owner: the palette's bouncing face and "Waiting for you". */
+  awaiting?: ReadonlySet<string>;
+  /** Agent IDs mid-turn: the palette's working face and "Working". */
+  busy?: ReadonlySet<string>;
   children: ReactNode;
 }) {
   const { t, lang } = useI18n();
@@ -120,7 +124,7 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
       }}>
         <button ref={viewButton} type="button" aria-haspopup="menu" aria-expanded={viewOpen} onClick={() => setViewOpen(!viewOpen)}
           onKeyDown={(e) => { if (e.key === 'ArrowDown' && !viewOpen) { e.preventDefault(); setViewOpen(true); } }}
-          className={`h-7 rounded px-2 text-xs hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${viewOpen ? 'bg-accent' : ''}`}>
+          className={`h-7 rounded px-2 text-xs font-medium hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${viewOpen ? 'bg-accent' : ''}`}>
           {t('menu.view')}
         </button>
         {viewOpen && (
@@ -199,7 +203,7 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
         onJump={(soul) => { setPalette(false); onJump(soul); }}
         onLaunch={onLaunch && (() => { setPalette(false); onLaunch(); })}
         onShowAll={onShowAll && hiddenCount > 0 ? () => { setPalette(false); onShowAll(); } : undefined}
-        hiddenCount={hiddenCount} />}
+        hiddenCount={hiddenCount} awaiting={awaiting} busy={busy} />}
     </header>
   );
 }
@@ -225,9 +229,10 @@ type PaletteAction = { key: string; label: string; icon: typeof Plus; run: () =>
  * show-all actions below the companions. A combobox: the arrow keys move
  * the highlight (`aria-activedescendant`), Enter picks it, typing filters.
  */
-function Palette({ forest, paused, onClose, onJump, onLaunch, onShowAll, hiddenCount }: {
+function Palette({ forest, paused, onClose, onJump, onLaunch, onShowAll, hiddenCount, awaiting, busy }: {
   forest: readonly SoulNode[]; paused: boolean; onClose: () => void; onJump: (soul: CensusRow) => void;
   onLaunch?: () => void; onShowAll?: () => void; hiddenCount: number;
+  awaiting?: ReadonlySet<string>; busy?: ReadonlySet<string>;
 }) {
   const { t } = useI18n();
   const [q, setQ] = useState('');
@@ -288,7 +293,7 @@ function Palette({ forest, paused, onClose, onJump, onLaunch, onShowAll, hiddenC
         // Keep focus in the search box; the click still picks.
         onMouseDown={(e) => e.preventDefault()}
         onClick={run}
-        className={`flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm ${selected ? 'bg-accent' : ''}`}>
+        className={`flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-3 text-left text-sm ${selected ? 'bg-accent' : ''}`}>
         {children}
       </div>
     );
@@ -319,14 +324,15 @@ function Palette({ forest, paused, onClose, onJump, onLaunch, onShowAll, hiddenC
             {teams.map((team) => (
               <div key={team.key} role="group" aria-label={team.heading}>
                 <h3 aria-hidden className="m-0 px-2 py-1.5 text-xs font-medium text-muted-foreground">{team.heading}</h3>
-                {team.souls.map((soul) => option(`soul:${soulKey(soul)}`, (
+                {team.souls.map((soul) => { const state = liveState(soul, awaiting, busy); return option(`soul:${soulKey(soul)}`, (
                   <>
-                    <SoulDudle soul={soul} size={18} paused={paused} />
+                    {/* CommandDialog sizes item svgs h-5 w-5: 20px. */}
+                    <SoulDudle soul={soul} size={20} paused={paused} state={state} />
                     <span>{displayName(soul)}</span>
                     <span className={soul.role ? 'text-muted-foreground' : 'font-mono text-xs text-muted-foreground'}>{displayRole(soul)}</span>
-                    <span className="ml-auto text-xs text-muted-foreground">{t(`presence.${soul.presence}`)}</span>
+                    <span className="ml-auto text-xs text-muted-foreground">{presenceText(soul, state, t)}</span>
                   </>
-                )))}
+                )); })}
               </div>
             ))}
             {shownActions.length > 0 && (
