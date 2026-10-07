@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Check, Circle, CircleDashed, Copy, Shield } from 'lucide-react';
+import { Check, Circle, Copy, Loader2, Shield } from 'lucide-react';
 import { useI18n, type Translate } from '../lib/i18n';
 import type { MessageKey } from '../locales/en';
 import { useSandbox, type SandboxStatus, type SandboxStep } from './Sandbox';
+import { Select } from './Select';
 
 const RUN_TEXT: Record<string, MessageKey> = {
   'owner-admin': 'sandbox.run.admin',
@@ -46,7 +47,7 @@ export function SandboxCard() {
         <Shield className={`size-3.5 ${on ? 'text-success' : 'text-muted-foreground'}`} aria-hidden />
         <h3 className="m-0 flex-1 text-sm font-medium">{t('sandbox.title')}</h3>
         {status && (
-          <input type="checkbox" role="switch" aria-label={t('sandbox.title')} checked={on} disabled={saving}
+          <input type="checkbox" role="switch" className="switch-sm" aria-label={t('sandbox.title')} checked={on} disabled={saving}
             onChange={(e) => sb.setEnabled(e.target.checked)} />
         )}
       </div>
@@ -56,14 +57,14 @@ export function SandboxCard() {
       {readFailure && <p className="error m-0 text-[11px]" role="alert">{t('sandbox.readFailed', { message: readFailure })}</p>}
       {status && on && (
         <>
-          <select aria-label={t('sandbox.provider')} value="standard_macos_account" onChange={() => {}}
-            className="h-7 w-full rounded-md border border-input bg-transparent px-2 text-xs text-foreground">
+          <Select wrapperClassName="w-full" aria-label={t('sandbox.provider')} value="standard_macos_account" onChange={() => {}}
+            className="h-7 pl-3 text-xs">
             <option value="standard_macos_account">{t('sandbox.standard')}</option>
             <option value="__soon" disabled>{t('sandbox.soon')}</option>
-          </select>
+          </Select>
           <p role="status" className="m-0 flex items-center gap-1.5 text-muted-foreground">
             {status.status === 'ready' ? <Check className="size-3 text-success" aria-hidden />
-              : status.status === 'creating' ? <CircleDashed className="size-3 text-primary" aria-hidden />
+              : status.status === 'creating' ? <Loader2 className="size-3 animate-spin text-primary" aria-hidden />
               : <Circle className="size-3" aria-hidden />}
             {sandboxStatusText(status, t)}
           </p>

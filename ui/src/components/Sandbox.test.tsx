@@ -85,7 +85,10 @@ describe('SandboxCard', () => {
     const provider = screen.getByRole('combobox', { name: 'Sandbox type' }) as HTMLSelectElement;
     expect(provider.value).toBe('standard_macos_account');
     expect(within(provider).getByRole('option', { name: 'More options coming soon' }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByText('Account “geniusbar-agent” exists; finish setting it up')).toBeTruthy();
+    const creating = screen.getByText('Account “geniusbar-agent” exists; finish setting it up');
+    // The design's spinning Loader2 while the account is being made, and its small switch.
+    expect(creating.querySelector('svg')?.getAttribute('class')).toContain('animate-spin');
+    expect(screen.getByRole('switch', { name: 'Sandboxing' }).className).toContain('switch-sm');
     const list = screen.getByRole('list', { name: 'Steps for you' });
     const items = within(list).getAllByRole('listitem');
     // create-account is done, so three remain, in agent-bot's order.

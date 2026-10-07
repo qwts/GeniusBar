@@ -7,7 +7,9 @@ import { layoutActions } from '../state/layout';
 import type { LaunchApi } from '../useLaunch';
 import type { Pauser } from '../usePause';
 import type { ChatApi } from '../useChat';
+import type { SoulMode } from '../bridge';
 import { MenuBar } from './MenuBar';
+import { SoulSourceContext, type SoulSource } from './SoulNotices';
 
 afterEach(() => { cleanup(); globalThis.localStorage?.clear(); layoutActions.forget(); });
 
@@ -24,11 +26,76 @@ describe('MenuBar approval badge', () => {
     expect(document.getElementById(item.getAttribute('aria-describedby')!)?.textContent).toBe('2 waiting on you, 1 new');
   });
 
+  it('shows the working count in mono after the badges, and describes it', () => {
+    render(<MenuBar open={false} onOpenChange={vi.fn()} tone="ok" title="ok" onReset={vi.fn()} unread={0}
+      approvals={1} working={3} forest={[]} paused onJump={vi.fn()}>menu</MenuBar>);
+    const item = screen.getByRole('button', { name: 'GeniusBar menu' });
+    expect(item.textContent).toBe('G13');
+    expect(document.getElementById(item.getAttribute('aria-describedby')!)?.textContent).toBe('1 waiting on you, 3 working');
+  });
+
   it('keeps the plain item at zero', () => {
     render(bar(0));
     const item = screen.getByRole('button', { name: 'GeniusBar menu' });
     expect(item.textContent).toBe('G');
     expect(item.getAttribute('aria-describedby')).toBeNull();
+  });
+});
+
+describe('the fleet Auto-Pilot banner (Lovable MenuBar)', () => {
+  const pilot = (autopilot: boolean, onAutopilotOff = vi.fn()) => (
+    <MenuBar open={false} onOpenChange={vi.fn()} tone="ok" title="ok" onReset={vi.fn()} unread={0}
+      forest={[]} paused onJump={vi.fn()} autopilot={autopilot} onAutopilotOff={onAutopilotOff}>menu</MenuBar>
+  );
+
+  it('shows under the menu bar with Turn off, and turns the G amber, while every companion is on Auto-Pilot', () => {
+    const off = vi.fn();
+    render(pilot(true, off));
+    const banner = screen.getByRole('status');
+    expect(banner.textContent).toContain('Auto-Pilot is on — companions run tools without asking.');
+    fireEvent.click(within(banner).getByRole('button', { name: 'Turn off' }));
+    expect(off).toHaveBeenCalledOnce();
+    const g = screen.getByRole('button', { name: 'GeniusBar menu' }).querySelector('span')!;
+    expect(g.className).toContain('bg-warning');
+  });
+
+  it('is absent, with the plain G, otherwise', () => {
+    render(pilot(false));
+    expect(screen.queryByText(/Auto-Pilot is on/)).toBeNull();
+    const g = screen.getByRole('button', { name: 'GeniusBar menu' }).querySelector('span')!;
+    expect(g.className).toContain('bg-foreground');
+  });
+
+  it('turns every companion back to Safe Mode from the desktop', async () => {
+    const setMode = vi.fn(async (_id: string, mode: SoulMode) => mode);
+    const source: SoulSource = {
+      population: vi.fn(async () => null), coldWake: vi.fn(async () => null), setColdWake: vi.fn(),
+      signedIn: vi.fn(async () => null), signIn: vi.fn(),
+      mode: vi.fn(async () => 'autopilot' as const), setMode,
+      model: vi.fn(async () => null), setModel: vi.fn(),
+    };
+    render(<SoulSourceContext.Provider value={source}>
+      <App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />
+    </SoulSourceContext.Provider>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Turn off' }));
+    await waitFor(() => expect(screen.queryByText(/Auto-Pilot is on/)).toBeNull());
+    expect(setMode.mock.calls.every(([, mode]) => mode === 'safe')).toBe(true);
+    expect(setMode).toHaveBeenCalledTimes(new Set(sampleCensus.map((s) => s.agentId)).size);
+  });
+});
+
+describe('the View menu', () => {
+  it('opens the all-activity audit log, and resets the layout with no icon', () => {
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'View' }));
+    const menu = screen.getByRole('menu', { name: 'View' });
+    const items = within(menu).getAllByRole('menuitem');
+    expect(items.map((i) => i.textContent?.trim())).toEqual(['Jump to companion⌘K', 'Audit log', 'Reset desktop layout']);
+    expect(items[2].querySelector('svg')).toBeNull();
+    fireEvent.click(items[1]);
+    expect(screen.queryByRole('menu', { name: 'View' })).toBeNull();
+    const popover = screen.getByRole('dialog', { name: 'GeniusBar menu' });
+    expect(within(popover).getByRole('region', { name: 'Audit log' })).toBeTruthy();
   });
 });
 
@@ -60,11 +127,12 @@ describe('the menu’s approval list', () => {
     expect(screen.getAllByText('luna').length).toBeGreaterThan(0);
   });
 
-  it('shows no section or counts while nothing waits', () => {
+  it('keeps the section and the counts, at zero, while nothing waits', () => {
     render(<App mode="tray" census={sampleCensus} connection={sampleConnection} isStatic
       chat={{ ...chat(), approvals: { records: [], local: new Map() } }} />);
     expect(screen.queryByRole('alert', { name: 'Waiting for your approval' })).toBeNull();
-    expect(screen.queryByText(/waiting on you/)).toBeNull();
+    expect(screen.getByRole('region', { name: 'Waiting for your approval' }).textContent).toContain('Nothing waiting for you');
+    expect(screen.getByText('0 waiting on you')).toBeTruthy();
   });
 });
 

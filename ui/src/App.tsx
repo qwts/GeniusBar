@@ -16,6 +16,8 @@ import { MenuBar } from './components/MenuBar';
 import { CliTools, type CliToolsApi } from './components/CliTools';
 import { AuditLog } from './components/AuditLog';
 import { FleetMode } from './components/FleetMode';
+import { Select } from './components/Select';
+import { useFleetMode } from './components/SoulNotices';
 import { RemoveServices } from './components/RemoveServices';
 import { SetupPanel } from './components/SetupPanel';
 import { UpdateNotice } from './components/UpdateNotice';
@@ -159,10 +161,10 @@ const footerIcon = 'rounded p-1 text-muted-foreground hover:bg-accent hover:text
 function LanguageSelect() {
   const { lang, setLang, t } = useI18n();
   return (
-    <select aria-label={t('language')} value={lang} onChange={(e) => setLang(e.target.value as Lang)}
-      className="h-6 w-[76px] rounded border border-input bg-transparent px-1.5 text-[11px] text-foreground">
+    <Select aria-label={t('language')} value={lang} onChange={(e) => setLang(e.target.value as Lang)}
+      wrapperClassName="w-[76px] shrink-0" chevronClassName="right-1" className="h-6 pr-5 pl-1.5 text-[11px]">
       {LANGS.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
-    </select>
+    </Select>
   );
 }
 
@@ -258,6 +260,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     roster,
   }, [launcher, roster, defaultHarness]);
   const layout = useLayout();
+  // The menu bar's Auto-Pilot banner and amber G (Lovable MenuBar): window mode only.
+  const fleetMode = useFleetMode(mode === 'window' ? roster : NO_CENSUS);
   // Pause all / Resume (#122): the desktop's menu bar chip and quick action.
   // `fleet` is the companions' pause, not `paused` (the hidden page's).
   const fleet = usePause(mode === 'window' ? pauser ?? (inApp() && !isStatic ? livePauser : undefined) : undefined, !pageHidden);
@@ -344,6 +348,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
         <SetupPanel setup={setup} onSetup={onSetup} existing={existingServices} />
       ) : (
         <FleetList forest={forest} paused={paused} unreadOf={unread} onOpen={open} hiding={hiding} onArchive={archiveWith && setArchiving}
+          awaiting={awaitingIds} busy={(badges ?? liveBadges).busy}
           empty={!showStarter && empty && <p className="muted empty">{empty}</p>} />
       )}
       {launch && !showSetup && <DefaultHarness harnesses={launch.harnesses} />}
@@ -364,7 +369,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
               <History className="size-3.5" aria-hidden />
             </button>
             {canLaunchPackage && (
-              <button type="button" className={footerIcon} aria-label={t('addCompanion')} title={t('addCompanion')} onClick={launchPackage}>
+              <button type="button" className={footerIcon} aria-label={t('launchCompanion')} title={t('launchCompanion')} onClick={launchPackage}>
                 <Plus className="size-3.5" aria-hidden />
               </button>
             )}
@@ -457,10 +462,12 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const update = updates ? updateNotice(updates.status) : null;
   const attention = fleet.failure
     ? { text: t(fleet.failure.action === 'pause' ? 'pauseFailed' : 'resumeFailed', { message: fleet.failure.message }), isError: true }
+    : fleetMode.error ? { text: t('mode.failed', { message: fleetMode.error }), isError: true }
     : update ? { text: update.text, isError: update.isError }
     : footer?.isError ? { text: footer.text, isError: true }
     : null;
   const shownBadges = badges ?? liveBadges;
+  const autopilot = fleetMode.mode === 'autopilot';
   const unreadTotal = unread ? roster.reduce((sum, soul) => sum + unread(soul), 0) : 0;
   const notice = showSetup ? t('setupHint')
     : forest.length === 0 ? (showStarter ? t('setupHint') : empty ?? header.title)
@@ -468,7 +475,9 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   return (
     <div className="gb flex h-full flex-col">
       <MenuBar open={menuOpen} onOpenChange={setMenuOpen} tone={header.tone} title={header.title}
-        attention={attention} onReset={layoutActions.reset} unread={unreadTotal} approvals={waiting.length} forest={forest} paused={paused} onJump={open}
+        attention={attention} onReset={layoutActions.reset} unread={unreadTotal} approvals={waiting.length} working={working} forest={forest} paused={paused} onJump={open}
+        autopilot={autopilot} onAutopilotOff={() => { void fleetMode.change('safe'); }}
+        onAudit={() => { setPanel('audit'); setMenuOpen(true); }}
         fleetPaused={fleet.paused} onResume={toggleFleet}
         onLaunch={canLaunchPackage ? launchPackage : undefined} hiddenCount={layout.hidden.length} onShowAll={layoutActions.showAll}>
         {menu({ hidden: layout.hidden, onToggle: layoutActions.setHidden, onToggleTeam: layoutActions.setTeamHidden, onShowAll: layoutActions.showAll })}

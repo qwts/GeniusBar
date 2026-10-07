@@ -83,6 +83,27 @@ describe('FleetList', () => {
     expect(onToggle).toHaveBeenLastCalledWith('user/agent_p', true);
   });
 
+  it('says "Waiting for you" in warning for a pending approval, animates faces, and fades hidden rows', () => {
+    const { container } = render(<FleetList forest={forest} paused onOpen={() => {}}
+      awaiting={new Set([luna.agentId])} busy={new Set([child.agentId])}
+      hiding={{ hidden: ['user/agent_c'], onToggle: () => {}, onToggleTeam: () => {}, onShowAll: () => {} }} />);
+    const lead = screen.getByRole('button', { name: /^luna,/ });
+    const waitingText = within(lead).getByText('Waiting for you');
+    expect(waitingText.className).toContain('text-warning');
+    expect(lead.querySelector('.dudle')?.getAttribute('data-state')).toBe('awaiting');
+    const sub = screen.getByRole('button', { name: /^agent_c,/ });
+    expect(within(sub).queryByText('Waiting for you')).toBeNull();
+    expect(sub.querySelector('.dudle')?.getAttribute('data-state')).toBe('working');
+    expect(sub.className).toContain('opacity-50');
+    expect(lead.className).not.toContain('opacity-50');
+    expect(container.querySelector('.dudle[data-state="offline"]')).toBeTruthy();
+  });
+
+  it('focuses the search when the menu opens, as the design does', () => {
+    render(<FleetList forest={forest} paused onOpen={() => {}} />);
+    expect(document.activeElement).toBe(screen.getByRole('searchbox'));
+  });
+
   it('shows the empty text instead of a search for an empty fleet', () => {
     render(<FleetList forest={[]} paused onOpen={() => {}} empty={<p>nobody here</p>} />);
     expect(screen.getByRole('region', { name: 'Fleet' }).textContent).toBe('nobody here');

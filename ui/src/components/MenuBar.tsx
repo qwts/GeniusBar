@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
-import { Eye, LayoutGrid, Pause, Plus, Search } from 'lucide-react';
+import { Eye, History, LayoutGrid, Pause, Plus, Search, Zap } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { badgeText } from '../model/approvals';
 import { allSouls, displayHarness, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
@@ -21,15 +21,25 @@ function useClickAway(ref: RefObject<HTMLElement | null>, open: boolean, close: 
  * the jump palette and the clock on the right. Escape or a click outside
  * closes a menu. ⌘K opens the palette. While companions are paused
  * (agent-bot `soul pause`), the design's "Companions paused" chip leads
- * the right side; clicking it resumes them.
+ * the right side; clicking it resumes them. While every companion is on
+ * Auto-Pilot the G turns amber and a warning bar under the menu bar says so,
+ * with Turn off.
  */
-export function MenuBar({ open, onOpenChange, tone, title, attention = null, onReset, unread, approvals = 0, forest, paused, onJump, fleetPaused = false, onResume, onLaunch, hiddenCount = 0, onShowAll, children }: {
+export function MenuBar({ open, onOpenChange, tone, title, attention = null, onReset, unread, approvals = 0, working = 0, autopilot = false, onAutopilotOff, onAudit, forest, paused, onJump, fleetPaused = false, onResume, onLaunch, hiddenCount = 0, onShowAll, children }: {
   open: boolean; onOpenChange: (open: boolean) => void; tone: string; title: string;
   attention?: { text: string; isError: boolean } | null; onReset: () => void;
   /** Unread messages across the fleet, badged on the GeniusBar item. */
   unread: number;
   /** Proposals waiting on the owner, badged on the G as the design does. */
   approvals?: number;
+  /** Companions mid-turn, shown in mono after the badges as the design does. */
+  working?: number;
+  /** Every companion is on Auto-Pilot (useFleetMode): amber G and the banner. */
+  autopilot?: boolean;
+  /** The banner's Turn off: every companion back to Safe Mode. */
+  onAutopilotOff?: () => void;
+  /** Opens the all-activity audit log; the View menu offers it when given. */
+  onAudit?: () => void;
   forest: readonly SoulNode[]; paused: boolean; onJump: (soul: CensusRow) => void;
   /** Some managed soul is paused; shows the chip when `onResume` is given too. */
   fleetPaused?: boolean;
@@ -53,7 +63,7 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
   useClickAway(view, viewOpen, closeView);
   const badge = useId();
   const waiting = badgeText(approvals);
-  const described = [waiting && t('bar.approvals', { count: approvals }), unread > 0 && t('newCount', { count: unread })]
+  const described = [waiting && t('bar.approvals', { count: approvals }), working > 0 && t('bar.working', { count: working }), unread > 0 && t('newCount', { count: unread })]
     .filter(Boolean).join(', ');
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
@@ -75,6 +85,15 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
 
   return (
     <header className="relative z-40 flex h-8 shrink-0 items-center gap-1 bg-menubar px-2 text-[13px] text-foreground">
+      {/* First, so the menus and palette paint over it. */}
+      {autopilot && (
+        <div role="status" className="absolute inset-x-0 top-full flex items-center justify-center gap-3 bg-warning px-4 py-0 text-[11px] font-semibold text-warning-foreground">
+          <Zap className="size-3" aria-hidden /> {t('autopilotBanner')}
+          {onAutopilotOff && (
+            <button type="button" onClick={onAutopilotOff} className="min-h-7 rounded px-1 underline underline-offset-2">{t('mode.turnOff')}</button>
+          )}
+        </div>
+      )}
       <span className="flex items-center gap-1.5 px-1.5 py-0.5 font-semibold tracking-tight">
         <span className="grid size-5 place-items-center rounded bg-primary text-[11px] text-primary-foreground" aria-hidden>G</span>
         <span>GeniusBar</span>
@@ -91,9 +110,14 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
               <Search className="size-3.5" aria-hidden /> {t('bar.palette')}
               <span className="ml-auto pl-4 text-muted-foreground">⌘K</span>
             </button>
+            {onAudit && (
+              <button type="button" role="menuitem" className={viewItem} onClick={() => { setViewOpen(false); onAudit(); }}>
+                <History className="size-3.5" aria-hidden /> {t('auditTitle')}
+              </button>
+            )}
             <div role="separator" className="-mx-1 my-1 h-px bg-border" />
             <button type="button" role="menuitem" className={viewItem} onClick={() => { setViewOpen(false); onReset(); }}>
-              <LayoutGrid className="size-3.5" aria-hidden /> {t('menu.resetLayout')}
+              {t('menu.resetLayout')}
             </button>
           </div>
         )}
@@ -113,7 +137,7 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
           </button>
         )}
         <button type="button" onClick={onReset} title={t('menu.resetLayout')} aria-label={t('menu.resetLayout')}
-          className="rounded p-0.5 text-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
+          className="rounded p-0.5 text-foreground/90 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
           <LayoutGrid className="size-4" aria-hidden />
         </button>
         <div ref={item} className="relative" onKeyDown={(e) => { if (e.key === 'Escape') onOpenChange(false); }}>
@@ -127,12 +151,13 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
             onClick={() => onOpenChange(!open)}
             className={`flex h-6 items-center gap-1 rounded px-1 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${open ? 'bg-accent' : ''}`}
           >
-            <span className="grid size-4 place-items-center rounded-[4px] bg-foreground text-[10px] font-bold text-background" aria-hidden>G</span>
+            <span className={`grid size-4 place-items-center rounded-[4px] text-[10px] font-bold ${autopilot ? 'bg-warning text-warning-foreground' : 'bg-foreground text-background'}`} aria-hidden>G</span>
             {waiting && (
               <span title={t('bar.approvals', { count: approvals })} aria-hidden className="grid min-w-4 place-items-center rounded-full bg-warning px-1 font-mono text-[10px] font-bold leading-4 text-warning-foreground">
                 {waiting}
               </span>
             )}
+            {working > 0 && <span title={t('bar.working', { count: working })} aria-hidden className="font-mono text-[11px] text-foreground">{working}</span>}
             <span className={`dot dot-${tone}`} aria-hidden />
             {unread > 0 && (
               <span title={t('newCount', { count: unread })} aria-hidden className="grid min-w-4 place-items-center rounded-full bg-warning px-1 font-mono text-[10px] font-bold leading-4 text-warning-foreground">
@@ -143,16 +168,16 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
           {described && <span id={badge} hidden>{described}</span>}
           {open && (
             <div role="dialog" aria-label={t('bar.menu')}
-              className="absolute top-full right-0 mt-1.5 flex max-h-[calc(100vh-3rem)] w-[22rem] flex-col overflow-y-auto rounded-lg border border-border bg-popover shadow-2xl">
+              className="absolute top-full right-0 mt-1.5 flex max-h-[calc(100vh-3rem)] w-80 flex-col overflow-y-auto rounded-md border border-border bg-popover shadow-md">
               {children}
             </div>
           )}
         </div>
         <button type="button" aria-label={t('bar.palette')} onClick={openPalette}
-          className="rounded p-0.5 text-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
+          className="rounded p-0.5 text-foreground/90 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
           <Search className="size-4" aria-hidden />
         </button>
-        <time className="pl-1 text-foreground" dateTime={now.toISOString()}>{clock}</time>
+        <time className="pl-1 text-foreground/90" dateTime={now.toISOString()}>{clock}</time>
       </div>
       {palette && <Palette forest={forest} paused={paused} onClose={() => setPalette(false)}
         onJump={(soul) => { setPalette(false); onJump(soul); }}

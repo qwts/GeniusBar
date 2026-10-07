@@ -82,18 +82,18 @@ describe('the Audit log tab', () => {
   const forest = buildSoulForest(sampleCensus);
   const chat = { entries: [], composer: emptyComposer, onDraft: () => {}, onSend: () => {} };
 
-  it('sits after Details and reads only that companion’s records once opened', async () => {
+  it('sits before Details, as the design orders the tabs, and reads only that companion’s records once opened', async () => {
     vi.mocked(listAudit).mockResolvedValue(sampleAudit.filter((r) => r.agentId === child.agentId));
     render(<CompanionSession soul={child} forest={forest} roster={sampleCensus} paused chat={chat} onOpen={() => {}} onClose={() => {}} />);
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Chat', 'Delegation', 'Details', 'Audit log']);
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Chat', 'Delegation', 'Audit log', 'Details']);
     expect(listAudit).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('tab', { name: 'Audit log' }));
     await waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(3));
     expect(listAudit).toHaveBeenCalledWith(child.agentId);
   });
 
-  it('follows Details without chat', () => {
+  it('keeps the design order without chat', () => {
     render(<CompanionSession soul={luna} forest={forest} roster={sampleCensus} paused onOpen={() => {}} onClose={() => {}} />);
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Details', 'Delegation', 'Audit log']);
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Delegation', 'Audit log', 'Details']);
   });
 });

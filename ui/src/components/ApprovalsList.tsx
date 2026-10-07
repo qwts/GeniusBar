@@ -7,14 +7,13 @@ const FOCUS = 'outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
 /**
  * The menu header's counts, as Lovable's GeniusBarItem: "N waiting on you"
- * in warning and "· M working" in mono. Nothing when both are zero.
+ * in warning and "· M working" in mono, zeros included.
  */
 export function ApprovalCounts({ waiting, working }: { waiting: number; working: number }) {
   const { t } = useI18n();
-  if (waiting <= 0 && working <= 0) return null;
   return (
     <p className="m-0 flex items-center gap-1 font-mono text-[11px]">
-      <span className={waiting > 0 ? 'text-warning' : 'text-muted-foreground'}>{t('bar.approvals', { count: waiting })}</span>
+      <span className="text-warning">{t('bar.approvals', { count: waiting })}</span>
       <span className="text-muted-foreground">· {t('bar.working', { count: working })}</span>
     </p>
   );
@@ -24,7 +23,8 @@ export function ApprovalCounts({ waiting, working }: { waiting: number; working:
  * The menu's "Waiting for your approval" section (Lovable GeniusBarItem,
  * #85): one card per pending proposal, oldest first, with the companion,
  * its tool, the command, and Approve / Deny. The name opens that
- * companion's chat. Renders nothing while nothing waits.
+ * companion's chat. While nothing waits the heading stays, over "Nothing
+ * waiting for you", and the section is no longer an alert.
  */
 export function ApprovalsList({ items, paused, onDecide, onOpen }: {
   items: readonly MenuApproval[];
@@ -34,17 +34,25 @@ export function ApprovalsList({ items, paused, onDecide, onOpen }: {
   onOpen: (soul: CensusRow) => void;
 }) {
   const { t } = useI18n();
-  if (items.length === 0) return null;
   const later = onDecide ? undefined : t('approval.unavailable');
+  const heading = <h2 className="m-0 px-3 pt-2 pb-1 font-mono text-[11px] font-normal tracking-wider text-muted-foreground uppercase">{t('approvals.title')}</h2>;
+  if (items.length === 0) {
+    return (
+      <section aria-label={t('approvals.title')} className="shrink-0 border-b border-border">
+        {heading}
+        <p className="m-0 px-3 pb-2 text-xs text-muted-foreground">{t('approvals.empty')}</p>
+      </section>
+    );
+  }
   return (
     <section role="alert" aria-label={t('approvals.title')} className="shrink-0 border-b border-border">
-      <h2 className="m-0 px-3 pt-2 pb-1 font-mono text-[11px] font-normal tracking-wider text-muted-foreground uppercase">{t('approvals.title')}</h2>
+      {heading}
       <ul className="m-0 max-h-48 list-none space-y-1 overflow-y-auto px-2 pt-0 pb-2">
         {items.map((item) => {
           const ready = Boolean(onDecide) && !item.deciding;
           const who = (
             <>
-              {item.soul && <SoulDudle soul={item.soul} size={16} paused={paused} />}
+              {item.soul && <SoulDudle soul={item.soul} size={16} paused={paused} state="awaiting" />}
               <span className="font-semibold">{item.name}</span>
               <span className="text-muted-foreground">· {item.tool}</span>
             </>

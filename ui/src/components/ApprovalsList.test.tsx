@@ -9,9 +9,20 @@ afterEach(cleanup);
 const items = menuApprovals(sampleApprovals, new Map(), sampleCensus);
 
 describe('ApprovalsList', () => {
-  it('renders nothing while nothing waits', () => {
-    const { container } = render(<ApprovalsList items={[]} paused onOpen={vi.fn()} onDecide={vi.fn()} />);
-    expect(container.firstChild).toBeNull();
+  it('keeps its heading and says nothing waits, without an alert, while nothing waits', () => {
+    render(<ApprovalsList items={[]} paused onOpen={vi.fn()} onDecide={vi.fn()} />);
+    expect(screen.queryByRole('alert')).toBeNull();
+    const section = screen.getByRole('region', { name: 'Waiting for your approval' });
+    expect(within(section).getByRole('heading', { name: 'Waiting for your approval' })).toBeTruthy();
+    expect(within(section).getByText('Nothing waiting for you')).toBeTruthy();
+    expect(within(section).queryByRole('listitem')).toBeNull();
+  });
+
+  it('bounces the waiting companions’ faces', () => {
+    const { container } = render(<ApprovalsList items={items} paused onOpen={vi.fn()} onDecide={vi.fn()} />);
+    const faces = [...container.querySelectorAll('.dudle')];
+    expect(faces.length).toBe(2);
+    for (const face of faces) expect(face.getAttribute('data-state')).toBe('awaiting');
   });
 
   it('shows one card per proposal, oldest first, as an alert', () => {
@@ -56,9 +67,10 @@ describe('ApprovalsList', () => {
 });
 
 describe('ApprovalCounts', () => {
-  it('shows the counts, and nothing when both are zero', () => {
+  it('always shows both counts, zeros included, waiting in the warning colour', () => {
     const { container, rerender } = render(<ApprovalCounts waiting={0} working={0} />);
-    expect(container.firstChild).toBeNull();
+    expect(container.textContent).toBe('0 waiting on you· 0 working');
+    expect(screen.getByText('0 waiting on you').className).toContain('text-warning');
     rerender(<ApprovalCounts waiting={2} working={0} />);
     expect(container.textContent).toBe('2 waiting on you· 0 working');
   });

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { harnessOptions, MAX_HARNESS } from '../model/launch';
 import { preferenceActions, usePreferences } from '../state/preferences';
 import { useI18n } from '../lib/i18n';
+import { Select } from './Select';
 
 /**
  * The menu's default harness: new launches start with it unless the
@@ -23,21 +24,21 @@ export function DefaultHarness({ harnesses }: { harnesses: readonly string[] }) 
     <section className="grid gap-1.5 border-t border-border p-3 text-xs" aria-label={t('harness.defaultTitle')}>
       <label className="grid gap-1.5">
         <span className="text-sm font-medium">{t('harness.defaultTitle')}</span>
-        <select value={other ? '__other' : defaultHarness ?? ''}
+        <Select wrapperClassName="w-full" value={other ? '__other' : defaultHarness ?? ''}
           onChange={(e) => {
             if (e.target.value === '__other') { setOther(true); setText(''); return; }
             setOther(false);
             preferenceActions.setDefaultHarness(e.target.value || null);
           }}
-          className="h-7 w-full rounded-md border border-input bg-transparent px-2 text-xs text-foreground">
+          className="h-7 pl-3 text-xs">
           <option value="">{t('harness.none')}</option>
           {options.map((h) => <option key={h.id} value={h.id}>{h.label}</option>)}
           <option value="__other">{t('harness.other')}</option>
-        </select>
+        </Select>
       </label>
       {other && (
         <input type="text" aria-label={t('harness.otherLabel')} placeholder={t('harness.otherPlaceholder')} value={text} maxLength={MAX_HARNESS}
-          className="h-7 font-mono text-xs"
+          className="h-7 w-full rounded-md border-input bg-transparent px-3 font-mono text-xs shadow-sm"
           onChange={(e) => setText(e.target.value)} onBlur={commit}
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }} />
       )}

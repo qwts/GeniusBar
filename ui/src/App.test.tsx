@@ -149,7 +149,7 @@ describe('App setup', () => {
     preferenceActions.setDefaultHarness('opencode');
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher} isStatic />);
-    fireEvent.click(screen.getByRole('button', { name: 'Add a companion' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Launch companion' }));
     const harness = screen.getByLabelText('Harness') as HTMLSelectElement;
     expect(harness.value).toBe('opencode');
     // The list only suggests: "Other…" launches a harness that is in neither the census nor the known list.
@@ -166,7 +166,7 @@ describe('App setup', () => {
   it('launches with agent comms on by default, or off when turned off first (#71)', () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher} isStatic />);
-    fireEvent.click(screen.getByRole('button', { name: 'Add a companion' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Launch companion' }));
     const comms = screen.getByRole('switch', { name: 'Agent comms' }) as HTMLInputElement;
     expect(comms.checked).toBe(true);
     fireEvent.click(comms);
@@ -191,7 +191,7 @@ describe('App setup', () => {
   it('launches a package from the footer, and shows a refusal inline', () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     const { rerender } = render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher} isStatic />);
-    fireEvent.click(screen.getByRole('button', { name: 'Add a companion' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Launch companion' }));
     fireEvent.change(screen.getByLabelText('Package'), { target: { value: '/souls/helper' } });
     fireEvent.change(screen.getByLabelText('Harness'), { target: { value: 'claude' } });
     fireEvent.submit(screen.getByRole('form', { name: 'Launch a companion package' }));
@@ -299,7 +299,7 @@ describe('App setup', () => {
   it('keeps contact AutoFill off the launch name field (#80)', () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher} isStatic />);
-    fireEvent.click(screen.getByRole('button', { name: 'Add a companion' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Launch companion' }));
     expect(screen.getByLabelText('Name').getAttribute('autocomplete')).toBe('off');
   });
 
@@ -308,7 +308,7 @@ describe('App setup', () => {
     render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher}
       openedPackage={{ id: 1, path: '/Downloads/broken.soul', checking: false, error: 'unreadable' }} isStatic />);
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Add a companion' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Launch companion' }));
     expect((screen.getByLabelText('Package') as HTMLInputElement).value).toBe('');
     expect(screen.queryByRole('alert')).toBeNull();
   });
@@ -366,8 +366,8 @@ describe('App setup', () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     const bundledFirst = { ...sampleTemplates, templates: [sampleTemplates.templates[2], ...sampleTemplates.templates.slice(0, 2)] };
     render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher} templateLister={async () => bundledFirst} isStatic />);
-    const add = screen.getByRole('button', { name: 'Add a companion' });
-    expect(add.getAttribute('title')).toBe('Add a companion');
+    const add = screen.getByRole('button', { name: 'Launch companion' });
+    expect(add.getAttribute('title')).toBe('Launch companion');
     fireEvent.click(add);
     const dialog = screen.getByRole('dialog', { name: 'Launch a new companion' });
     const souls = await within(dialog).findByRole('radiogroup', { name: 'Soul' });
@@ -387,7 +387,7 @@ describe('App setup', () => {
 
   it('offers no launch without a launcher', () => {
     render(<App census={sampleCensus} connection={sampleConnection} isStatic />);
-    expect(screen.queryByRole('button', { name: 'Add a companion' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Launch companion' })).toBeNull();
   });
 
   it('shows update states in the panel and acts on them (#34)', () => {
@@ -643,7 +643,7 @@ describe('App window mode', () => {
   it('never shows a finished launch dialog after the popup is hidden (#116)', () => {
     const launched: LaunchApi = { state: { phase: 'launched', requestId: 'r1', agentId: 'agent_x' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     render(<App census={sampleCensus} connection={sampleConnection} launcher={launched} isStatic />);
-    fireEvent.click(screen.getByRole('button', { name: 'Add a companion' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Launch companion' }));
     expect(screen.getByRole('dialog', { name: 'Launch a new companion' })).toBeTruthy();
     const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
     try {
