@@ -4506,37 +4506,58 @@ pub async fn identity_apps_list<R: Runtime>(app: AppHandle<R>) -> Result<Value, 
     parse_identity_apps_list(&output.stdout, &output.stderr)
 }
 
-/// Connects an existing App: its ID and a private key file the owner picks
-/// in the native open dialog. Only the path goes to agent-bot; the key is
-/// never read here. `{id, slug, installUrl}`.
+/// Connects an existing App: its ID and its private key, a file the owner
+/// picks in the native open dialog or, with `pass_cli`, an item in the
+/// owner's pass-cli vault that agent-bot restores itself. Only the path or
+/// the item's name goes to agent-bot; the key is never read here.
+/// `{id, slug, installUrl}`.
 #[tauri::command]
 pub async fn identity_app_connect<R: Runtime>(
     app: AppHandle<R>,
     id: String,
     prompt: String,
+    pass_cli: Option<String>,
 ) -> Result<Value, BridgeError> {
     identity_app_id(&id)?;
-    let key = pick_key_file(prompt).await?;
+    let key = identity_key_source(pass_cli, prompt).await?;
     let args = identity_app_connect_args(&id, &key)?;
     let output = run_agent_bot(&app, args, "identity-app-unavailable").await?;
     parse_identity_app_result(&output.stdout, &output.stderr, false)
 }
 
-/// Rotates a managed App's key to a new file the owner downloaded from the
-/// App's settings on github.com and picks in the native open dialog.
-/// `{id, slug, installUrl, retired}`; `retired` is the old key's public
-/// fingerprint, which the owner must still delete on github.com.
+/// Rotates a managed App's key to a new one the owner downloaded from the
+/// App's settings on github.com: a file picked in the native open dialog,
+/// or a pass-cli item (`pass_cli`). `{id, slug, installUrl, retired}`;
+/// `retired` is the old key's public fingerprint, which the owner must
+/// still delete on github.com.
 #[tauri::command]
 pub async fn identity_app_rotate_key<R: Runtime>(
     app: AppHandle<R>,
     slug: String,
     prompt: String,
+    pass_cli: Option<String>,
 ) -> Result<Value, BridgeError> {
     identity_app_slug(&slug)?;
-    let key = pick_key_file(prompt).await?;
+    let key = identity_key_source(pass_cli, prompt).await?;
     let args = identity_app_rotate_args(&slug, &key)?;
     let output = run_agent_bot(&app, args, "identity-app-unavailable").await?;
     parse_identity_app_result(&output.stdout, &output.stderr, true)
+}
+
+/// Where a connect or rotation takes its key from: the pass-cli item when
+/// one is named (checked before anything opens), else the file the owner
+/// picks in the dialog.
+async fn identity_key_source(
+    pass_cli: Option<String>,
+    prompt: String,
+) -> Result<KeySource, BridgeError> {
+    match pass_cli.filter(|item| !item.is_empty()) {
+        Some(item) => {
+            identity_pass_item(&item)?;
+            Ok(KeySource::PassCli(item))
+        }
+        None => Ok(KeySource::File(pick_key_file(prompt).await?)),
+    }
 }
 
 /// Assigns a managed App to a harness or a soul: `{slug, harness}` or
@@ -4584,9 +4605,12 @@ pub async fn identity_addon_set<R: Runtime>(
 
 /// Starts GitHub's manifest flow with `identity app create --manifest
 /// --json`: agent-bot asks the owner, opens a ten-minute loopback listener
-/// and prints `{status: "pending", localUrl}`, which this returns at once
-/// with a `handle`; the same process later prints `{id, slug, installUrl}`
-/// or an error, which `identity_app_create_status` reports.
+/// and prints `{status: "pending", localUrl}`; GitHub's answer later brings
+/// `{id, slug, installUrl}` or an error. The process runs detached, in its
+/// own session with its output in files under the app's local data dir, so
+/// a create outlives GeniusBar and is found again at the next launch
+/// (`IdentityJobs::reattach`). This waits for the pending line and returns
+/// `{handle, localUrl}`; `identity_app_create_status` reports the rest.
 #[tauri::command]
 pub async fn identity_app_create<R: Runtime>(
     app: AppHandle<R>,
@@ -4595,138 +4619,59 @@ pub async fn identity_app_create<R: Runtime>(
     org: Option<String>,
 ) -> Result<Value, BridgeError> {
     let args = identity_app_create_args(name.as_deref(), org.as_deref())?;
-    let unavailable = |e: String| BridgeError::new("identity-app-unavailable", &e);
-    let resources = app
-        .path()
-        .resource_dir()
-        .map_err(|e| unavailable(e.to_string()))?;
-    let mut argv: Vec<std::ffi::OsString> = vec![resources
-        .join("components")
-        .join("agent-bot")
-        .join("agent-bot.mjs")
-        .into_os_string()];
-    argv.extend(args);
-    let (mut events, child) = app
-        .shell()
-        .sidecar("node")
-        .map_err(|e| unavailable(e.to_string()))?
-        .envs(HOST_ENV.iter().copied())
-        .args(argv)
-        .spawn()
-        .map_err(|e| unavailable(e.to_string()))?;
-    let handle = jobs.next.fetch_add(1, Ordering::Relaxed) + 1;
-    jobs.jobs.lock().unwrap().insert(
-        handle,
-        IdentityJob {
-            state: json!({ "status": "pending" }),
-            child: Some(child),
-        },
-    );
-    let (first, started) = oneshot::channel::<Result<String, BridgeError>>();
-    let watcher = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let mut first = Some(first);
-        let mut last_stderr = Vec::new();
-        let mut settled = false;
-        while let Some(event) = events.recv().await {
-            match event {
-                CommandEvent::Stdout(line) => match parse_create_line(&line) {
-                    CreateLine::Pending(url) => {
-                        if let Some(sender) = first.take() {
-                            let _ = sender.send(Ok(url.clone()));
-                        }
-                        watcher
-                            .state::<IdentityJobs>()
-                            .update(handle, json!({ "status": "pending", "localUrl": url }));
-                    }
-                    CreateLine::Done(result) => {
-                        settled = true;
-                        watcher
-                            .state::<IdentityJobs>()
-                            .finish(handle, json!({ "status": "complete", "result": result }));
-                    }
-                    CreateLine::Failed(error) => {
-                        settled = true;
-                        if let Some(sender) = first.take() {
-                            let _ = sender.send(Err(error.clone()));
-                        }
-                        watcher.state::<IdentityJobs>().finish(
-                            handle,
-                            json!({ "status": "failed", "error": { "code": error.code, "message": error.message } }),
-                        );
-                    }
-                    CreateLine::Other => {}
-                },
-                CommandEvent::Stderr(line) => last_stderr = line,
-                CommandEvent::Terminated(_) => break,
-                _ => {}
-            }
-        }
-        if !settled {
-            let error = identity_error(parse_agent_bot_json(
-                b"",
-                &last_stderr,
-                "identity-app-failed",
-                "agent-bot: ",
-                "agent-bot ended App creation without a result",
-                |_| false,
-            ))
-            .unwrap_err();
-            if let Some(sender) = first.take() {
-                let _ = sender.send(Err(error.clone()));
-            }
-            watcher.state::<IdentityJobs>().finish(
-                handle,
-                json!({ "status": "failed", "error": { "code": error.code, "message": error.message } }),
-            );
-        }
-    });
+    let handle = jobs.start(&app, args)?;
     // agent-bot asks the owner before it listens, so the first line waits
     // on that answer; a dialog left alone gives up with the listener.
-    match tokio::time::timeout(Duration::from_secs(600), started).await {
-        Ok(Ok(Ok(local_url))) => Ok(json!({ "handle": handle, "localUrl": local_url })),
-        Ok(Ok(Err(error))) => {
-            jobs.jobs.lock().unwrap().remove(&handle);
-            Err(error)
-        }
-        _ => {
-            jobs.cancel(handle);
-            jobs.jobs.lock().unwrap().remove(&handle);
-            Err(BridgeError::new(
-                "identity-app-timeout",
-                "agent-bot did not start App creation",
-            ))
+    let deadline = Instant::now() + Duration::from_secs(600);
+    loop {
+        match jobs.state(handle)? {
+            CreateState::Pending(Some(url)) => {
+                return Ok(json!({ "handle": handle, "localUrl": url }))
+            }
+            // Both lines were there at the first look: nothing to open, and
+            // the status read brings the result.
+            CreateState::Complete(_) => return Ok(json!({ "handle": handle, "localUrl": "" })),
+            CreateState::Failed(error) => {
+                jobs.cancel(handle);
+                return Err(error);
+            }
+            CreateState::Pending(None) if Instant::now() >= deadline => {
+                jobs.cancel(handle);
+                return Err(BridgeError::new(
+                    "identity-app-timeout",
+                    "agent-bot did not start App creation",
+                ));
+            }
+            CreateState::Pending(None) => tokio::time::sleep(Duration::from_millis(250)).await,
         }
     }
 }
 
-/// Where a create started by `identity_app_create` stands: `{status:
-/// "pending", localUrl}`, `{status: "complete", result: {id, slug,
-/// installUrl}}` or `{status: "failed", error: {code, message}}`.
+/// Where a create started by `identity_app_create`, or found again at
+/// launch, stands: `{status: "pending", localUrl}`, `{status: "complete",
+/// result: {id, slug, installUrl}}` or `{status: "failed", error: {code,
+/// message}}`; `identity-app-interrupted` when its process is gone without
+/// an answer.
 #[tauri::command]
 pub fn identity_app_create_status(
     jobs: State<'_, IdentityJobs>,
     handle: u64,
 ) -> Result<Value, BridgeError> {
-    jobs.jobs
-        .lock()
-        .unwrap()
-        .get(&handle)
-        .map(|job| job.state.clone())
-        .ok_or_else(|| {
-            BridgeError::new(
-                "identity-app-job-not-found",
-                "this App creation is no longer running",
-            )
-        })
+    jobs.state(handle).map(|state| state.to_json())
 }
 
-/// Stops a create that is still waiting for GitHub; agent-bot's listener
-/// closes with its process.
+/// The creates still waiting for GitHub, including those a previous launch
+/// started: `[{handle, localUrl}]`, so the UI can take them up again.
+#[tauri::command]
+pub fn identity_app_create_pending(jobs: State<'_, IdentityJobs>) -> Value {
+    Value::Array(jobs.pending())
+}
+
+/// Stops a create that is still waiting for GitHub: agent-bot's listener
+/// closes with its process, and the record goes.
 #[tauri::command]
 pub fn identity_app_create_cancel(jobs: State<'_, IdentityJobs>, handle: u64) {
     jobs.cancel(handle);
-    jobs.jobs.lock().unwrap().remove(&handle);
 }
 
 /// Opens the create flow's loopback page or a GitHub App page in the
@@ -4757,44 +4702,387 @@ pub async fn identity_app_open(url: String) -> Result<(), BridgeError> {
     }
 }
 
-/// Create jobs this app started; each keeps its agent-bot process until it
-/// finishes or is cancelled.
+/// The creates this launch started or found again, by handle. Each is an
+/// `agent-bot identity app create` running on its own, known by its files
+/// under `<app_local_data_dir>/identity-create/`: `<id>.json` (`{pid,
+/// startedAt}`), `<id>.out` (its stdout, the lines `parse_create_line`
+/// reads) and `<id>.err`. Nothing secret is in them: agent-bot prints the
+/// page, then the App's public result or an error.
 #[derive(Default)]
 pub struct IdentityJobs {
     next: AtomicU64,
-    jobs: Mutex<HashMap<u64, IdentityJob>>,
+    jobs: Mutex<HashMap<u64, CreateRecord>>,
 }
 
-struct IdentityJob {
-    state: Value,
-    child: Option<CommandChild>,
+/// A create's process and files.
+#[derive(Debug, Clone)]
+struct CreateRecord {
+    pid: u32,
+    json: std::path::PathBuf,
+    out: std::path::PathBuf,
+    err: std::path::PathBuf,
+}
+
+/// What a create's files say.
+#[derive(Debug, PartialEq)]
+enum CreateState {
+    /// Waiting: on the owner's answer (no page yet), then on GitHub.
+    Pending(Option<String>),
+    Complete(Value),
+    Failed(BridgeError),
+}
+
+/// Records older than this are forgotten at launch.
+const CREATE_RECORD_LIFETIME: Duration = Duration::from_secs(24 * 60 * 60);
+/// agent-bot's listener gives up after ten minutes, so a pending record
+/// quiet for longer is not a create any more, whatever its pid now runs.
+const CREATE_PENDING_LIMIT: Duration = Duration::from_secs(15 * 60);
+
+impl CreateState {
+    fn to_json(&self) -> Value {
+        match self {
+            CreateState::Pending(url) => json!({ "status": "pending", "localUrl": url }),
+            CreateState::Complete(result) => json!({ "status": "complete", "result": result }),
+            CreateState::Failed(error) => json!({
+                "status": "failed",
+                "error": { "code": error.code, "message": error.message },
+            }),
+        }
+    }
+}
+
+impl CreateRecord {
+    fn new(dir: &std::path::Path, id: &str, pid: u32) -> Self {
+        Self {
+            pid,
+            json: dir.join(format!("{id}.json")),
+            out: dir.join(format!("{id}.out")),
+            err: dir.join(format!("{id}.err")),
+        }
+    }
+
+    /// A record's `pid` from its `.json`; None when it is not one.
+    fn read(dir: &std::path::Path, id: &str) -> Option<Self> {
+        let json = dir.join(format!("{id}.json"));
+        let record: Value = serde_json::from_slice(&std::fs::read(json).ok()?).ok()?;
+        let pid = u32::try_from(record.get("pid")?.as_u64()?).ok()?;
+        Some(Self::new(dir, id, pid))
+    }
+
+    fn state(&self) -> CreateState {
+        let stdout = std::fs::read(&self.out).unwrap_or_default();
+        let stderr = std::fs::read(&self.err).unwrap_or_default();
+        let alive = pid_alive(self.pid) && file_age(&self.out) < CREATE_PENDING_LIMIT;
+        create_state(&stdout, &stderr, alive)
+    }
+
+    /// Ends the create's process, if the pid still runs an `agent-bot`
+    /// create: a pid from a record can have been reused since, and a signal
+    /// to someone else's process is worse than a listener left to time out.
+    fn kill(&self) {
+        if let Ok(pid) = i32::try_from(self.pid) {
+            if pid_alive(self.pid) && pid_runs_create(self.pid) {
+                // SAFETY: a plain signal to a pid this app recorded and checked.
+                unsafe { libc::kill(pid, libc::SIGTERM) };
+            }
+        }
+    }
+
+    fn remove(&self) {
+        for path in [&self.json, &self.out, &self.err] {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 impl IdentityJobs {
-    fn update(&self, handle: u64, state: Value) {
-        if let Some(job) = self.jobs.lock().unwrap().get_mut(&handle) {
-            job.state = state;
-        }
+    /// Spawns the create and registers it. Fails `identity-app-unavailable`
+    /// when the sidecar or the record directory is not there.
+    fn start<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        args: Vec<std::ffi::OsString>,
+    ) -> Result<u64, BridgeError> {
+        let unavailable = |e: String| BridgeError::new("identity-app-unavailable", &e);
+        let resources = app
+            .path()
+            .resource_dir()
+            .map_err(|e| unavailable(e.to_string()))?;
+        let mut argv: Vec<std::ffi::OsString> = vec![resources
+            .join("components")
+            .join("agent-bot")
+            .join("agent-bot.mjs")
+            .into_os_string()];
+        argv.extend(args);
+        let dir = create_record_dir(app).map_err(unavailable)?;
+        let record = spawn_create(&dir, argv).map_err(unavailable)?;
+        Ok(self.register(record))
     }
 
-    fn finish(&self, handle: u64, state: Value) {
-        if let Some(job) = self.jobs.lock().unwrap().get_mut(&handle) {
-            job.state = state;
-            job.child = None;
-        }
+    fn register(&self, record: CreateRecord) -> u64 {
+        let handle = self.next.fetch_add(1, Ordering::Relaxed) + 1;
+        self.jobs.lock().unwrap().insert(handle, record);
+        handle
+    }
+
+    fn record(&self, handle: u64) -> Result<CreateRecord, BridgeError> {
+        self.jobs
+            .lock()
+            .unwrap()
+            .get(&handle)
+            .cloned()
+            .ok_or_else(|| {
+                BridgeError::new(
+                    "identity-app-job-not-found",
+                    "this App creation is no longer running",
+                )
+            })
+    }
+
+    fn state(&self, handle: u64) -> Result<CreateState, BridgeError> {
+        Ok(self.record(handle)?.state())
     }
 
     fn cancel(&self, handle: u64) {
-        let child = self
-            .jobs
-            .lock()
-            .unwrap()
-            .get_mut(&handle)
-            .and_then(|job| job.child.take());
-        if let Some(child) = child {
-            let _ = child.kill();
+        if let Some(record) = self.jobs.lock().unwrap().remove(&handle) {
+            record.kill();
+            record.remove();
         }
     }
+
+    /// `[{handle, localUrl}]` for the creates waiting on GitHub.
+    fn pending(&self) -> Vec<Value> {
+        let jobs = self.jobs.lock().unwrap();
+        let mut handles: Vec<&u64> = jobs.keys().collect();
+        handles.sort();
+        handles
+            .into_iter()
+            .filter_map(|handle| match jobs[handle].state() {
+                CreateState::Pending(Some(url)) => {
+                    Some(json!({ "handle": handle, "localUrl": url }))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Takes up the creates a previous launch left in the record
+    /// directory: one still running, or holding GitHub's answer, is
+    /// registered again (`identity_app_create_pending` offers the waiting
+    /// ones to the UI); one interrupted, or older than a day, is deleted,
+    /// as is any stray file that old.
+    pub fn reattach<R: Runtime>(app: &AppHandle<R>) {
+        let Ok(dir) = create_record_dir(app) else {
+            return;
+        };
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return;
+        };
+        let jobs = app.state::<IdentityJobs>();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            let Some(id) = name.strip_suffix(".json") else {
+                if file_age(&path) >= CREATE_RECORD_LIFETIME {
+                    let _ = std::fs::remove_file(&path);
+                }
+                continue;
+            };
+            let record = match CreateRecord::read(&dir, id) {
+                Some(record) if file_age(&record.json) < CREATE_RECORD_LIFETIME => record,
+                _ => {
+                    CreateRecord::new(&dir, id, 0).remove();
+                    continue;
+                }
+            };
+            match record.state() {
+                CreateState::Failed(error) if error.code == "identity-app-interrupted" => {
+                    record.remove();
+                }
+                _ => {
+                    jobs.register(record);
+                }
+            }
+        }
+    }
+}
+
+fn create_record_dir<R: Runtime>(app: &AppHandle<R>) -> Result<std::path::PathBuf, String> {
+    let dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("identity-create");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// The bundled Node, beside the app executable, where the shell plugin's
+/// `sidecar("node")` finds it.
+fn node_sidecar() -> Result<std::path::PathBuf, String> {
+    let exe = tauri::utils::platform::current_exe().map_err(|e| e.to_string())?;
+    let dir = exe
+        .parent()
+        .ok_or_else(|| "the app executable has no directory".to_string())?;
+    // Under `cargo test` the executable sits in `deps`, as the shell plugin allows for.
+    let dir = if dir.ends_with("deps") {
+        dir.parent().unwrap_or(dir)
+    } else {
+        dir
+    };
+    Ok(dir.join("node"))
+}
+
+/// Runs `node argv` in its own session, its output in the record's files,
+/// and writes the record. Quitting GeniusBar leaves it running.
+fn spawn_create(
+    dir: &std::path::Path,
+    argv: Vec<std::ffi::OsString>,
+) -> Result<CreateRecord, String> {
+    use std::os::unix::{fs::OpenOptionsExt, process::CommandExt};
+    let id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_nanos()
+        .to_string();
+    let mut record = CreateRecord::new(dir, &id, 0);
+    let open = |path: &std::path::Path| {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .mode(0o600)
+            .open(path)
+            .map_err(|e| e.to_string())
+    };
+    let out = open(&record.out)?;
+    let err = open(&record.err)?;
+    let mut command = std::process::Command::new(node_sidecar()?);
+    command
+        .args(argv)
+        .envs(HOST_ENV.iter().copied())
+        .stdin(std::process::Stdio::null())
+        .stdout(out)
+        .stderr(err);
+    // SAFETY: setsid only, between fork and exec.
+    unsafe {
+        command.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
+    let mut child = command.spawn().map_err(|e| {
+        record.remove();
+        e.to_string()
+    })?;
+    record.pid = child.id();
+    // Reaped when it ends, so a finished create is no zombie that still
+    // answers `kill(pid, 0)`.
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    let started = iso_time(std::time::SystemTime::now());
+    std::fs::write(
+        &record.json,
+        json!({ "pid": record.pid, "startedAt": started }).to_string(),
+    )
+    .map_err(|e| {
+        record.kill();
+        record.remove();
+        e.to_string()
+    })?;
+    Ok(record)
+}
+
+/// Whether `pid` is a process: signal 0 touches nothing, and EPERM says it
+/// is there and someone else's.
+fn pid_alive(pid: u32) -> bool {
+    let Ok(pid) = i32::try_from(pid) else {
+        return false;
+    };
+    if pid <= 0 {
+        return false;
+    }
+    // SAFETY: signal 0 to a pid, which sends nothing.
+    let sent = unsafe { libc::kill(pid, 0) };
+    sent == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+/// Whether `pid`'s command line is an `agent-bot identity app create`, as
+/// `ps` reports it; false for any other process, or when `ps` cannot say.
+fn pid_runs_create(pid: u32) -> bool {
+    std::process::Command::new("/bin/ps")
+        .args(["-p", &pid.to_string(), "-o", "command="])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+        .is_some_and(|command| {
+            command.contains("agent-bot.mjs") && command.contains(" identity app create")
+        })
+}
+
+/// How long ago a file was last written; zero when it is not there.
+fn file_age(path: &std::path::Path) -> Duration {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .unwrap_or_default()
+}
+
+/// What a create's output says: the page from its pending line while its
+/// process is there, GitHub's result or agent-bot's error once printed, and
+/// `identity-app-interrupted` when the process is gone without one. Before
+/// the pending line, agent-bot's last word on stderr (a usage error) is the
+/// reason instead.
+fn create_state(stdout: &[u8], stderr: &[u8], alive: bool) -> CreateState {
+    let mut pending = None;
+    for line in stdout.split(|b| *b == b'\n') {
+        match parse_create_line(line) {
+            CreateLine::Pending(url) => pending = Some(url),
+            CreateLine::Done(result) => return CreateState::Complete(result),
+            CreateLine::Failed(error) => return CreateState::Failed(error),
+            CreateLine::Other => {}
+        }
+    }
+    if alive {
+        return CreateState::Pending(pending);
+    }
+    let message = last_line(stderr);
+    let message = message.strip_prefix("agent-bot: ").unwrap_or(&message);
+    if pending.is_none() && !message.is_empty() {
+        let error = identity_error(Err(BridgeError::new("identity-app-failed", message)));
+        return CreateState::Failed(error.unwrap_err());
+    }
+    CreateState::Failed(BridgeError::new(
+        "identity-app-interrupted",
+        "GeniusBar or agent-bot stopped before GitHub answered",
+    ))
+}
+
+/// `2026-10-07T12:34:56Z` for a time (the record's `startedAt`).
+fn iso_time(time: std::time::SystemTime) -> String {
+    let secs = time
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let (h, m, s) = ((secs % 86_400) / 3_600, (secs % 3_600) / 60, secs % 60);
+    // Days to a civil date (Howard Hinnant's algorithm).
+    let z = (secs / 86_400) as i64 + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let mo = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(mo <= 2);
+    format!("{y:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}Z")
 }
 
 /// Lets the owner pick a private key file in the native open dialog.
@@ -4887,6 +5175,42 @@ fn identity_key_path(path: &str) -> Result<(), BridgeError> {
     }
 }
 
+/// A pass-cli item's name, as agent-bot's `identity-apps.mjs` `slug()`
+/// takes it: the App slug rule, so nothing option-shaped gets through.
+fn identity_pass_item(item: &str) -> Result<(), BridgeError> {
+    if valid_identity_slug(item) {
+        Ok(())
+    } else {
+        Err(identity_invalid(
+            "the pass-cli item is a lowercase name of letters, digits and -",
+        ))
+    }
+}
+
+/// Where a connect or rotation takes its key from: `--key-file PATH`, a
+/// file the owner picked, or `--pass-cli ITEM`, an item in the owner's
+/// pass-cli vault that agent-bot restores itself.
+#[derive(Debug, PartialEq)]
+enum KeySource {
+    File(String),
+    PassCli(String),
+}
+
+impl KeySource {
+    fn args(&self) -> Result<[std::ffi::OsString; 2], BridgeError> {
+        match self {
+            KeySource::File(path) => {
+                identity_key_path(path)?;
+                Ok(["--key-file".into(), path.into()])
+            }
+            KeySource::PassCli(item) => {
+                identity_pass_item(item)?;
+                Ok(["--pass-cli".into(), item.into()])
+            }
+        }
+    }
+}
+
 fn identity_apps_list_args() -> Vec<std::ffi::OsString> {
     vec![
         "identity".into(),
@@ -4931,31 +5255,37 @@ fn identity_app_create_args(
     Ok(args)
 }
 
-fn identity_app_connect_args(id: &str, key: &str) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+fn identity_app_connect_args(
+    id: &str,
+    key: &KeySource,
+) -> Result<Vec<std::ffi::OsString>, BridgeError> {
     identity_app_id(id)?;
-    identity_key_path(key)?;
+    let [flag, value] = key.args()?;
     Ok(vec![
         "identity".into(),
         "app".into(),
         "connect".into(),
         "--id".into(),
         id.into(),
-        "--key-file".into(),
-        key.into(),
+        flag,
+        value,
         "--json".into(),
     ])
 }
 
-fn identity_app_rotate_args(slug: &str, key: &str) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+fn identity_app_rotate_args(
+    slug: &str,
+    key: &KeySource,
+) -> Result<Vec<std::ffi::OsString>, BridgeError> {
     identity_app_slug(slug)?;
-    identity_key_path(key)?;
+    let [flag, value] = key.args()?;
     Ok(vec![
         "identity".into(),
         "app".into(),
         "rotate-key".into(),
         slug.into(),
-        "--key-file".into(),
-        key.into(),
+        flag,
+        value,
         "--json".into(),
     ])
 }
@@ -5332,7 +5662,11 @@ mod identity_app_tests {
             );
         }
         assert_eq!(
-            identity_app_connect_args("123", "/Users/me/Downloads/app.pem").unwrap(),
+            identity_app_connect_args(
+                "123",
+                &KeySource::File("/Users/me/Downloads/app.pem".into())
+            )
+            .unwrap(),
             vec![
                 "identity",
                 "app",
@@ -5352,12 +5686,14 @@ mod identity_app_tests {
             ("1", "--json"),
         ] {
             assert_eq!(
-                identity_app_connect_args(id, key).unwrap_err().code,
+                identity_app_connect_args(id, &KeySource::File(key.into()))
+                    .unwrap_err()
+                    .code,
                 "identity-app-invalid"
             );
         }
         assert_eq!(
-            identity_app_rotate_args("luna-bot", "/k.pem").unwrap(),
+            identity_app_rotate_args("luna-bot", &KeySource::File("/k.pem".into())).unwrap(),
             vec![
                 "identity",
                 "app",
@@ -5375,7 +5711,9 @@ mod identity_app_tests {
             ("a", ""),
         ] {
             assert_eq!(
-                identity_app_rotate_args(slug, key).unwrap_err().code,
+                identity_app_rotate_args(slug, &KeySource::File(key.into()))
+                    .unwrap_err()
+                    .code,
                 "identity-app-invalid"
             );
         }
@@ -5577,6 +5915,182 @@ mod identity_app_tests {
             parse_create_line(b"Open http://127.0.0.1:1/"),
             CreateLine::Other
         );
+    }
+
+    #[test]
+    fn builds_pass_cli_key_arguments() {
+        assert_eq!(
+            identity_app_connect_args("123", &KeySource::PassCli("luna-bot-key".into())).unwrap(),
+            vec![
+                "identity",
+                "app",
+                "connect",
+                "--id",
+                "123",
+                "--pass-cli",
+                "luna-bot-key",
+                "--json"
+            ]
+        );
+        assert_eq!(
+            identity_app_rotate_args("luna-bot", &KeySource::PassCli("k2".into())).unwrap(),
+            vec![
+                "identity",
+                "app",
+                "rotate-key",
+                "luna-bot",
+                "--pass-cli",
+                "k2",
+                "--json"
+            ]
+        );
+        // agent-bot's `slug()` grammar: lowercase letters, digits and inner
+        // dashes, 64 at most; nothing option-shaped or path-shaped.
+        for item in [
+            "",
+            "-x",
+            "--json",
+            "Luna",
+            "a b",
+            "a_b",
+            "a/b",
+            "a-",
+            "../k",
+            &"a".repeat(65),
+        ] {
+            assert_eq!(
+                identity_app_connect_args("1", &KeySource::PassCli(item.into()))
+                    .unwrap_err()
+                    .code,
+                "identity-app-invalid",
+                "{item:?}"
+            );
+            assert_eq!(
+                identity_app_rotate_args("luna-bot", &KeySource::PassCli(item.into()))
+                    .unwrap_err()
+                    .code,
+                "identity-app-invalid",
+                "{item:?}"
+            );
+        }
+        assert_eq!(identity_pass_item(&"a".repeat(64)), Ok(()));
+        assert_eq!(identity_pass_item("7"), Ok(()));
+    }
+
+    #[test]
+    fn reads_a_create_from_its_record_files() {
+        let dir = std::env::temp_dir().join(format!("geniusbar-create-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let write = |id: &str, pid: u32, out: &str, err: &str| {
+            std::fs::write(
+                dir.join(format!("{id}.json")),
+                json!({ "pid": pid, "startedAt": "2026-10-07T12:00:00Z" }).to_string(),
+            )
+            .unwrap();
+            std::fs::write(dir.join(format!("{id}.out")), out).unwrap();
+            std::fs::write(dir.join(format!("{id}.err")), err).unwrap();
+            CreateRecord::read(&dir, id).unwrap()
+        };
+        const PENDING: &str =
+            "{\"status\":\"pending\",\"localUrl\":\"http://127.0.0.1:5123/?state=ab\"}\n";
+        const DONE: &str = "{\"id\":\"9\",\"slug\":\"luna-bot\",\"installUrl\":\"https://github.com/apps/luna-bot/installations/new\"}\n";
+        const FAILED: &str = "{\"error\":{\"code\":\"identity-app-timeout\",\"message\":\"App creation timed out after 10 minutes; start create again.\"}}\n";
+        let alive = std::process::id();
+        // No process has this pid.
+        let dead = i32::MAX as u32;
+        assert_eq!(
+            write("1", alive, PENDING, "").state(),
+            CreateState::Pending(Some("http://127.0.0.1:5123/?state=ab".into()))
+        );
+        // Still at the owner's consent dialog.
+        assert_eq!(
+            write("2", alive, "", "").state(),
+            CreateState::Pending(None)
+        );
+        assert_eq!(
+            write("3", dead, PENDING, "").state(),
+            CreateState::Failed(BridgeError::new(
+                "identity-app-interrupted",
+                "GeniusBar or agent-bot stopped before GitHub answered"
+            ))
+        );
+        // The listener's death after a stderr warning is still an interruption.
+        assert_eq!(
+            write("4", dead, PENDING, "(node) warning\n").state(),
+            CreateState::Failed(BridgeError::new(
+                "identity-app-interrupted",
+                "GeniusBar or agent-bot stopped before GitHub answered"
+            ))
+        );
+        // A result stands whether or not the process is still there.
+        for pid in [alive, dead] {
+            assert_eq!(
+                write("5", pid, &format!("{PENDING}{DONE}"), "").state(),
+                CreateState::Complete(json!({
+                    "id": "9", "slug": "luna-bot",
+                    "installUrl": "https://github.com/apps/luna-bot/installations/new",
+                }))
+            );
+            assert_eq!(
+                write("6", pid, &format!("{PENDING}{FAILED}"), "").state(),
+                CreateState::Failed(BridgeError::new(
+                    "identity-app-timeout",
+                    "App creation timed out after 10 minutes; start create again."
+                ))
+            );
+        }
+        // Gone before it listened: agent-bot's last word is the reason.
+        assert_eq!(
+            write("7", dead, "", "agent-bot: usage: agent-bot identity show\n").state(),
+            CreateState::Failed(BridgeError::new(
+                "identity-app-failed",
+                "usage: agent-bot identity show"
+            ))
+        );
+        assert_eq!(
+            write("8", dead, "", "").state(),
+            CreateState::Failed(BridgeError::new(
+                "identity-app-interrupted",
+                "GeniusBar or agent-bot stopped before GitHub answered"
+            ))
+        );
+        // Key material on either stream never becomes a message.
+        let key = std::str::from_utf8(KEY).unwrap();
+        for state in [
+            write("9", dead, "", key).state(),
+            write("10", dead, key, "").state(),
+            write("11", alive, key, key).state(),
+        ] {
+            assert!(!state.to_json().to_string().contains("BEGIN"), "{state:?}");
+        }
+        // Not a record: no pid.
+        std::fs::write(dir.join("12.json"), "{}").unwrap();
+        assert!(CreateRecord::read(&dir, "12").is_none());
+        assert!(CreateRecord::read(&dir, "13").is_none());
+        // What the web view gets.
+        assert_eq!(
+            CreateState::Pending(None).to_json(),
+            json!({ "status": "pending", "localUrl": null })
+        );
+        assert_eq!(
+            CreateState::Failed(BridgeError::new("identity-app-interrupted", "gone")).to_json(),
+            json!({ "status": "failed", "error": { "code": "identity-app-interrupted", "message": "gone" } })
+        );
+        let record = write("14", alive, PENDING, "");
+        record.remove();
+        assert!(!record.json.exists() && !record.out.exists() && !record.err.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn formats_record_times() {
+        let at = |secs: u64| iso_time(std::time::UNIX_EPOCH + Duration::from_secs(secs));
+        assert_eq!(at(0), "1970-01-01T00:00:00Z");
+        assert_eq!(at(951_782_400), "2000-02-29T00:00:00Z");
+        assert_eq!(at(1_791_376_496), "2026-10-07T12:34:56Z");
+        assert!(!pid_alive(0));
+        assert!(pid_alive(std::process::id()));
     }
 
     #[test]

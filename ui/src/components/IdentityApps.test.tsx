@@ -48,6 +48,7 @@ function fakeSource(initial: IdentityApp[], over: Partial<IdentityAppsSource> = 
       ? { status: 'pending', localUrl: 'http://127.0.0.1:5123/?state=ab' }
       : { status: 'complete', result: { id: '9', slug: 'new-bot', installUrl: 'https://github.com/apps/new-bot/installations/new' } })),
     cancelCreate: vi.fn(async () => {}),
+    createPending: vi.fn(async () => []),
     connect: vi.fn(async (id: string) => {
       current = [...current, app('linked-bot')];
       return { id, slug: 'linked-bot', installUrl: 'https://github.com/apps/linked-bot/installations/new' };
@@ -180,6 +181,25 @@ describe('GitHub App row in the ⓘ sheet (Lovable fidelity pass 5)', () => {
     expect(notice.textContent).toContain('Delete the old key in the App’s settings on github.com');
   });
 
+  it('rotates the key from a pass-cli item named inline, without a file dialog', async () => {
+    const source = fakeSource([keyed()]);
+    row(source);
+    fireEvent.click(await screen.findByRole('button', { name: 'Rotate from pass-cli…' }));
+    const go = screen.getByRole('button', { name: 'Rotate' }) as HTMLButtonElement;
+    expect(go.disabled).toBe(true);
+    fireEvent.change(screen.getByRole('textbox', { name: 'pass-cli item' }), { target: { value: ' luna-key ' } });
+    expect(go.disabled).toBe(false);
+    fireEvent.click(go);
+    expect(source.rotateKey).toHaveBeenCalledWith('luna-bot', '', 'luna-key');
+    expect(screen.queryByRole('textbox', { name: 'pass-cli item' })).toBeNull();
+    expect((await screen.findByText(/New key in use for luna-bot\./)).textContent).toContain('Old key: SHA256:old=.');
+    // Cancel folds the field away, calling nothing.
+    fireEvent.click(screen.getByRole('button', { name: 'Rotate from pass-cli…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('textbox', { name: 'pass-cli item' })).toBeNull();
+    expect(source.rotateKey).toHaveBeenCalledTimes(1);
+  });
+
   it('shows a rotation refusal, but not a closed file dialog', async () => {
     const source = fakeSource([keyed()], {
       rotateKey: vi.fn(async () => { throw new BridgeError('identity-app-cancelled', 'no key file was chosen'); }),
@@ -300,6 +320,49 @@ describe('IdentityAppsCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Choose key file…' }));
     expect(source.connect).toHaveBeenCalledWith('42', 'Choose the GitHub App’s private key (.pem)');
     expect(await screen.findByText('linked-bot[bot]')).toBeTruthy();
+  });
+
+  it('connects an existing App from a pass-cli item, with no file dialog', async () => {
+    const source = fakeSource([]);
+    withIdentities(source, <IdentityAppsCard />);
+    await expand();
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect an existing App' }));
+    const connect = screen.getByRole('button', { name: 'Connect from pass-cli' }) as HTMLButtonElement;
+    expect(connect.disabled).toBe(true);
+    expect(screen.getByText('Or the name of the key’s item in pass-cli; agent-bot restores it itself.')).toBeTruthy();
+    fireEvent.change(screen.getByRole('textbox', { name: 'App ID' }), { target: { value: '42' } });
+    expect(connect.disabled).toBe(true);
+    fireEvent.change(screen.getByRole('textbox', { name: 'pass-cli item' }), { target: { value: ' luna-key ' } });
+    expect(connect.disabled).toBe(false);
+    fireEvent.click(connect);
+    expect(source.connect).toHaveBeenCalledWith('42', '', 'luna-key');
+    expect(await screen.findByText('linked-bot[bot]')).toBeTruthy();
+  });
+
+  it('takes up a create still waiting for GitHub from before GeniusBar last quit', async () => {
+    const source = fakeSource([], { createPending: vi.fn(async () => [{ handle: 7, localUrl: 'http://127.0.0.1:5123/?state=ab' }]) });
+    withIdentities(source, <IdentityAppsCard pollMs={1} />);
+    await expand();
+    expect(await screen.findByText('Waiting for GitHub…')).toBeTruthy();
+    expect(source.create).not.toHaveBeenCalled();
+    expect(source.open).not.toHaveBeenCalled();
+    expect((screen.getByRole('button', { name: 'Create a new App' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Open the page again' }));
+    expect(source.open).toHaveBeenCalledWith('http://127.0.0.1:5123/?state=ab');
+    await waitFor(() => expect(source.createStatus).toHaveBeenCalledWith(7));
+    expect(await screen.findByRole('button', { name: 'Install on GitHub' })).toBeTruthy();
+  });
+
+  it('rotates an App\'s key from a pass-cli item in the list', async () => {
+    const source = fakeSource([app('luna-bot')]);
+    withIdentities(source, <IdentityAppsCard />);
+    await expand();
+    const row = within(await screen.findByRole('list', { name: 'GitHub Apps' })).getAllByRole('listitem')[0];
+    fireEvent.click(within(row).getByRole('button', { name: 'Rotate from pass-cli…' }));
+    fireEvent.change(within(row).getByRole('textbox', { name: 'pass-cli item' }), { target: { value: 'luna-key' } });
+    fireEvent.click(within(row).getByRole('button', { name: 'Rotate' }));
+    expect(source.rotateKey).toHaveBeenCalledWith('luna-bot', '', 'luna-key');
+    expect((await within(row).findByText(/New key in use for luna-bot\./)).textContent).toContain('Old key: SHA256:old=.');
   });
 
   it('switches the add-on on through agent-bot when the list reports it', async () => {
@@ -442,13 +505,17 @@ describe('agent-bot identity calls', () => {
       if (command === 'identity_addon_set') return { addon: 'github-identity', enabled: false, changed: true };
       if (command === 'identity_app_remove') return { slug: 'a', id: '1', removed: { storeItem: { store: 'keychain', name: 'agent-bot.app.a/github-app/a', existed: true }, configRecord: true } };
       if (command === 'identity_app_create') return { handle: 3, localUrl: 'http://127.0.0.1:1/' };
+      if (command === 'identity_app_create_pending') return [{ handle: 7, localUrl: 'http://127.0.0.1:2/' }, { nope: 1 }];
       if (command === 'identity_app_assign') return { slug: 'a', soul: 'agent_1' };
       return { id: '1', slug: 'a', installUrl: 'https://github.com/apps/a/installations/new', retired: 'SHA256:x' };
     });
     expect(await liveIdentityApps.list()).toEqual({ apps: [], addons: { 'github-identity': true } });
     expect(await liveIdentityApps.create()).toEqual({ handle: 3, localUrl: 'http://127.0.0.1:1/' });
+    expect(await liveIdentityApps.createPending()).toEqual([{ handle: 7, localUrl: 'http://127.0.0.1:2/' }]);
     await liveIdentityApps.connect('12', 'pick');
+    await liveIdentityApps.connect('12', '', 'luna-key');
     await liveIdentityApps.rotateKey('a', 'pick');
+    await liveIdentityApps.rotateKey('a', '', 'luna-key');
     await liveIdentityApps.assign('a', { soul: 'agent_1' });
     await liveIdentityApps.assign('a', { harness: 'codex' });
     expect(await liveIdentityApps.setAddon('github-identity', false)).toEqual({ addon: 'github-identity', enabled: false, changed: true });
@@ -458,8 +525,11 @@ describe('agent-bot identity calls', () => {
     expect(vi.mocked(invoke).mock.calls).toEqual([
       ['identity_apps_list', {}],
       ['identity_app_create', {}],
+      ['identity_app_create_pending', {}],
       ['identity_app_connect', { id: '12', prompt: 'pick' }],
+      ['identity_app_connect', { id: '12', prompt: '', passCli: 'luna-key' }],
       ['identity_app_rotate_key', { slug: 'a', prompt: 'pick' }],
+      ['identity_app_rotate_key', { slug: 'a', prompt: '', passCli: 'luna-key' }],
       ['identity_app_assign', { slug: 'a', soul: 'agent_1' }],
       ['identity_app_assign', { slug: 'a', harness: 'codex' }],
       ['identity_addon_set', { name: 'github-identity', enabled: false }],

@@ -430,6 +430,7 @@ pub fn run() {
             bridge::identity_app_create,
             bridge::identity_app_create_status,
             bridge::identity_app_create_cancel,
+            bridge::identity_app_create_pending,
             bridge::identity_app_connect,
             bridge::identity_app_rotate_key,
             bridge::identity_app_assign,
@@ -450,6 +451,8 @@ pub fn run() {
             bridge::start(app.handle().clone());
             if !matches!(mode, Mode::Snapshot(_)) {
                 bridge::refresh_services(app.handle().clone());
+                // App creates a previous launch left waiting on GitHub (#67).
+                bridge::IdentityJobs::reattach(app.handle());
             }
             updates::init(app.handle())?;
             let window = app
