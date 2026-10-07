@@ -132,6 +132,15 @@ describe('Desktop status dot', () => {
 });
 
 describe('Desktop hide and restore', () => {
+  it("shows a team's ⋯ on hover and focus only, but always on a hidden lead's placeholder (N9)", () => {
+    render(<Live />);
+    const more = screen.getByRole('button', { name: 'More for luna' });
+    expect(more.className.split(' ')).toEqual(expect.arrayContaining(['opacity-0', 'group-hover:opacity-100', 'focus-visible:opacity-100', 'aria-expanded:opacity-100']));
+    expect(screen.getByRole('region', { name: 'luna' }).className.split(' ')).toContain('group');
+    act(() => layoutActions.setHidden('user/agent_p', true));
+    expect(screen.getByRole('button', { name: 'More for Team' }).className).not.toMatch(/opacity-0/);
+  });
+
   it("hides a lead from its team's ⋯ and restores it from the placeholder", () => {
     render(<Live />);
     fireEvent.click(screen.getByRole('button', { name: 'More for luna' }));

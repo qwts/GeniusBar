@@ -79,7 +79,7 @@ export function ToolApprovalCard({ e, name, onResolve, allowSession = false }: {
     <div
       role={pending ? 'alert' : undefined}
       aria-busy={e.deciding ? true : undefined}
-      className={`max-w-xl rounded-md border-2 p-3 ${pending ? 'border-warning bg-warning/10' : 'border-border bg-card'}`}
+      className={`max-w-xl rounded-md border-2 p-3 ${pending ? 'border-warning bg-warning/10' : 'border-border bg-card opacity-80'}`}
     >
       <div className="flex items-start gap-2">
         <ShieldAlert className={`mt-0.5 size-4 shrink-0 ${pending ? 'text-warning' : 'text-muted-foreground'}`} aria-hidden />
@@ -98,7 +98,7 @@ export function ToolApprovalCard({ e, name, onResolve, allowSession = false }: {
             </button>
             <button type="button" disabled={!ready || !allowSession} title={allowSession ? unavailable : later}
               onClick={() => resolve('approved_session')}
-              className={`${BUTTON} bg-secondary text-secondary-foreground shadow-sm hover:bg-accent`}>
+              className={`${BUTTON} bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80`}>
               {t('approveSession')}
             </button>
             <button type="button" disabled={!ready} title={unavailable} onClick={() => resolve('denied')}

@@ -1,11 +1,12 @@
 import { useContext, useEffect, useId, useMemo, useRef, useState, type PointerEvent, type ReactNode, type RefObject } from 'react';
-import { Archive, ChevronDown, Eye, EyeOff, Monitor, MoreHorizontal, Palette, Plus, Radio, Shield, ShieldOff, Users, X } from 'lucide-react';
+import { Archive, ChevronDown, Eye, EyeOff, History, Monitor, MoreHorizontal, Palette, Plus, Radio, Shield, ShieldOff, Users, X } from 'lucide-react';
 import { displayName, displayRole, roleAndHarness, soulKey, type CensusRow, type SoulNode } from '../model/census';
 import { companionLabel, teamKeys, teamsOf, type Team } from '../model/fleet';
 import { useI18n } from '../lib/i18n';
 import { noBadges, type SoulBadges } from '../model/refresh';
 import { layoutActions, type DesktopLayout } from '../state/layout';
 import { ProfileSourceContext } from '../useSoulProfile';
+import { AuditLog } from './AuditLog';
 import { CustomizeDialog } from './CustomizeDialog';
 import { SoulDudle } from './FleetList';
 import { CompanionHoverCard, useHoverCard } from './HoverCard';
@@ -171,7 +172,7 @@ function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unread
     <section
       aria-label={leadHidden ? t('team.placeholder') : displayName(team.lead)}
       style={{ left: at.x, top: at.y, width: count > 0 ? CARD_W : SOLO_W }}
-      className={`absolute rounded-xl border bg-card/75 shadow-lg backdrop-blur-md ${awaitingCount > 0 ? 'border-warning/70' : 'border-border'} ${live ? 'z-20' : ''}`}
+      className={`group absolute rounded-xl border bg-card/75 shadow-lg backdrop-blur-md ${awaitingCount > 0 ? 'border-warning/70' : 'border-border'} ${live ? 'z-20' : ''}`}
     >
       <div onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
         className={`flex touch-none items-center gap-2 p-2 ${live ? 'cursor-grabbing' : 'cursor-grab'}`}>
@@ -214,7 +215,10 @@ function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unread
           <button ref={moreButton} type="button" aria-haspopup="menu" aria-expanded={more}
             aria-label={t('team.more', { name: leadHidden ? t('team.placeholder') : displayName(team.lead) })}
             onClick={() => setMore(!more)}
-            className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground">
+            // As the design, whose header ends with the pills and the chevron: shown on hover
+            // and focus only, so keyboard users keep it. A hidden lead's placeholder keeps it
+            // visible, since it is that card's only control.
+            className={`rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground ${leadHidden ? '' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100'}`}>
             <MoreHorizontal className="size-4" aria-hidden />
           </button>
           {more && (leadHidden ? (
@@ -414,19 +418,13 @@ function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = 
 }
 
 /**
- * A movable window over the desktop, hosting one companion's session, with
- * the design's chrome: a close dot, the Dudle, the mono name and its role · harness line,
- * and a pill for the census's hardened flag when it is known.
+ * A movable window over the desktop with the design's chrome: a close dot,
+ * then `head` (the title and its controls), then the body.
  */
-export function CompanionWindow({ soul, paused, onClose, actions, children }: {
-  soul: CensusRow; paused: boolean; onClose: () => void;
-  /** The chrome's right-hand controls after the pill, such as ⓘ. */
-  actions?: ReactNode;
-  children: ReactNode;
+function DesktopWindow({ head, titleId, onClose, children }: {
+  head: ReactNode; titleId: string; onClose: () => void; children: ReactNode;
 }) {
   const { t } = useI18n();
-  const title = displayName(soul);
-  const titleId = useId();
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const drag = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const close = useRef<HTMLButtonElement>(null);
@@ -456,6 +454,30 @@ export function CompanionWindow({ soul, paused, onClose, actions, children }: {
           className="grid size-4 place-items-center rounded-full bg-destructive/80 text-destructive-foreground hover:bg-destructive">
           <X className="size-2.5" aria-hidden />
         </button>
+        {head}
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+    </section>
+  );
+}
+
+/**
+ * A movable window over the desktop, hosting one companion's session, with
+ * the design's chrome: a close dot, the Dudle, the mono name and its role · harness line,
+ * and a pill for the census's hardened flag when it is known.
+ */
+export function CompanionWindow({ soul, paused, onClose, actions, children }: {
+  soul: CensusRow; paused: boolean; onClose: () => void;
+  /** The chrome's right-hand controls after the pill, such as ⓘ. */
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
+  const { t } = useI18n();
+  const title = displayName(soul);
+  const titleId = useId();
+  return (
+    <DesktopWindow titleId={titleId} onClose={onClose} head={(
+      <>
         <SoulDudle soul={soul} size={20} paused={paused} />
         <h2 id={titleId} className="m-0 truncate font-mono text-xs font-semibold text-foreground">{title}</h2>
         <span className="mr-auto truncate text-[11px] text-muted-foreground">{roleAndHarness(soul)}</span>
@@ -466,8 +488,31 @@ export function CompanionWindow({ soul, paused, onClose, actions, children }: {
           </span>
         )}
         {actions}
+      </>
+    )}>
+      {children}
+    </DesktopWindow>
+  );
+}
+
+/**
+ * Window mode's Audit log (Lovable route /audit): the companion window's
+ * chrome around the design's page, its heading then every companion's records.
+ */
+export function AuditWindow({ roster, onClose }: { roster: readonly CensusRow[]; onClose: () => void }) {
+  const { t } = useI18n();
+  const titleId = useId();
+  return (
+    <DesktopWindow titleId={titleId} onClose={onClose} head={(
+      <>
+        <History className="size-4 text-muted-foreground" aria-hidden />
+        <h2 id={titleId} className="m-0 mr-auto truncate font-mono text-xs font-semibold text-foreground">{t('auditTitle')}</h2>
+      </>
+    )}>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <h1 className="m-0 px-4 pt-6 text-lg font-semibold md:px-6">{t('auditTitle')} · <span className="text-muted-foreground">{t('allActivity')}</span></h1>
+        <AuditLog agentId={null} roster={roster} />
       </div>
-      <div className="flex min-h-0 flex-1 flex-col">{children}</div>
-    </section>
+    </DesktopWindow>
   );
 }

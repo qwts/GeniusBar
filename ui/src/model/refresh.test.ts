@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyCensus, busyOf, commsAmong, commsOf, computerUseOf, huesOf, rolesOf, sameHues, sameRoles, sameSet } from './refresh';
-import { disconnected, STARTING_WINDOW_MS, unpairedMessage } from './status';
+import { disconnected, STARTING_WINDOW_MS, statusErrors } from './status';
 import { needsSetup } from './setup';
 
 const now = new Date('2026-10-02T01:00:00Z');
@@ -15,18 +15,18 @@ describe('applyCensus', () => {
   it('an unreachable broker keeps the last refresh time', () => {
     const ok = applyCensus(disconnected, { ok: true, souls: [] }, now);
     const s = applyCensus(ok, { ok: false, code: 'broker-unreachable', message: 'no broker socket' }, later);
-    expect(s).toMatchObject({ brokerUnreachable: true, lastRefresh: now, lastError: 'GeniusBar can’t reach its background service yet.' });
+    expect(s).toMatchObject({ brokerUnreachable: true, lastRefresh: now, lastError: statusErrors.unreachable });
   });
 
   it('credential errors mean unpaired, with the pairing hint', () => {
     const s = applyCensus(disconnected, { ok: false, code: 'unauthenticated', message: 'who?' }, now);
-    expect(s).toMatchObject({ bridgeConnected: true, unpaired: true, lastError: unpairedMessage });
+    expect(s).toMatchObject({ bridgeConnected: true, unpaired: true, lastError: statusErrors.unpaired });
   });
 
   it('bridge errors mean not connected yet', () => {
     const s = applyCensus(disconnected, { ok: false, code: 'bridge-unavailable', message: 'starting' }, now);
     expect(s.bridgeConnected).toBe(false);
-    expect(s.lastError).toBe('GeniusBar had trouble starting its background service. Try reopening GeniusBar.');
+    expect(s.lastError).toBe(statusErrors.bridge);
   });
 
   it('other errors are reported without claiming an outage', () => {

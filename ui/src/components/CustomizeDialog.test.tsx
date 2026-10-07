@@ -33,7 +33,8 @@ describe('CustomizeDialog (#64)', () => {
     const { dialog } = open(s);
     expect(await screen.findByRole('dialog', { name: 'Luna' })).toBe(dialog);
     expect(s.profile).toHaveBeenCalledWith(luna.agentId);
-    expect(within(dialog).getByText('claude', { selector: 'span' })).toBeTruthy();
+    // The harness by its label, as the design's title badge (N3).
+    expect(within(dialog).getByText('Claude Code', { selector: 'span' })).toBeTruthy();
     expect(within(dialog).getByRole('tab', { name: 'Profile' }).getAttribute('aria-selected')).toBe('true');
     const name = within(dialog).getByLabelText('Name') as HTMLInputElement;
     expect(name.value).toBe('Luna');
@@ -132,7 +133,21 @@ describe('CustomizeDialog (#64)', () => {
     expect(screen.getByRole('dialog', { name: 'luna' })).toBe(dialog);
   });
 
-  it('closes on Escape, ×, Close and a backdrop click, and not on a click inside', async () => {
+  it('follows the typed name in its title, with the design’s fields and no role placeholder (N13, R2)', async () => {
+    const { dialog } = open(source());
+    const name = await within(dialog).findByDisplayValue('Luna') as HTMLInputElement;
+    fireEvent.change(name, { target: { value: 'Lunita' } });
+    expect(within(dialog).getByRole('heading', { level: 2 }).textContent).toBe('Lunita');
+    fireEvent.change(name, { target: { value: '  ' } });
+    expect(within(dialog).getByRole('heading', { level: 2 }).textContent).toBe('Luna');
+    const role = within(dialog).getByLabelText('Role') as HTMLInputElement;
+    expect(role.placeholder).toBe('');
+    expect(role.className.split(' ')).toEqual(expect.arrayContaining(['h-9', 'py-1', 'shadow-sm']));
+    const description = within(dialog).getByLabelText('Description');
+    expect(description.className.split(' ')).toEqual(expect.arrayContaining(['min-h-[60px]', 'py-2', 'shadow-sm']));
+  });
+
+  it('closes on Escape, ×, Cancel and a backdrop click, and not on a click inside', async () => {
     const { onClose, dialog } = open(source());
     await within(dialog).findByDisplayValue('Luna');
     fireEvent.keyDown(within(dialog).getByRole('tab', { name: 'Profile' }), { key: 'Escape' });
@@ -140,8 +155,8 @@ describe('CustomizeDialog (#64)', () => {
     (document.activeElement as HTMLElement | null)?.blur();
     fireEvent.keyDown(document.body, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(2);
-    fireEvent.click(within(dialog).getAllByRole('button', { name: 'Close' })[0]);
-    fireEvent.click(within(dialog).getAllByRole('button', { name: 'Close' })[1]);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     expect(onClose).toHaveBeenCalledTimes(4);
     fireEvent.pointerDown(dialog);
     fireEvent.click(dialog);

@@ -3,28 +3,35 @@ import { useI18n } from '../lib/i18n';
 import { credentialNote, healthHeader, type ConnectionSnapshot } from '../model/status';
 
 /**
- * The GeniusBar menu's title row, as the Lovable design: the name on the
- * left and, where the design has its counts, the broker health in mono
- * (destructive when it fails), then the credential state.
+ * The GeniusBar menu's title row, as the Lovable design: the name, then the
+ * counts in mono. While the broker is healthy and the credential has nothing
+ * to say, that is all (the health stays for screen readers only); otherwise
+ * the health line (destructive when it fails) and the credential state sit
+ * under the row.
  */
 export function HealthHeader({ connection, children }: { connection: ConnectionSnapshot; children?: ReactNode }) {
-  const { t } = useI18n();
-  const header = healthHeader(connection, t);
+  const { t, lang } = useI18n();
+  const header = healthHeader(connection, t, lang);
   const note = credentialNote(connection, t);
+  const quiet = header.tone === 'ok' && !note;
   return (
     <header className="border-b border-border p-3">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <div className="flex items-center gap-2">
         <h1 className="m-0 flex-1 text-sm font-semibold">GeniusBar</h1>
-        <div role="status" aria-label={header.label} className="min-w-0">
-          <p className={`health-title justify-end font-mono text-[11px] ${header.tone === 'bad' ? 'text-destructive' : ''}`}>
+        {children}
+      </div>
+      {quiet ? (
+        <span role="status" aria-label={header.label} className="sr-only">{header.title}</span>
+      ) : (
+        <div role="status" aria-label={header.label} className="mt-1 min-w-0">
+          <p className={`health-title m-0 font-mono text-[11px] ${header.tone === 'bad' ? 'text-destructive' : ''}`}>
             <span className={`dot dot-${header.tone}`} aria-hidden="true" />
             {header.title}
           </p>
-          {header.detail && <p className="muted small m-0 text-right font-mono">{header.detail}</p>}
+          {header.detail && <p className="m-0 font-mono text-xs text-muted-foreground">{header.detail}</p>}
         </div>
-        {children}
-      </div>
-      {note && <p className="note small">{note}</p>}
+      )}
+      {note && <p className="m-0 mt-1 text-xs text-muted-foreground">{note}</p>}
     </header>
   );
 }
@@ -35,8 +42,8 @@ export function HealthHeader({ connection, children }: { connection: ConnectionS
  * GeniusBar needs. A failure the footer would show sits under it.
  */
 export function SetupHeader({ connection, running, error }: { connection: ConnectionSnapshot; running: boolean; error?: string | null }) {
-  const { t } = useI18n();
-  const header = healthHeader(connection, t);
+  const { t, lang } = useI18n();
+  const header = healthHeader(connection, t, lang);
   const status = running ? t('setup.settingUp') : header.title;
   return (
     <header className="space-y-1 border-b border-border p-4 text-sm">

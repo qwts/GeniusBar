@@ -4,7 +4,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { buildSoulForest, countSouls, findSoul, soulKey, type CensusRow, type SoulNode } from './model/census';
-import { unpairedMessage, type ConnectionSnapshot } from './model/status';
+import { errorText, unpairedMessage, type ConnectionSnapshot } from './model/status';
 
 /** From the shell's `snapshot_options`; null on a normal launch. */
 export interface SnapshotOptions {
@@ -30,7 +30,8 @@ export const SNAPSHOT_SETTLE_MS = 100;
 export function snapshotReport(forest: readonly SoulNode[], connection: ConnectionSnapshot,
   detail: string | null): SnapshotReport | null {
   if (!connection.bridgeConnected) return null;
-  let error = connection.lastError ?? (connection.unpaired ? unpairedMessage : null);
+  // The shell prints this, so it stays English.
+  let error = connection.lastError !== null ? errorText(connection.lastError) : connection.unpaired ? unpairedMessage : null;
   if (error === null && detail !== null && !findSoul(forest, detail)) error = `no soul with agent ID '${detail}'`;
   return { souls: countSouls(forest), error };
 }

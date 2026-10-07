@@ -80,11 +80,13 @@ export function displayRole(soul: Pick<CensusRow, 'harness' | 'role'>): string {
 
 /**
  * The design's "role · harness" line: the declared role ahead of the
- * harness when there is one, else the harness alone.
+ * harness when there is one, else the harness alone. `harness` words the
+ * harness: its raw ID by default, or its label (`soulHarnessLabel`).
  */
-export function roleAndHarness(soul: Pick<CensusRow, 'harness' | 'role'>): string {
+export function roleAndHarness(soul: Pick<CensusRow, 'harness' | 'role'>,
+  harness: (soul: Pick<CensusRow, 'harness'>) => string = displayHarness): string {
   const role = soul.role?.trim();
-  return role ? `${role} · ${displayHarness(soul)}` : displayHarness(soul);
+  return role ? `${role} · ${harness(soul)}` : harness(soul);
 }
 
 /**

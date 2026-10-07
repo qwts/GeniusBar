@@ -2,7 +2,7 @@
 // refresh did, with errors told apart by their stable code.
 import type { DaemonStatus, SoulComms } from '../bridge';
 import type { CensusRow, SoulRole } from './census';
-import { brokerErrorMessage, STARTING_WINDOW_MS, type ConnectionSnapshot } from './status';
+import { brokerErrorCode, STARTING_WINDOW_MS, statusErrors, type ConnectionSnapshot } from './status';
 
 export type CensusOutcome =
   | { ok: true; souls: readonly CensusRow[] }
@@ -23,11 +23,11 @@ export function applyCensus(prev: ConnectionSnapshot, outcome: CensusOutcome, no
     return { ...prev, bridgeConnected: true, loadingCredential: false, unpaired: false,
       brokerUnreachable: false, lastError: null, lastRefresh: now, starting: false, failingSince: null };
   }
-  const lastError = brokerErrorMessage(outcome.code, outcome.message);
+  const lastError = brokerErrorCode(outcome.code, outcome.message);
   // The shell reports bridge-* codes while Node starts or restarts.
   if (outcome.code.startsWith('bridge-')) {
     return { ...prev, bridgeConnected: false,
-      lastError: 'GeniusBar had trouble starting its background service. Try reopening GeniusBar.' };
+      lastError: statusErrors.bridge };
   }
   if (UNPAIRED.has(outcome.code)) {
     return { ...prev, bridgeConnected: true, loadingCredential: false, unpaired: true, lastError,

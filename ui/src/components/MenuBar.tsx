@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
-import { Eye, History, Pause, Plus, Search, Zap } from 'lucide-react';
+import { Eye, History, Pause, Plus, Search, X, Zap } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { badgeText } from '../model/approvals';
 import { displayHarness, displayName, displayRole, soulKey, type CensusRow, type SoulNode } from '../model/census';
@@ -88,10 +88,10 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
     <header className="relative z-40 flex h-8 shrink-0 items-center gap-1 bg-menubar px-2 text-[13px] text-foreground">
       {/* First, so the menus and palette paint over it. */}
       {autopilot && (
-        <div role="status" className="absolute inset-x-0 top-full flex items-center justify-center gap-3 bg-warning px-4 py-0 text-[11px] font-semibold text-warning-foreground">
+        <div role="status" className="absolute inset-x-0 top-full flex items-center justify-center gap-3 bg-warning px-4 py-1 text-[11px] font-semibold text-warning-foreground">
           <Zap className="size-3" aria-hidden /> {t('autopilotBanner')}
           {onAutopilotOff && (
-            <button type="button" onClick={onAutopilotOff} className="min-h-7 rounded px-1 underline underline-offset-2">{t('mode.turnOff')}</button>
+            <button type="button" onClick={onAutopilotOff} className="min-h-0 rounded px-1 py-0 underline underline-offset-2">{t('mode.turnOff')}</button>
           )}
         </div>
       )}
@@ -133,7 +133,7 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
       )}
       <div className="ml-auto flex items-center gap-3 pr-1">
         {fleetPaused && onResume && (
-          <button type="button" onClick={onResume} className="flex min-h-7 items-center gap-1 rounded bg-secondary px-3 py-0.5 text-secondary-foreground">
+          <button type="button" onClick={onResume} className="flex min-h-7 items-center gap-1 rounded bg-secondary px-2 py-0.5 text-secondary-foreground">
             <Pause className="size-3" aria-hidden /> {t('paused')}
           </button>
         )}
@@ -155,7 +155,7 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
               </span>
             )}
             {working > 0 && <span title={t('bar.working', { count: working })} aria-hidden className="font-mono text-[11px] text-foreground">{working}</span>}
-            <span className={`dot dot-${tone}`} aria-hidden />
+            {tone !== 'ok' && <span className={`dot dot-${tone}`} aria-hidden />}
             {unread > 0 && (
               <span title={t('newCount', { count: unread })} aria-hidden className="grid min-w-4 place-items-center rounded-full bg-primary px-1 font-mono text-[10px] font-bold leading-4 text-primary-foreground">
                 {unread}
@@ -282,7 +282,7 @@ function Palette({ forest, paused, onClose, onJump, onLaunch, onShowAll, hiddenC
           if (e.key === 'Escape') onClose();
           if (e.key === 'Tab') trapTab(e, box.current);
         }}
-        className="w-full max-w-lg overflow-hidden rounded-lg border border-border bg-background shadow-lg">
+        className="relative w-full max-w-lg overflow-hidden rounded-lg border border-border bg-background shadow-lg">
         <div className="flex items-center gap-2 border-b border-border px-3">
           <Search className="size-5 shrink-0 opacity-50" aria-hidden />
           <input autoFocus value={q} onChange={(e) => { setQ(e.target.value); setActive(0); }} onKeyDown={onInputKey}
@@ -290,9 +290,13 @@ function Palette({ forest, paused, onClose, onJump, onLaunch, onShowAll, hiddenC
             role="combobox" aria-expanded="true" aria-controls={listId} aria-autocomplete="list" aria-activedescendant={activeId}
             className="h-12 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground" />
         </div>
-        <div className="max-h-80 overflow-y-auto p-1">
-          {options.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">{t('bar.noResults')}</p>}
-          <div id={listId} role="listbox" aria-label={t('bar.palette')}>
+        <button type="button" aria-label={t('close')} onClick={onClose}
+          className="absolute top-3.5 right-4 rounded-sm opacity-70 hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
+          <X className="size-4" aria-hidden />
+        </button>
+        <div className="max-h-[300px] overflow-y-auto p-1">
+          {options.length === 0 && <p className="m-0 py-6 text-center text-sm">{t('bar.noResults')}</p>}
+          <div id={listId} role="listbox" aria-label={t('bar.palette')} className="px-2">
             {teams.map((team) => (
               <div key={team.key} role="group" aria-label={team.heading}>
                 <h3 aria-hidden className="m-0 px-2 py-1.5 text-xs font-medium text-muted-foreground">{team.heading}</h3>
@@ -300,7 +304,7 @@ function Palette({ forest, paused, onClose, onJump, onLaunch, onShowAll, hiddenC
                   <>
                     <SoulDudle soul={soul} size={18} paused={paused} />
                     <span>{displayName(soul)}</span>
-                    <span className={`${soul.role ? '' : 'font-mono '}text-xs text-muted-foreground`}>{displayRole(soul)}</span>
+                    <span className={soul.role ? 'text-muted-foreground' : 'font-mono text-xs text-muted-foreground'}>{displayRole(soul)}</span>
                     <span className="ml-auto text-xs text-muted-foreground">{t(`presence.${soul.presence}`)}</span>
                   </>
                 )))}

@@ -92,9 +92,14 @@ describe('ToolApprovalCard buttons (a11y audit)', () => {
     }
   });
 
-  it('shows a resolved card at full contrast', () => {
+  it('dims a resolved card as the design does (N11), and the pending one not at all', () => {
     render(<ToolApprovalCard e={{ ...e, status: 'approved' }} name="luna" />);
     const card = screen.getByText('git push').closest('div.rounded-md') as HTMLElement;
-    expect(card.className).not.toMatch(/opacity-/);
+    expect(card.className.split(' ')).toContain('opacity-80');
+    cleanup();
+    render(<ToolApprovalCard e={e} name="luna" onResolve={() => {}} />);
+    const pending = screen.getByText('git push').closest('div.rounded-md') as HTMLElement;
+    expect(pending.className).not.toMatch(/opacity-/);
+    expect(screen.getByRole('button', { name: 'Approve for session' }).className.split(' ')).toContain('hover:bg-secondary/80');
   });
 });

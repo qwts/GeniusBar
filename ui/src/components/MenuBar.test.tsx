@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import { emptyChat } from '../model/chat';
+import { buildSoulForest } from '../model/census';
 import { sampleApprovals, sampleCensus, sampleConnection, samplePaused } from '../model/fixtures';
 import { layoutActions } from '../state/layout';
 import { noBadges } from '../model/refresh';
@@ -85,6 +86,43 @@ describe('the fleet Auto-Pilot banner (Lovable MenuBar)', () => {
   });
 });
 
+describe('menu bar and palette chrome (pass 3)', () => {
+  const bar = (tone: string, extra: Partial<Parameters<typeof MenuBar>[0]> = {}) => (
+    <MenuBar open={false} onOpenChange={vi.fn()} tone={tone} title="t" onReset={vi.fn()} unread={0}
+      forest={[]} paused onJump={vi.fn()} {...extra}>menu</MenuBar>
+  );
+
+  it('shows the G item’s health dot only when something is wrong (N2)', () => {
+    const { container, unmount } = render(bar('ok'));
+    expect(container.querySelector('.dot')).toBeNull();
+    unmount();
+    const bad = render(bar('bad'));
+    expect(bad.container.querySelector('.dot.dot-bad')).toBeTruthy();
+  });
+
+  it('pads the Auto-Pilot strip py-1 with a flat Turn off (N2)', () => {
+    render(bar('ok', { autopilot: true, onAutopilotOff: vi.fn() }));
+    expect(screen.getByRole('status').className.split(' ')).toContain('py-1');
+    expect(screen.getByRole('button', { name: 'Turn off' }).className.split(' ')).toEqual(expect.arrayContaining(['min-h-0', 'py-0']));
+  });
+
+  it('gives the palette the design’s ✕, list height, insets, empty text and role size (N1, R1)', () => {
+    const captain = { ...sampleCensus[0], role: 'Release captain' };
+    render(bar('ok', { forest: buildSoulForest([captain, ...sampleCensus.slice(1)]) }));
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    const palette = screen.getByRole('dialog', { name: 'Jump to companion' });
+    const listbox = within(palette).getByRole('listbox');
+    expect(listbox.className).toBe('px-2');
+    expect(listbox.parentElement?.className.split(' ')).toEqual(expect.arrayContaining(['max-h-[300px]', 'p-1']));
+    expect(within(palette).getByText('Release captain').className).toBe('text-muted-foreground');
+    expect(within(palette).getAllByText('unknown harness')[0].className).toBe('font-mono text-xs text-muted-foreground');
+    fireEvent.change(within(palette).getByRole('combobox'), { target: { value: 'nobody' } });
+    expect(within(palette).getByText('No companions found').className).not.toMatch(/muted/);
+    fireEvent.click(within(palette).getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog', { name: 'Jump to companion' })).toBeNull();
+  });
+});
+
 describe('the View menu', () => {
   it('opens the all-activity audit log, and resets the layout with no icon', () => {
     render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
@@ -95,8 +133,32 @@ describe('the View menu', () => {
     expect(items[2].querySelector('svg')).toBeNull();
     fireEvent.click(items[1]);
     expect(screen.queryByRole('menu', { name: 'View' })).toBeNull();
+    // N8: a desktop window with the design's page heading, not a panel in the 320px popover.
+    expect(screen.queryByRole('dialog', { name: 'GeniusBar menu' })).toBeNull();
+    const audit = screen.getByRole('dialog', { name: 'Audit log' });
+    expect(within(audit).getByRole('heading', { level: 1 }).textContent).toBe('Audit log · All activity');
+    expect(document.activeElement).toBe(within(audit).getByRole('button', { name: 'Close window' }));
+    fireEvent.click(within(audit).getByRole('button', { name: 'Close window' }));
+    expect(screen.queryByRole('dialog', { name: 'Audit log' })).toBeNull();
+  });
+
+  it('opens the same window from the menu footer’s History, closing the menu (N8)', () => {
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'GeniusBar menu' }));
     const popover = screen.getByRole('dialog', { name: 'GeniusBar menu' });
-    expect(within(popover).getByRole('region', { name: 'Audit log' })).toBeTruthy();
+    fireEvent.click(within(popover).getByRole('button', { name: 'Audit log' }));
+    expect(screen.queryByRole('dialog', { name: 'GeniusBar menu' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Audit log' })).toBeNull();
+    const audit = screen.getByRole('dialog', { name: 'Audit log' });
+    fireEvent.keyDown(audit, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Audit log' })).toBeNull();
+  });
+
+  it('keeps the inline panel in the tray popup (N8)', () => {
+    render(<App census={sampleCensus} connection={sampleConnection} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'Audit log' }));
+    expect(screen.getByRole('region', { name: 'Audit log' })).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Audit log' })).toBeNull();
   });
 });
 
@@ -147,7 +209,7 @@ describe('the "Companions paused" chip (#122, agent-bot soul pause)', () => {
     const onResume = vi.fn();
     render(chip(true, onResume));
     const button = screen.getByRole('button', { name: 'Companions paused' });
-    expect(button.className).toBe('flex min-h-7 items-center gap-1 rounded bg-secondary px-3 py-0.5 text-secondary-foreground');
+    expect(button.className).toBe('flex min-h-7 items-center gap-1 rounded bg-secondary px-2 py-0.5 text-secondary-foreground');
     const item = screen.getByRole('button', { name: 'GeniusBar menu' });
     expect(button.compareDocumentPosition(item) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(button);
