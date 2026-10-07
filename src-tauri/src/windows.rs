@@ -303,6 +303,7 @@ pub async fn sync_team_windows(
         .iter()
         .filter(|label| label.starts_with(TEAM_PREFIX))
         .count();
+    let mut failed: Vec<String> = Vec::new();
     for (index, team) in create.into_iter().enumerate() {
         let label = format!("{TEAM_PREFIX}{}", slug(&team.key));
         let url = page("team", &[("soul", Some(&team.key))]);
@@ -326,11 +327,46 @@ pub async fn sync_team_windows(
             .skip_taskbar(true)
             .accept_first_mouse(true)
             .focused(false);
-        builder.build().map_err(|e| e.to_string())?;
+        // One card that cannot be made (the app still settling right after an
+        // update, a window server refusal) never costs the others: it is noted
+        // and the popup asks again shortly.
+        if let Err(e) = builder.build() {
+            failed.push(format!("{}: {e}", team.key));
+        }
     }
     // A window already open keeps its size and place: its page fits itself
     // to the card (and to a menu hanging off it) and the person drags it.
-    Ok(true)
+    if failed.is_empty() {
+        Ok(true)
+    } else {
+        let message = format!("team windows not created: {}", failed.join("; "));
+        log_line(&app, &message);
+        Err(message)
+    }
+}
+
+/// Appends one line to `shell.log` in the app's log folder
+/// (`~/Library/Logs/app.geniusbar` on macOS): the only trace a tray app
+/// launched by LaunchServices leaves. Failures to log are ignored.
+pub fn log_line(app: &tauri::AppHandle, message: &str) {
+    use std::io::Write;
+    let Ok(dir) = app.path().app_log_dir() else {
+        return;
+    };
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("shell.log"))
+    {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let _ = writeln!(file, "{stamp} {message}");
+    }
 }
 
 #[cfg(test)]

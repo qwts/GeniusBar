@@ -647,14 +647,20 @@ export interface TeamWindowSpec {
  * The popup's coordinator call (#223): one window per team in the list,
  * the rest closed. True when native team windows are in use; false in
  * `--window` mode, on other platforms, under a snapshot, outside the app,
- * or with a shell that cannot (an error is the same answer).
+ * or with a shell that has no such command. Any other failure rejects with
+ * a `sync-failed` BridgeError, so the coordinator tries again later rather
+ * than giving up on the desktop for the rest of the run.
  */
 export async function syncTeamWindows(teams: readonly TeamWindowSpec[], invokeImpl: typeof invoke = invoke): Promise<boolean> {
   if (!inApp() && invokeImpl === invoke) return false;
   try {
     return (await invokeImpl<unknown>('sync_team_windows', { teams })) === true;
-  } catch {
-    return false;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // Tauri's answer for a command the shell does not have (an older shell),
+    // or one its capabilities do not allow: this shell cannot.
+    if (/not found|not allowed/i.test(message)) return false;
+    throw new BridgeError('sync-failed', message || 'The shell could not sync the team windows.');
   }
 }
 
