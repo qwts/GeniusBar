@@ -4,6 +4,7 @@ import type { SurfaceRequest, SurfaceWindow } from '../bridge';
 import type { Archiver } from '../components/ArchiveDialog';
 import { sampleCensus, sampleProfile } from '../model/fixtures';
 import { LAYOUT_KEY, layoutActions } from '../state/layout';
+import type { PackageCheck } from '../soulPackage';
 import type { LaunchApi } from '../useLaunch';
 import { ProfileSourceContext, type ProfileSource } from '../useSoulProfile';
 import { AuditSurface } from './AuditSurface';
@@ -217,5 +218,55 @@ describe('the other window surfaces (#223)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(win.close).toHaveBeenCalledTimes(1);
     expect(opened).toEqual([]);
+  });
+});
+
+describe('LaunchSurface with a dropped package (#98)', () => {
+  const idle = (): LaunchApi => ({ state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() });
+
+  it('checks the package, then fills the form as a Finder-opened one', async () => {
+    let answer: (value: PackageCheck) => void = () => {};
+    const checkPackage = vi.fn(() => new Promise<PackageCheck>((resolve) => { answer = resolve; }));
+    render(<LaunchSurface {...data} win={null} launcher={idle()} open={null} packagePath="/souls/helper.soul/" checkPackage={checkPackage} />);
+    expect(await screen.findByText('Checking this companion package…')).toBeTruthy();
+    expect(checkPackage).toHaveBeenCalledWith('/souls/helper.soul/');
+    await act(async () => { answer({ error: null, name: 'Helper - Starter', description: 'Answers questions about this Mac.', preferredHarnesses: ['opencode'] }); });
+    expect(screen.queryByText('Checking this companion package…')).toBeNull();
+    expect(screen.getByText('Answers questions about this Mac.')).toBeTruthy();
+    expect((screen.getByPlaceholderText('Optional') as HTMLInputElement).value).toBe('Helper');
+  });
+
+  it('shows why a package cannot be launched', async () => {
+    const checkPackage = vi.fn(async (): Promise<PackageCheck> => ({ error: 'Two folders claim this companion.' }));
+    render(<LaunchSurface {...data} win={null} launcher={idle()} open={null} packagePath="/souls/dup.soul" checkPackage={checkPackage} />);
+    expect((await screen.findByRole('alert')).textContent).toContain('Two folders claim this companion.');
+  });
+
+  it('opens an installed soul\'s session instead of a new launch, and closes', async () => {
+    const { win } = fakeWindow();
+    const { opened, open } = fakeOpen();
+    const checkPackage = vi.fn(async (): Promise<PackageCheck> => ({ error: null, agentId: 'agent_p' }));
+    render(<LaunchSurface {...data} win={win} launcher={idle()} open={open} packagePath="/souls/Luna - Starter.soul" checkPackage={checkPackage} />);
+    await waitFor(() => expect(opened).toEqual([{ surface: 'session', soul: 'user/agent_p' }]));
+    expect(win.close).toHaveBeenCalled();
+  });
+
+  it('takes the path as is outside the app, and checks nothing without a package', () => {
+    const checkPackage = vi.fn(async (): Promise<PackageCheck> => ({ error: null }));
+    const view = render(<LaunchSurface {...data} win={null} launcher={idle()} open={null} packagePath="/souls/helper.soul" />);
+    expect(screen.queryByText('Checking this companion package…')).toBeNull();
+    expect((screen.getByLabelText('Path to soul, ending with .soul') as HTMLInputElement).value).toBe('/souls/helper.soul');
+    view.unmount();
+    render(<LaunchSurface {...data} win={null} launcher={idle()} open={null} checkPackage={checkPackage} />);
+    expect(checkPackage).not.toHaveBeenCalled();
+  });
+});
+
+describe('TeamSurface drop cue (#98)', () => {
+  it('draws a dashed border over the card only while a .soul hovers', () => {
+    const { rerender } = render(<TeamSurface {...data} soul="user/agent_p" win={null} open={null} />);
+    expect(screen.queryByTestId('soul-drop-cue')).toBeNull();
+    rerender(<TeamSurface {...data} soul="user/agent_p" win={null} open={null} dropping />);
+    expect(screen.getByTestId('soul-drop-cue').className).toContain('border-dashed');
   });
 });

@@ -213,6 +213,8 @@ export const en = {
   'launch.progress.joined': 'Joined',
   'launch.progress.done': 'done',
   'launch.progress.running': 'in progress',
+  'launch.sandboxed': 'sandboxed',
+  'launch.unrestricted': 'unrestricted',
   'launch.comms': 'Agent comms',
   'launch.commsHint': 'Lets this companion message and be messaged by other companions.',
   'harness.defaultTitle': 'Default harness',

@@ -214,6 +214,8 @@ export const es: Catalog = {
   'launch.progress.joined': 'Se ha unido',
   'launch.progress.done': 'hecho',
   'launch.progress.running': 'en curso',
+  'launch.sandboxed': 'aislado',
+  'launch.unrestricted': 'sin restricciones',
   'launch.comms': 'Comunicación entre agentes',
   'launch.commsHint': 'Permite que este compañero envíe y reciba mensajes de otros compañeros.',
   'harness.defaultTitle': 'Arnés predeterminado',

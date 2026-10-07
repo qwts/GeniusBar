@@ -1,9 +1,9 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { Check, Circle, Loader2 } from 'lucide-react';
+import { Check, Circle, Loader2, Shield, ShieldOff } from 'lucide-react';
 import { displayName, type CensusRow } from '../model/census';
 import { savedBrief } from '../bridge';
-import { canLaunch, harnessOptions, MAX_BRIEF, MAX_HARNESS, MAX_ROLE, normalPackagePath, preferredHarness, prefillHarness, suggestedName, type LaunchStage, type LaunchState } from '../model/launch';
-import { useI18n } from '../lib/i18n';
+import { canLaunch, harnessOptions, MAX_BRIEF, MAX_HARNESS, MAX_ROLE, normalPackagePath, preferredHarness, prefillHarness, suggestedName, type LaunchSandbox, type LaunchStage, type LaunchState } from '../model/launch';
+import { useI18n, type Translate } from '../lib/i18n';
 import { radioGroupKeys } from '../lib/radioGroup';
 import { chosenTemplate, CUSTOM_SOUL, initialChoice } from '../model/templates';
 import type { LaunchApi } from '../useLaunch';
@@ -67,6 +67,19 @@ interface LaunchFormProps {
   loadBrief?: (agentId: string) => Promise<string | null>;
 }
 
+/** "Runs as <account> (sandboxed)" or "(unrestricted)", as the launch result says (#66). */
+export function launchRunsAsText(sandbox: LaunchSandbox, t: Translate): string {
+  const kind = t(sandbox.resolution === 'sandboxed' ? 'launch.sandboxed' : 'launch.unrestricted');
+  return t('sandbox.runsAs', { user: `${sandbox.account} (${kind})` });
+}
+
+/** The launch result's "Runs as" line, when the daemon said (#66). */
+function RunsAs({ state }: { state: LaunchState }) {
+  const { t } = useI18n();
+  const sandbox = 'sandbox' in state ? state.sandbox : undefined;
+  return sandbox ? <span className="block text-muted-foreground">{launchRunsAsText(sandbox, t)}</span> : null;
+}
+
 export function LaunchStatus({ state }: { state: LaunchState }) {
   const { t } = useI18n();
   switch (state.phase) {
@@ -85,12 +98,14 @@ export function LaunchStatus({ state }: { state: LaunchState }) {
       return (
         <p className="m-0 text-xs text-foreground" role="status">
           {state.agentId ? <span className="selectable">{t('launch.launchedAs', { agentId: state.agentId })}</span> : t('launch.launched')}
+          <RunsAs state={state} />
         </p>
       );
     case 'failed':
       return (
         <p className="m-0 text-[11px] text-destructive" role="alert">
           {t('launch.failed', { detail: state.detail ?? t('launch.failedNoDetail') })}
+          <RunsAs state={state} />
         </p>
       );
     case 'error':
@@ -128,6 +143,13 @@ export function LaunchProgress({ state }: { state: LaunchState }) {
             <span className="sr-only">{i < step ? t('launch.progress.done') : i === step ? t('launch.progress.running') : ''}</span>
           </li>
         ))}
+        {/* Who the companion runs as, once the daemon says (#66); no Lovable screen draws it. */}
+        {'sandbox' in state && state.sandbox && (
+          <li className="flex items-center gap-2 text-muted-foreground">
+            {state.sandbox.resolution === 'sandboxed' ? <Shield className="size-4 shrink-0" aria-hidden /> : <ShieldOff className="size-4 shrink-0" aria-hidden />}
+            {launchRunsAsText(state.sandbox, t)}
+          </li>
+        )}
       </ol>
       {state.phase === 'pending' && (
         <p className="m-0 font-mono text-[11px] text-muted-foreground">

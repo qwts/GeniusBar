@@ -430,3 +430,27 @@ describe('LaunchForm brief (#120)', () => {
     expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ brief: 'Triage the inbox' }));
   });
 });
+
+describe('LaunchForm: who the companion runs as (#66)', () => {
+  it('ends the progress list with "Runs as" once the daemon says, and not before', () => {
+    const idle = launcherIn({ phase: 'idle' });
+    const { rerender } = render(form(idle, { initialPackagePath: '/souls/helper.soul' }));
+    fireEvent.submit(screen.getByRole('form'));
+    rerender(form({ ...idle, state: { phase: 'pending', requestId: 'r1', note: null, stage: 'account' } }, { initialPackagePath: '/souls/helper.soul' }));
+    let items = within(screen.getByRole('list', { name: 'Launch progress' })).getAllByRole('listitem').map((li) => li.textContent);
+    expect(items).toHaveLength(3);
+    rerender(form({ ...idle, state: { phase: 'pending', requestId: 'r1', note: null, stage: 'harness', sandbox: { resolution: 'sandboxed', account: 'gb-helper' } } },
+      { initialPackagePath: '/souls/helper.soul' }));
+    items = within(screen.getByRole('list', { name: 'Launch progress' })).getAllByRole('listitem').map((li) => li.textContent);
+    expect(items.at(-1)).toBe('Runs as gb-helper (sandboxed)');
+  });
+
+  it('says it with a refused launch\'s result', () => {
+    const idle = launcherIn({ phase: 'idle' });
+    const { rerender } = render(form(idle, { initialPackagePath: '/souls/helper.soul' }));
+    fireEvent.submit(screen.getByRole('form'));
+    rerender(form({ ...idle, state: { phase: 'failed', requestId: 'r1', agentId: null, detail: 'refused', sandbox: { resolution: 'unrestricted', account: 'owner' } } },
+      { initialPackagePath: '/souls/helper.soul' }));
+    expect(screen.getByRole('alert').textContent).toContain('Runs as owner (unrestricted)');
+  });
+});

@@ -5,9 +5,11 @@ import { createRoot } from 'react-dom/client';
 import { App, type AppMode } from './App';
 import type { CliToolsApi } from './components/CliTools';
 import type { DevTools, HarnessAuth, Starter } from './components/FirstLaunch';
-import { inApp, openDesktop } from './bridge';
+import { currentWindow, inApp, openDesktop, openSurface } from './bridge';
+import { DropCue } from './components/DropCue';
 import { menuApprovals } from './model/approvals';
 import { parseSurface } from './model/surface';
+import { checkSoulPackage, routeDroppedPackage, useSoulDrop, type OpenedPackage } from './soulPackage';
 import { LiveSurface } from './surfaces/LiveSurface';
 import { useCensus } from './useCensus';
 import { useChat } from './useChat';
@@ -39,46 +41,19 @@ function Live({ snapshot }: { snapshot: SnapshotOptions | null }) {
   }, [waiting, snapshot]);
   const launcher = useLaunch();
   const updates = useUpdates();
-  const [openedPackage, setOpenedPackage] = useState<{ id: number; path: string; checking: boolean; error: string | null; agentId?: string; name?: string;
-    preferredHarnesses?: string[]; description?: string; copyOf?: { name: string | null; agentId: string } }>();
+  const [openedPackage, setOpenedPackage] = useState<OpenedPackage>();
   const packageSequence = useRef(0);
+  // A package from Finder or dropped here (#98): checked, then the form shows it.
+  const showPackage = useCallback(async (path: string) => {
+    const id = ++packageSequence.current;
+    setOpenedPackage({ id, path, checking: true, error: null });
+    const checked = await checkSoulPackage(path);
+    setOpenedPackage((current) => current?.id === id ? { ...current, checking: false, ...checked } : current);
+  }, []);
   const loadOpenedPackages = useCallback(async () => {
     const paths = await invoke<string[]>('take_opened_soul_packages');
-    for (const path of paths) {
-      const id = ++packageSequence.current;
-      setOpenedPackage({ id, path, checking: true, error: null });
-      try {
-        await invoke('validate_soul_package', { package: path });
-        // agent-bot says whether this folder is an installed soul, a copy of
-        // one, or one that must not be launched (#80). A copy launches under
-        // a new name, which agent-bot's daemon forks into a new soul (#110);
-        // an older daemon still refuses it, and LaunchStatus shows why.
-        // An older bundle without `soul locate` keeps the package flow.
-        const located = await invoke<{ status: string; agentId?: string; message?: string; name?: string; description?: string; preferredHarnesses?: string[] }>('locate_soul_package', { package: path })
-          .catch(() => null);
-        const refused = located && !['package', 'installed', 'copy'].includes(located.status);
-        const copyOf = located?.status === 'copy' && typeof located.agentId === 'string'
-          ? { agentId: located.agentId, name: typeof located.name === 'string' ? located.name : null } : null;
-        setOpenedPackage((current) => current?.id === id ? {
-          ...current,
-          checking: false,
-          ...(located?.status === 'installed' && located.agentId ? { agentId: located.agentId } : {}),
-          // A package says what it is (agent-bot 0.10.14+): the form prefills from it (#120).
-          ...(located?.status === 'package' && typeof located.name === 'string' ? { name: located.name } : {}),
-          ...(located?.status === 'package' && typeof located.description === 'string' ? { description: located.description } : {}),
-          ...(located?.status === 'package' && Array.isArray(located.preferredHarnesses) ? { preferredHarnesses: located.preferredHarnesses.filter((h) => typeof h === 'string') } : {}),
-          ...(copyOf ? { copyOf } : {}),
-          ...(refused ? { error: located.message ?? 'This folder can’t be launched as a companion.' } : {}),
-        } : current);
-      } catch {
-        setOpenedPackage((current) => current?.id === id ? {
-          ...current,
-          checking: false,
-          error: 'GeniusBar couldn’t read this companion package. Check that it’s accessible and contains a soul.json file, then try again.',
-        } : current);
-      }
-    }
-  }, []);
+    for (const path of paths) await showPackage(path);
+  }, [showPackage]);
   useEffect(() => {
     if (snapshot) return;
     let active = true;
@@ -107,12 +82,27 @@ function Live({ snapshot }: { snapshot: SnapshotOptions | null }) {
   // the desktop; the popup is the default.
   const [mode, setMode] = useState<AppMode>('tray');
   useEffect(() => { invoke<AppMode>('app_mode').then(setMode, () => {}); }, []);
+  // A `.soul` dropped on the popup (#98): the tray popup opens the launch
+  // window with it; --window, a snapshot, or a shell without windows shows
+  // it here, as Finder's "Open with GeniusBar" does.
+  const nativeLaunch = mode === 'tray' && inApp() && !snapshot;
+  const dropPackage = useCallback((path: string) => {
+    void routeDroppedPackage(path, {
+      open: nativeLaunch ? openSurface : null,
+      show: (dropped) => { void showPackage(dropped); },
+      opened: () => { currentWindow()?.hide().catch(() => {}); },
+    });
+  }, [nativeLaunch, showPackage]);
+  const dropping = useSoulDrop(dropPackage);
   return (
+    <>
     <App mode={mode} census={census} connection={connection} rosterSettled={settled} onRefresh={refresh} setup={setup} isStatic={Boolean(snapshot)} select={select}
       onSetup={(migrate) => { void runSetup(migrate); }} existingServices={existing} cliTools={cliTools} chat={snapshot ? undefined : chat} launcher={launcher} starter={starter} harnessAuth={harnessAuth}
       devTools={devTools} openedPackage={openedPackage} updates={updates}
       onOpenDesktop={inApp() && !snapshot ? () => { void openDesktop().catch(() => {}); } : undefined}
       onRemoveServices={async () => { await invoke('remove_services'); void refresh?.(); }} />
+    {dropping && <div className="gb"><DropCue fill /></div>}
+    </>
   );
 }
 

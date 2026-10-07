@@ -181,6 +181,16 @@ export function launchParams(request: LaunchRequest): Record<string, string | bo
 export const LAUNCH_STAGES = ['checking', 'account', 'joining', 'harness', 'session'] as const;
 export type LaunchStage = (typeof LAUNCH_STAGES)[number];
 
+/**
+ * Who the launched companion runs as (agent-comms 0.3.14 `launch-status`,
+ * GeniusBar #66): agent-bot's sandbox account, or the owner's own when it
+ * runs unrestricted. Older daemons say nothing.
+ */
+export interface LaunchSandbox {
+  resolution: 'sandboxed' | 'unrestricted';
+  account: string;
+}
+
 export type LaunchState =
   | { phase: 'idle' }
   | { phase: 'requesting' }
@@ -188,10 +198,10 @@ export type LaunchState =
    * Accepted; `note` explains a status check that could not complete and
    * `stage` is the daemon's latest report, null until it says.
    */
-  | { phase: 'pending'; requestId: string; note: string | null; stage: LaunchStage | null }
-  | { phase: 'launched'; requestId: string; agentId: string | null }
+  | { phase: 'pending'; requestId: string; note: string | null; stage: LaunchStage | null; sandbox?: LaunchSandbox }
+  | { phase: 'launched'; requestId: string; agentId: string | null; sandbox?: LaunchSandbox }
   /** `stage` says where the daemon stopped, when it reported stages. */
-  | { phase: 'failed'; requestId: string; agentId: string | null; detail: string | null; stage?: LaunchStage | null }
+  | { phase: 'failed'; requestId: string; agentId: string | null; detail: string | null; stage?: LaunchStage | null; sandbox?: LaunchSandbox }
   /** The launch was refused, or its status can no longer be read. */
   | { phase: 'error'; requestId: string | null; text: string };
 
@@ -205,15 +215,35 @@ export function canLaunch(state: LaunchState): boolean {
 /** The state after one `launchStatus` result; unknown statuses stay pending. */
 export function applyStatus(state: LaunchState, result: unknown): LaunchState {
   if (state.phase !== 'pending') return state;
-  const r = (result ?? {}) as { status?: unknown; agentId?: unknown; detail?: unknown; stage?: unknown };
+  const r = (result ?? {}) as { status?: unknown; agentId?: unknown; detail?: unknown; stage?: unknown; sandbox?: unknown };
   const agentId = typeof r.agentId === 'string' ? r.agentId : null;
   const stage = laterStage(state.stage, r.stage);
-  if (r.status === 'launched') return { phase: 'launched', requestId: state.requestId, agentId };
+  // A result without one keeps what an earlier one said.
+  const sandbox = launchSandbox(r.sandbox) ?? state.sandbox;
+  const runsAs = sandbox ? { sandbox } : {};
+  if (r.status === 'launched') return { phase: 'launched', requestId: state.requestId, agentId, ...runsAs };
   if (r.status === 'failed') {
     const detail = typeof r.detail === 'string' && r.detail.trim() !== '' ? r.detail : null;
-    return { phase: 'failed', requestId: state.requestId, agentId, detail, ...(stage ? { stage } : {}) };
+    return { phase: 'failed', requestId: state.requestId, agentId, detail, ...(stage ? { stage } : {}), ...runsAs };
   }
-  return { ...state, note: null, stage };
+  return { ...state, note: null, stage, ...runsAs };
+}
+
+/** The longest sandbox account name shown; a longer one is taken as malformed. */
+const MAX_ACCOUNT = 256;
+
+/**
+ * A `launch-status` result's `sandbox`, or null when absent or malformed:
+ * a known resolution and a non-blank account without control characters.
+ */
+export function launchSandbox(raw: unknown): LaunchSandbox | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const { resolution, account } = raw as { resolution?: unknown; account?: unknown };
+  if (resolution !== 'sandboxed' && resolution !== 'unrestricted') return null;
+  if (typeof account !== 'string') return null;
+  const name = account.trim();
+  if (name === '' || name.length > MAX_ACCOUNT || CONTROL.test(name)) return null;
+  return { resolution, account: name };
 }
 
 /** The reported stage when it is a known one past the current; stages never go back. */
