@@ -441,3 +441,23 @@ describe('CustomizeDialog colour (#64)', () => {
     });
   });
 });
+
+describe('CustomizeDialog pass 7 (X3, X8, X13, X20)', () => {
+  it('animates the title Dudle with the live state, as the design’s state={c.presence}', async () => {
+    render(<ProfileSourceContext.Provider value={source()}><CustomizeDialog soul={luna} onClose={vi.fn()} state="awaiting" /></ProfileSourceContext.Provider>);
+    const dialog = await screen.findByRole('dialog', { name: 'Luna' });
+    expect(dialog.querySelector('svg.dudle')?.getAttribute('data-state')).toBe('awaiting');
+  });
+
+  it('gives the footer 36px ringed buttons and the tabs an offset ring with no hover colour', async () => {
+    const { dialog } = open(source());
+    await screen.findByRole('dialog', { name: 'Luna' });
+    const cancel = within(dialog).getByRole('button', { name: 'Cancel' });
+    expect(cancel.className.split(' ')).toEqual(expect.arrayContaining(['h-9', 'outline-none', 'focus-visible:ring-2', 'focus-visible:ring-ring']));
+    expect(cancel.className).not.toContain('min-h-8');
+    for (const tab of within(dialog).getAllByRole('tab')) {
+      expect(tab.className.split(' ')).toEqual(expect.arrayContaining(['ring-offset-background', 'focus-visible:ring-offset-2']));
+      expect(tab.className).not.toContain('hover:text-foreground');
+    }
+  });
+});

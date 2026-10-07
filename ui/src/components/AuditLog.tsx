@@ -101,11 +101,11 @@ export function AuditLog({ agentId, roster = [] }: { agentId: string | null; ros
           </span>
         )}
         <button type="button" onClick={copyJson} disabled={rows.length === 0}
-          className="h-8 rounded-md px-2 text-xs text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-50">
+          className="h-8 rounded-md px-2 text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring hover:text-foreground disabled:pointer-events-none disabled:opacity-50">
           {t('audit.copy')}
         </button>
         <button type="button" onClick={exportJson} disabled={rows.length === 0}
-          className="inline-flex h-8 items-center gap-2 rounded-md bg-secondary px-3 text-xs font-medium text-secondary-foreground shadow-sm hover:bg-secondary/80 disabled:pointer-events-none disabled:opacity-50">
+          className="inline-flex h-8 items-center gap-2 rounded-md bg-secondary px-3 text-xs font-medium text-secondary-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-secondary/80 disabled:pointer-events-none disabled:opacity-50">
           <Download className="size-4" aria-hidden /> {t('exportJson')}
         </button>
       </div>

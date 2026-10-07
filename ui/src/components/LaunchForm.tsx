@@ -300,7 +300,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
         {soul ? (
           <p className="text-sm font-medium">{displayName(soul)}</p>
         ) : custom && (
-          <input value={packagePath} aria-label={t('launch.package')} placeholder={t('launch.packagePlaceholder')} className={field}
+          <input value={packagePath} aria-label={t('launch.packagePlaceholder')} placeholder={t('launch.packagePlaceholder')} className={field}
             onChange={(e) => {
               if (picker) setChoice(CUSTOM_SOUL);
               setPackagePath(e.target.value);
@@ -413,10 +413,10 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
         : !ready && <p className="m-0 text-xs text-muted-foreground">{t('launch.busy')}</p>}
       {!busy && <div className="flex items-center justify-end gap-2 pt-1">
         {onCancel && (
-          <button type="button" onClick={onCancel} className="h-9 rounded-md px-4 text-sm font-medium hover:bg-accent">{t('cancel')}</button>
+          <button type="button" onClick={onCancel} className="h-9 rounded-md px-4 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-accent">{t('cancel')}</button>
         )}
         <button type="submit" disabled={!ready || checkingPackage || Boolean(pathError) || needsName || briefTooLong}
-          className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50">
+          className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-primary/90 disabled:opacity-50">
           {t('launch.go')}
         </button>
       </div>}

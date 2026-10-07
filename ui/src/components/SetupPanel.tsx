@@ -4,7 +4,7 @@ import { describeExisting, SETUP_STEPS, type ExistingServices, type SetupState }
 
 const MARK = { pending: Circle, running: Loader2, done: Check } as const;
 // The design's Set up button (Lovable SetupPanel): secondary, no border.
-const setupButton = 'inline-flex items-center justify-center gap-1.5 rounded-md bg-secondary px-3 py-1 text-sm text-secondary-foreground hover:bg-accent disabled:opacity-50';
+const setupButton = 'inline-flex items-center justify-center gap-1.5 rounded-md bg-secondary px-3 py-1 text-sm text-secondary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-accent disabled:opacity-50';
 
 /** Setup can keep another install's services or move them to GeniusBar. */
 export function SetupPanel({ setup, onSetup, existing }: {

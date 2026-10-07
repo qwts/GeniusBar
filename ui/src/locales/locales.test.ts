@@ -34,6 +34,13 @@ describe('locales', () => {
     expect(es['field.parent']).toBe('Superior');
   });
 
+  it('matches the pass 7 copy: role label, package placeholder, quotes and apostrophe (X4-X7)', () => {
+    expect([en['launch.role'], es['launch.role']]).toEqual(['What should it help with?', '¿Con qué debe ayudar?']);
+    expect(es['launch.packagePlaceholder']).toBe('Ruta al soul, terminando en .soul');
+    expect(es['sandbox.missing']).toBe('La cuenta “{account}” aún no existe');
+    expect(en['launch.harnessHint']).toBe("GeniusBar doesn't run models itself — the harness does.");
+  });
+
   it('calls a harness "arnés", a template "Alma" and a left companion "Desconectado" (T2-T4)', () => {
     const spanish = Object.values(es).join('\n').replaceAll('{harness}', '');
     expect(spanish).not.toMatch(/\bharness/i);

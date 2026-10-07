@@ -547,7 +547,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
         onAudit={openAudit}
         fleetPaused={fleet.paused} onResume={toggleFleet}
         onLaunch={canLaunchPackage ? launchPackage : undefined} hiddenCount={layout.hidden.length} onShowAll={layoutActions.showAll}
-        onHome={() => { setSelectedKey(null); setAuditWindow(false); setMenuOpen(false); }}>
+        onHome={() => { setSelectedKey(null); setAuditWindow(false); setMenuOpen(false); }}
+        awaiting={awaitingIds} busy={busyIds}>
         {menu({ hidden: layout.hidden, onToggle: layoutActions.setHidden, onToggleTeam: layoutActions.setTeamHidden, onShowAll: layoutActions.showAll })}
       </MenuBar>
       <Desktop forest={forest} layout={layout} paused={paused} unreadOf={unread} selectedKey={openKey} onOpen={open}
@@ -558,7 +559,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
           // resolves this soul it replaces the census's hardened pill.
           <CompanionWindow soul={sandbox.soul(selected.agentId) ? { ...selected, hardened: undefined } : selected}
             paused={paused} onClose={() => setSelectedKey(null)} state={liveState(selected, awaitingIds, busyIds)}
-            actions={<><SandboxChip soul={selected} /><InfoButton soul={selected} /></>}>{session}</CompanionWindow>
+            actions={<><SandboxChip soul={selected} /><InfoButton soul={selected} state={liveState(selected, awaitingIds, busyIds)} /></>}>{session}</CompanionWindow>
         )}
         {auditWindow && <AuditWindow roster={roster} onClose={() => setAuditWindow(false)} />}
       </Desktop>

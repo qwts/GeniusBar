@@ -94,7 +94,7 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty, onA
       <li key={key} className="group flex items-center gap-2 px-2">
         <button
           type="button"
-          className={`companion-row flex min-h-7 min-w-0 flex-1 items-center gap-2 rounded py-1 pr-1 text-left text-sm hover:bg-accent ${hidden ? 'opacity-50' : ''}`}
+          className={`companion-row flex min-h-7 min-w-0 flex-1 items-center gap-2 rounded py-1 pr-1 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-accent ${hidden ? 'opacity-50' : ''}`}
           style={{ paddingLeft: 4 + depth * 14 }}
           title={t('showDetails', { name })}
           aria-label={companionLabel(soul, t, unread)}
@@ -121,7 +121,7 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty, onA
         {hiding && (
           <button
             type="button"
-            className="rounded p-1 text-muted-foreground hover:text-foreground"
+            className="rounded p-1 text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring hover:text-foreground"
             aria-label={`${team ? (hidden ? t('bar.showTeam') : t('bar.hideTeam')) : hidden ? t('bar.show') : t('bar.hide')}: ${name}`}
             aria-pressed={!hidden}
             onClick={() => (team ? hiding.onToggleTeam(team, !hidden) : hiding.onToggle(key, !hidden))}
@@ -132,7 +132,7 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty, onA
         {onArchive && (
           <button
             type="button"
-            className="rounded p-1 text-muted-foreground hover:text-destructive"
+            className="rounded p-1 text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring hover:text-destructive"
             aria-label={`${t('bar.archive')}: ${name}`}
             title={t('bar.archive')}
             onClick={() => onArchive(soul)}

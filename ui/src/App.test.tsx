@@ -207,7 +207,7 @@ describe('App setup', () => {
     const listed = [...harness.options].map((o) => o.value);
     expect(listed).toEqual(expect.arrayContaining(['claude', 'opencode', 'muse', 'codex', '__other']));
     expect(listed).not.toContain('my-own-harness');
-    fireEvent.change(screen.getByLabelText('Package'), { target: { value: '/souls/helper' } });
+    fireEvent.change(screen.getByLabelText('Path to soul, ending with .soul'), { target: { value: '/souls/helper' } });
     fireEvent.change(harness, { target: { value: '__other' } });
     fireEvent.change(within(screen.getByRole('dialog', { name: 'Launch a new companion' })).getByLabelText('Harness command'), { target: { value: 'my-own-harness' } });
     fireEvent.submit(screen.getByRole('form', { name: 'Launch a companion package' }));
@@ -221,7 +221,7 @@ describe('App setup', () => {
     const comms = screen.getByRole('switch', { name: 'Agent comms' }) as HTMLInputElement;
     expect(comms.checked).toBe(true);
     fireEvent.click(comms);
-    fireEvent.change(screen.getByLabelText('Package'), { target: { value: '/souls/helper' } });
+    fireEvent.change(screen.getByLabelText('Path to soul, ending with .soul'), { target: { value: '/souls/helper' } });
     fireEvent.change(screen.getByLabelText('Harness'), { target: { value: 'claude' } });
     fireEvent.submit(screen.getByRole('form', { name: 'Launch a companion package' }));
     expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { package: '/souls/helper' }, harness: 'claude', name: '', comms: false });
@@ -243,7 +243,7 @@ describe('App setup', () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     const { rerender } = render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher} isStatic />);
     fireEvent.click(screen.getByRole('button', { name: 'Launch companion' }));
-    fireEvent.change(screen.getByLabelText('Package'), { target: { value: '/souls/helper' } });
+    fireEvent.change(screen.getByLabelText('Path to soul, ending with .soul'), { target: { value: '/souls/helper' } });
     fireEvent.change(screen.getByLabelText('Harness'), { target: { value: 'claude' } });
     fireEvent.submit(screen.getByRole('form', { name: 'Launch a companion package' }));
     expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { package: '/souls/helper' }, harness: 'claude', name: '', comms: true });
@@ -258,7 +258,7 @@ describe('App setup', () => {
       openedPackage={{ id: 1, path: '/Downloads/broken.soul', checking: false,
         error: 'GeniusBar couldn’t read this soul package. Check that it’s accessible and contains a soul.json file, then try again.' }}
       isStatic />);
-    expect((screen.getByLabelText('Package') as HTMLInputElement).value).toBe('/Downloads/broken.soul');
+    expect((screen.getByLabelText('Path to soul, ending with .soul') as HTMLInputElement).value).toBe('/Downloads/broken.soul');
     expect(screen.getByRole('alert').textContent).toMatch(/couldn’t read this soul package/i);
   });
 
@@ -270,7 +270,7 @@ describe('App setup', () => {
     expect((screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.submit(form);
     expect(launcher.launch).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText('Package'), { target: { value: '/souls/helper' } });
+    fireEvent.change(screen.getByLabelText('Path to soul, ending with .soul'), { target: { value: '/souls/helper' } });
     expect((screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.submit(form);
     expect(launcher.launch).toHaveBeenCalledOnce();
@@ -360,7 +360,7 @@ describe('App setup', () => {
       openedPackage={{ id: 1, path: '/Downloads/broken.soul', checking: false, error: 'unreadable' }} isStatic />);
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     fireEvent.click(screen.getByRole('button', { name: 'Launch companion' }));
-    expect((screen.getByLabelText('Package') as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText('Path to soul, ending with .soul') as HTMLInputElement).value).toBe('');
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
@@ -433,7 +433,7 @@ describe('App setup', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Launch soul…' }));
     expect(screen.queryByRole('menu')).toBeNull();
     const dialog = screen.getByRole('dialog', { name: 'Launch a new companion' });
-    expect(within(dialog).getByLabelText('Package')).toBeTruthy();
+    expect(within(dialog).getByLabelText('Path to soul, ending with .soul')).toBeTruthy();
   });
 
   it('offers no launch without a launcher', () => {
@@ -645,7 +645,7 @@ describe('App window mode', () => {
     const dialog = screen.getByRole('dialog', { name: 'Launch a new companion' });
     const backdrop = dialog.parentElement!;
     // Selecting text in the path field and releasing over the backdrop keeps the dialog.
-    fireEvent.pointerDown(within(dialog).getByLabelText('Package'));
+    fireEvent.pointerDown(within(dialog).getByLabelText('Path to soul, ending with .soul'));
     fireEvent.click(backdrop);
     expect(screen.getByRole('dialog', { name: 'Launch a new companion' })).toBeTruthy();
     // A press and release on the backdrop closes it.
@@ -660,11 +660,11 @@ describe('App window mode', () => {
     fireEvent.click(within(desktop()).getByRole('button', { name: 'Launch companion' }));
     const pending: LaunchApi = { ...launcher, state: { phase: 'pending', requestId: 'r1', note: null, stage: null } };
     rerender(<App mode="window" census={sampleCensus} connection={sampleConnection} launcher={pending} isStatic />);
-    fireEvent.keyDown(screen.getByLabelText('Package'), { key: 'Escape' });
+    fireEvent.keyDown(screen.getByLabelText('Path to soul, ending with .soul'), { key: 'Escape' });
     fireEvent.keyDown(document.body, { key: 'Escape' });
     expect(screen.getByRole('dialog', { name: 'Launch a new companion' })).toBeTruthy();
     rerender(<App mode="window" census={sampleCensus} connection={sampleConnection} launcher={launcher} isStatic />);
-    fireEvent.keyDown(screen.getByLabelText('Package'), { key: 'Escape' });
+    fireEvent.keyDown(screen.getByLabelText('Path to soul, ending with .soul'), { key: 'Escape' });
     expect(screen.queryByRole('dialog', { name: 'Launch a new companion' })).toBeNull();
   });
 
@@ -675,7 +675,7 @@ describe('App window mode', () => {
     const { rerender } = render(<App mode="window" census={census} connection={sampleConnection} launcher={launcher} onRefresh={onRefresh} isStatic />);
     fireEvent.click(within(desktop()).getByRole('button', { name: 'Launch companion' }));
     const dialog = screen.getByRole('dialog', { name: 'Launch a new companion' });
-    fireEvent.change(within(dialog).getByLabelText('Package'), { target: { value: '/souls/helper.soul/' } });
+    fireEvent.change(within(dialog).getByLabelText('Path to soul, ending with .soul'), { target: { value: '/souls/helper.soul/' } });
     fireEvent.submit(within(dialog).getByRole('form'));
     expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ target: { package: '/souls/helper.soul' } }));
     const launched: LaunchApi = { ...launcher, state: { phase: 'launched', requestId: 'r1', agentId: 'agent_c' } };
@@ -688,7 +688,7 @@ describe('App window mode', () => {
     expect(screen.getByRole('region', { name: 'agent_c, agent_c' })).toBeTruthy();
     // The next launch starts clean.
     fireEvent.click(within(desktop()).getByRole('button', { name: 'Launch companion' }));
-    expect((screen.getByLabelText('Package') as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText('Path to soul, ending with .soul') as HTMLInputElement).value).toBe('');
     expect((screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
@@ -717,7 +717,7 @@ describe('App window mode', () => {
     expect([...account.options].map((o) => o.textContent)).toEqual(['Choose an account', 'user', 'zed', 'Other account…']);
     fireEvent.change(account, { target: { value: '__other' } });
     fireEvent.change(within(dialog).getByLabelText('Other account'), { target: { value: 'gb-agent' } });
-    fireEvent.change(within(dialog).getByLabelText('Package'), { target: { value: '/souls/helper.soul' } });
+    fireEvent.change(within(dialog).getByLabelText('Path to soul, ending with .soul'), { target: { value: '/souls/helper.soul' } });
     fireEvent.change(within(dialog).getByLabelText('Harness'), { target: { value: 'claude' } });
     fireEvent.submit(within(dialog).getByRole('form'));
     expect(launcher.launch).toHaveBeenCalledWith({ account: 'gb-agent', target: { package: '/souls/helper.soul' }, harness: 'claude', name: '', comms: true });

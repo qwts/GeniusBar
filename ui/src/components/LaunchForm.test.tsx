@@ -71,7 +71,7 @@ describe('LaunchForm package path (#116)', () => {
   it('drops the trailing slash Finder gives an opened .soul', () => {
     const launcher = launcherIn({ phase: 'idle' });
     render(form(launcher, { initialPackagePath: '/Users/admin/Desktop/VMShare.soul/' }));
-    expect((screen.getByLabelText('Package') as HTMLInputElement).value).toBe('/Users/admin/Desktop/VMShare.soul');
+    expect((screen.getByLabelText('Path to soul, ending with .soul') as HTMLInputElement).value).toBe('/Users/admin/Desktop/VMShare.soul');
     fireEvent.submit(screen.getByRole('form'));
     expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ target: { package: '/Users/admin/Desktop/VMShare.soul' } }));
   });
@@ -79,7 +79,7 @@ describe('LaunchForm package path (#116)', () => {
   it('drops a pasted trailing slash when the field is left or the form is sent', () => {
     const launcher = launcherIn({ phase: 'idle' });
     render(form(launcher));
-    const path = screen.getByLabelText('Package') as HTMLInputElement;
+    const path = screen.getByLabelText('Path to soul, ending with .soul') as HTMLInputElement;
     fireEvent.change(path, { target: { value: '/souls/a.soul//' } });
     // Typing a folder path keeps its slash until the field is left.
     expect(path.value).toBe('/souls/a.soul//');
@@ -96,7 +96,7 @@ describe('LaunchForm role (agent-bot-identity#535)', () => {
   it('sends a typed role, trimmed, with a package launch and nothing when blank', () => {
     const launcher = launcherIn({ phase: 'idle' });
     render(form(launcher, { initialPackagePath: '/souls/helper.soul' }));
-    const role = screen.getByLabelText('Role') as HTMLInputElement;
+    const role = screen.getByLabelText('What should it help with?') as HTMLInputElement;
     expect(role.maxLength).toBe(60);
     fireEvent.submit(screen.getByRole('form'));
     expect(Object.hasOwn(vi.mocked(launcher.launch).mock.calls[0][0], 'role')).toBe(false);
@@ -114,7 +114,7 @@ describe('LaunchForm relaunching an existing companion (#79)', () => {
     render(form(launcher, { soul: starter }));
     expect(screen.queryByText('Name')).toBeNull();
     expect(screen.queryByPlaceholderText('Optional')).toBeNull();
-    expect(screen.queryByLabelText('Role')).toBeNull();
+    expect(screen.queryByLabelText('What should it help with?')).toBeNull();
     fireEvent.submit(screen.getByRole('form'));
     expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ target: { soul: 'agent_s' }, name: '' }));
     expect(Object.hasOwn(vi.mocked(launcher.launch).mock.calls[0][0], 'role')).toBe(false);
@@ -191,7 +191,7 @@ describe('LaunchForm soul templates (#65)', () => {
     expect(radios().map((r) => r.textContent)).toEqual(['Coder', 'Researcher', 'Starter', 'Custom soul']);
     expect(checked()).toBe('Coder');
     expect(screen.getByText('Writes and reviews code in your repositories.')).toBeTruthy();
-    expect(screen.queryByLabelText('Package')).toBeNull();
+    expect(screen.queryByLabelText('Path to soul, ending with .soul')).toBeNull();
   });
 
   it('launches the chosen template\'s package with its default harness', async () => {
@@ -216,20 +216,20 @@ describe('LaunchForm soul templates (#65)', () => {
     expect((screen.getByLabelText('Harness') as HTMLSelectElement).value).toBe('muse');
   });
 
-  it('labels Name and Role as the design and names the role after the chosen soul (LA2)', async () => {
+  it('labels Name and Role as the design (Role: "What should it help with?", X4) and names the role after the chosen soul (LA2)', async () => {
     render(form(launcherIn({ phase: 'idle' }), { listTemplates: listed }));
     await picker();
-    for (const label of ['Name', 'Role']) {
+    for (const label of ['Name', 'What should it help with?']) {
       const el = screen.getByText(label, { selector: 'label' });
       expect(el.className).toContain('text-sm font-medium leading-none');
       expect(screen.getByLabelText(label).id).toBe(el.getAttribute('for'));
     }
     expect(screen.getByLabelText('Name').getAttribute('placeholder')).toBe('Optional');
-    expect(screen.getByLabelText('Role').getAttribute('placeholder')).toBe('Coder');
+    expect(screen.getByLabelText('What should it help with?').getAttribute('placeholder')).toBe('Coder');
     fireEvent.click(screen.getByRole('radio', { name: 'Researcher' }));
-    expect(screen.getByLabelText('Role').getAttribute('placeholder')).toBe('Researcher');
+    expect(screen.getByLabelText('What should it help with?').getAttribute('placeholder')).toBe('Researcher');
     fireEvent.click(screen.getByRole('radio', { name: 'Custom soul' }));
-    expect(screen.getByLabelText('Role').getAttribute('placeholder')).toBe('Optional, e.g. Researcher');
+    expect(screen.getByLabelText('What should it help with?').getAttribute('placeholder')).toBe('Optional, e.g. Researcher');
   });
 
   it('"Custom soul" shows the package path field and launches the typed path', async () => {
@@ -237,7 +237,7 @@ describe('LaunchForm soul templates (#65)', () => {
     render(form(launcher, { listTemplates: listed }));
     await picker();
     fireEvent.click(screen.getByRole('radio', { name: 'Custom soul' }));
-    const path = screen.getByLabelText('Package') as HTMLInputElement;
+    const path = screen.getByLabelText('Path to soul, ending with .soul') as HTMLInputElement;
     expect(path.value).toBe('');
     fireEvent.change(path, { target: { value: '/souls/mine.soul/' } });
     fireEvent.submit(screen.getByRole('form'));
@@ -249,7 +249,7 @@ describe('LaunchForm soul templates (#65)', () => {
     render(form(launcher, { initialPackagePath: '/souls/helper.soul', packageDescription: 'Answers questions.', listTemplates: listed }));
     await picker();
     expect(checked()).toBe('Custom soul');
-    expect((screen.getByLabelText('Package') as HTMLInputElement).value).toBe('/souls/helper.soul');
+    expect((screen.getByLabelText('Path to soul, ending with .soul') as HTMLInputElement).value).toBe('/souls/helper.soul');
     expect(screen.getByText('Answers questions.')).toBeTruthy();
     fireEvent.click(screen.getByRole('radio', { name: 'Coder' }));
     expect(screen.queryByText('Answers questions.')).toBeNull();
@@ -268,7 +268,7 @@ describe('LaunchForm soul templates (#65)', () => {
     expect(checked()).toBe('Coder');
     fireEvent.keyDown(group, { key: 'ArrowLeft' });
     expect(checked()).toBe('Custom soul');
-    expect(screen.getByLabelText('Package')).toBeTruthy();
+    expect(screen.getByLabelText('Path to soul, ending with .soul')).toBeTruthy();
   });
 
   it('notes templates agent-bot could not read', async () => {
@@ -288,7 +288,7 @@ describe('LaunchForm soul templates (#65)', () => {
       await waitFor(() => expect(lister).toHaveBeenCalled());
       await Promise.resolve();
       expect(screen.queryByRole('radiogroup')).toBeNull();
-      fireEvent.change(screen.getByLabelText('Package'), { target: { value: '/souls/a.soul' } });
+      fireEvent.change(screen.getByLabelText('Path to soul, ending with .soul'), { target: { value: '/souls/a.soul' } });
       fireEvent.submit(screen.getByRole('form'));
       expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ target: { package: '/souls/a.soul' } }));
       cleanup();

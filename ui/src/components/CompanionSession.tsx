@@ -15,13 +15,14 @@ import type { ApprovalDecision, ChatEntry, Composer } from '../model/chat';
 import { soulHarnessLabel } from '../model/launch';
 import { dudleFor } from '../model/dudle';
 import { useI18n, type Translate } from '../lib/i18n';
-import { tabStep } from '../lib/keys';
+import { escapeStaysInside, tabStep } from '../lib/keys';
 import type { LaunchApi } from '../useLaunch';
 import { useSoulProfile } from '../useSoulProfile';
 import { AuditLog } from './AuditLog';
 import { Conversation } from './Conversation';
 import { CustomizeDialog } from './CustomizeDialog';
 import { liveState, presenceText, SoulDudle } from './FleetList';
+import type { DudleState } from './Dudle';
 import { LaunchForm } from './LaunchForm';
 import { ModelSelect } from './ModelField';
 import { ActsAs, GitHubAppRow, useIdentityApps } from './IdentityApps';
@@ -97,7 +98,8 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
       className="flex min-h-0 flex-1 flex-col"
       aria-label={`${name}, ${soul.agentId}`}
       onKeyDown={(e) => {
-        if (e.key === 'Escape') onClose();
+        // As the design: Escape in the composer, a field or an inner dialog stays there.
+        if (e.key === 'Escape' && !escapeStaysInside(e.target, e.currentTarget)) onClose();
       }}
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-2 md:px-8">
@@ -116,7 +118,7 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
         </div>
       {/* The design's segmented tabs, at the header's right. */}
       {showBack && <SandboxChip soul={soul} />}
-      {showBack && <InfoButton soul={soul} />}
+      {showBack && <InfoButton soul={soul} state={state} />}
       <div role="tablist" aria-label={name} className="ml-auto flex h-9 items-center gap-0.5 rounded-lg bg-muted p-1"
         onKeyDown={(e) => {
           // As Radix Tabs: Left / Right wrap, Home / End jump to the ends.
@@ -136,8 +138,8 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
             aria-controls={`${ids}-panel`}
             tabIndex={active === id ? 0 : -1}
             onClick={() => setTab(id)}
-            className={`rounded-md px-3 py-1 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring ${active === id
-              ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
+            className={`rounded-md px-3 py-1 text-sm font-medium ring-offset-background outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${active === id
+              ? 'bg-background text-foreground shadow' : 'text-muted-foreground'}`}
           >
             {t(`tab.${id}`)}
           </button>
@@ -150,7 +152,7 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
           <ChatTab key={soulKey(soul)} soul={soul} chat={chat} paused={paused} refresh={metricsRefresh} />
         )}
         {active === 'tree' && <DelegationTree forest={forest} focus={soulKey(soul)} paused={paused} onOpen={onOpen} awaiting={awaiting} busy={busy} />}
-        {active === 'details' && <CompanionDetails soul={soul} roster={roster} launch={launch} metricsRefresh={metricsRefresh} />}
+        {active === 'details' && <CompanionDetails soul={soul} roster={roster} launch={launch} metricsRefresh={metricsRefresh} awaiting={awaiting} busy={busy} />}
         {active === 'audit' && <AuditLog agentId={soul.agentId} roster={roster} />}
       </div>
     </section>
@@ -369,7 +371,11 @@ export function useSoulComputerUse(agentId: string, population: { record: SoulPo
   return { on: supported && typeof on === 'boolean' ? on : null, stopped, saving, error, change };
 }
 
-export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0 }: { soul: CensusRow; roster?: readonly CensusRow[]; launch?: LaunchProps; metricsRefresh?: number }) {
+export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0, awaiting, busy }: {
+  soul: CensusRow; roster?: readonly CensusRow[]; launch?: LaunchProps; metricsRefresh?: number;
+  /** Live state for the Presence row, as the session header's: "Waiting for you" / "Working…". */
+  awaiting?: ReadonlySet<string>; busy?: ReadonlySet<string>;
+}) {
   const { t, lang } = useI18n();
   const [launching, setLaunching] = useState(false);
   const [metrics, setMetrics] = useState<RuntimeMetrics>({ unavailable: true });
@@ -428,7 +434,8 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
     [t('field.agentId'), <span className="selectable">{soul.agentId}</span>],
     [t('field.account'), soul.account],
     [t('field.harness'), soulHarnessLabel(soul)],
-    [t('field.presence'), t(`presence.${soul.presence}`)],
+    // As the design: the live presence (awaiting / working), else the census.
+    [t('field.presence'), presenceText(soul, liveState(soul, awaiting, busy), t)],
     [t('field.parent'), parent],
     [t('field.unacked'), String(soul.unacked)],
     [t('field.lastWake'), soul.lastWake ?? t('none')],
@@ -711,7 +718,11 @@ export function SoulFactRows({ soul, refresh = 0 }: { soul: CensusRow; refresh?:
  * agent-bot reports it; then Customize… (#64), once agent-bot answers
  * `soul profile` for the soul (asked each time the sheet opens).
  */
-export function InfoButton({ soul }: { soul: CensusRow }) {
+export function InfoButton({ soul, state }: {
+  soul: CensusRow;
+  /** The live face for Customize…'s title Dudle (the design's `state={c.presence}`). */
+  state?: DudleState;
+}) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [customizing, setCustomizing] = useState(false);
@@ -723,9 +734,9 @@ export function InfoButton({ soul }: { soul: CensusRow }) {
   const name = displayName(soul);
   return (
     <>
-      {customizing && <CustomizeDialog soul={soul} onClose={() => { setCustomizing(false); info.current?.focus(); }} />}
+      {customizing && <CustomizeDialog soul={soul} state={state} onClose={() => { setCustomizing(false); info.current?.focus(); }} />}
       <button ref={info} type="button" onClick={() => setOpen(true)} aria-label={t('details.title')} title={t('details.title')} aria-haspopup="dialog"
-        className="rounded p-1 text-muted-foreground hover:text-foreground">
+        className="rounded p-1 text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring hover:text-foreground">
         <Info className="size-3.5" aria-hidden />
       </button>
       {/* Portalled to the body: the companion window's transform would otherwise

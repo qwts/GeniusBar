@@ -146,3 +146,15 @@ describe('FleetList Dudle colour (#64)', () => {
     expect(bodies[1]).toBe(`hsl(${Math.round(deriveDudle(child.agentId).bodyHue * 360)} 70% 62%)`);
   });
 });
+
+describe('FleetList focus rings (X8)', () => {
+  it('rings the rows, the eye and the archive buttons on keyboard focus', () => {
+    render(<FleetList forest={forest} paused onOpen={() => {}} onArchive={() => {}}
+      hiding={{ hidden: [], onToggle: () => {}, onToggleTeam: () => {}, onShowAll: () => {} }} />);
+    const buttons = within(screen.getByRole('list', { name: 'luna' })).getAllByRole('button');
+    expect(buttons.length).toBe(6);
+    for (const b of buttons) {
+      expect(b.className.split(' ')).toEqual(expect.arrayContaining(['outline-none', 'focus-visible:ring-2', 'focus-visible:ring-ring']));
+    }
+  });
+});
