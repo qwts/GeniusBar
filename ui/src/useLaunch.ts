@@ -52,7 +52,7 @@ export function useLaunch({ callImpl = call, pollMs = LAUNCH_POLL_MS }:
         set({ phase: 'error', requestId: null, text: launchErrorText('bad-response', 'launch returned no request id') });
         return;
       }
-      set({ phase: 'pending', requestId: result.requestId, note: null });
+      set({ phase: 'pending', requestId: result.requestId, note: null, stage: null });
     } catch (error) {
       const e = asBridgeError(error);
       set({ phase: 'error', requestId: null, text: launchErrorText(e.code, e.message, request.account) });

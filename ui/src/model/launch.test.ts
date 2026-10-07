@@ -22,7 +22,7 @@ import {
 
 const soul: LaunchRequest = { account: 'user', target: { soul: 'agent_1' }, harness: 'codex', name: '' };
 const pkg: LaunchRequest = { account: 'user', target: { package: '/souls/p' }, harness: 'codex', name: ' Helper ' };
-const pending: LaunchState = { phase: 'pending', requestId: 'launch_1', note: null };
+const pending: LaunchState = { phase: 'pending', requestId: 'launch_1', note: null, stage: null };
 
 describe('launch requests', () => {
   it('builds params with exactly one target and no blank name', () => {
@@ -100,6 +100,21 @@ describe('launch lifecycle', () => {
     expect(applyStatus(pending, { status: 'failed', agentId: null, detail: 'no GitHub identity' }))
       .toEqual({ phase: 'failed', requestId: 'launch_1', agentId: null, detail: 'no GitHub identity' });
     expect(applyStatus(pending, { status: 'failed' })).toMatchObject({ phase: 'failed', detail: null });
+  });
+
+  it('keeps the daemon\'s latest stage, never going back, and names it on a failure', () => {
+    const account = applyStatus(pending, { status: 'pending', stage: 'account' });
+    expect(account).toEqual({ ...pending, stage: 'account' });
+    expect(applyStatus(account, { status: 'pending', stage: 'checking' })).toEqual(account);
+    expect(applyStatus(account, { status: 'pending', stage: 'teleport' })).toEqual(account);
+    expect(applyStatus(account, { status: 'pending' })).toEqual(account);
+    const harness = applyStatus(account, { status: 'pending', stage: 'harness' });
+    expect(harness).toEqual({ ...pending, stage: 'harness' });
+    expect(applyStatus(harness, { status: 'failed', detail: 'codex is not on PATH', stage: 'harness' }))
+      .toEqual({ phase: 'failed', requestId: 'launch_1', agentId: null, detail: 'codex is not on PATH', stage: 'harness' });
+    expect(applyStatus(harness, { status: 'launched', agentId: 'agent_9' }))
+      .toEqual({ phase: 'launched', requestId: 'launch_1', agentId: 'agent_9' });
+    expect(applyStatusError(harness, 'broker-unreachable', 'down')).toMatchObject({ phase: 'pending', stage: 'harness' });
   });
 
   it('keeps polling through transient status errors and stops on final ones', () => {
