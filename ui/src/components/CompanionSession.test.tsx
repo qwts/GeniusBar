@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BridgeError, runtimeMetrics, setSoulComms, soulComms, type ComputerUseSwitch, type RuntimeMetrics, type SoulMode, type SoulModel, type SoulPopulation } from '../bridge';
@@ -318,6 +318,45 @@ describe('CompanionSession', () => {
     fireEvent.keyDown(screen.getByRole('tab', { name: 'Chat' }), { key: 'End' });
     expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Details' }));
     expect(screen.getByRole('tab', { name: 'Details' }).className).toContain('focus-visible:ring-2');
+  });
+
+  it('offers Stop in the header while this soul drives the screen, halting only it (#122)', async () => {
+    const stopped: string[] = [];
+    const stopper = { supported: async () => true, stop: async (agentId: string) => { stopped.push(agentId); return { agentId, stopped: true } as never; } };
+    const driving = new Set(['agent_c', 'agent_p']);
+    const view = render(<CompanionSession soul={child} forest={forest} roster={sampleCensus} paused chat={chat} onOpen={() => {}} onClose={() => {}}
+      computerUse={driving} stopper={stopper} />);
+    const stop = await screen.findByRole('button', { name: 'Stop: agent_c is using the computer' });
+    expect(stop.textContent).toContain('Stop');
+    fireEvent.click(stop);
+    await waitFor(() => expect(stopped).toEqual(['agent_c']));
+    expect(screen.getByRole('button', { name: /^Stop:/ }).textContent).toContain('Stopping…');
+    // Once the daemon drops it, the header shows no Stop.
+    view.rerender(<CompanionSession soul={child} forest={forest} roster={sampleCensus} paused chat={chat} onOpen={() => {}} onClose={() => {}}
+      computerUse={new Set(['agent_p'])} stopper={stopper} />);
+    expect(screen.queryByRole('button', { name: /^Stop:/ })).toBeNull();
+  });
+
+  it('shows no Stop without a stopper, for a soul not driving, or on a bundle without soul stop (#122)', async () => {
+    const driving = new Set(['agent_c']);
+    const view = render(<CompanionSession soul={child} forest={forest} roster={sampleCensus} paused chat={chat} onOpen={() => {}} onClose={() => {}} computerUse={driving} />);
+    expect(screen.queryByRole('button', { name: /^Stop:/ })).toBeNull();
+    const unsupported = { supported: async () => false, stop: async () => { throw new Error('never'); } };
+    view.rerender(<CompanionSession soul={child} forest={forest} roster={sampleCensus} paused chat={chat} onOpen={() => {}} onClose={() => {}} computerUse={driving} stopper={unsupported} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.queryByRole('button', { name: /^Stop:/ })).toBeNull();
+    const stopper = { supported: async () => true, stop: async () => { throw new Error('never'); } };
+    view.rerender(<CompanionSession soul={luna} forest={forest} roster={sampleCensus} paused onOpen={() => {}} onClose={() => {}} computerUse={driving} stopper={stopper} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.queryByRole('button', { name: /^Stop:/ })).toBeNull();
+  });
+
+  it('says why a stop failed, in the header (#122)', async () => {
+    const stopper = { supported: async () => true, stop: async () => { throw new Error('daemon away'); } };
+    render(<CompanionSession soul={child} forest={forest} roster={sampleCensus} paused chat={chat} onOpen={() => {}} onClose={() => {}}
+      computerUse={new Set(['agent_c'])} stopper={stopper} />);
+    fireEvent.click(await screen.findByRole('button', { name: /^Stop:/ }));
+    expect((await screen.findByRole('alert')).textContent).toBe('Could not stop: daemon away');
   });
 
   it('opens on the details without chat', () => {

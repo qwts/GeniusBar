@@ -54,7 +54,7 @@ export function LiveSurface({ query, snapshot = false, listenDrops }: {
     <AppProviders isStatic={snapshot}>
       {surface === 'team' && <TeamSurface {...data} soul={soul} open={open} dropping={dropping} />}
       {surface === 'session' && <SessionSurface {...data} soul={soul} tab={tab} action={action} open={open}
-        launcher={launcher} archiver={live ? liveArchiver : undefined} />}
+        launcher={launcher} archiver={live ? liveArchiver : undefined} stopper={live ? liveStopper : undefined} />}
       {surface === 'audit' && <AuditSurface {...data} soul={soul} />}
       {surface === 'customize' && <CustomizeSurface {...data} soul={soul} />}
       {surface === 'perimeter' && <PerimeterSurface isStatic={snapshot} />}
