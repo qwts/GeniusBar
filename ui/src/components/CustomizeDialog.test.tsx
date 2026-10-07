@@ -380,6 +380,51 @@ describe('CustomizeDialog colour (#64)', () => {
     expect(save).toHaveBeenCalledWith('agent_p', expect.objectContaining({ edit: { appearance: null, files: {} } }));
   });
 
+  it('switches a skill off and saves the whole disabled list, and back on is clean (#64)', async () => {
+    const save = vi.fn<SaveRevision>(async () => ({ revision: REVISION }));
+    const { dialog } = open(source(), vi.fn(), undefined, save);
+    await within(dialog).findByDisplayValue('Luna');
+    fireEvent.click(within(dialog).getByRole('tab', { name: 'Context' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Skills' }));
+    const button = within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement;
+    expect(within(dialog).getByText('A skill switched off stays in the package but is not loaded.')).toBeTruthy();
+    const triage = within(dialog).getByRole('switch', { name: 'triage on' }) as HTMLInputElement;
+    expect(triage.checked).toBe(true);
+    expect(triage.className).toContain('switch-sm');
+    expect(button.disabled).toBe(true);
+    fireEvent.click(triage);
+    expect(triage.checked).toBe(false);
+    expect(within(dialog).getByText('triage').className).toContain('line-through');
+    expect(button.disabled).toBe(false);
+    fireEvent.click(triage);
+    expect(button.disabled).toBe(true);
+    fireEvent.click(triage);
+    fireEvent.click(within(dialog).getByRole('switch', { name: 'review on' }));
+    fireEvent.click(button);
+    expect(save).toHaveBeenCalledWith('agent_p', {
+      expectedRevision: '2026.10.1', reason: 'Edited in GeniusBar', edit: { skills: { disabled: ['review', 'triage'] }, files: {} },
+    });
+    await within(dialog).findByText('Saved as revision 4be1c0ffee5a.');
+    expect(button.disabled).toBe(true);
+    expect((within(dialog).getByRole('switch', { name: 'triage on' }) as HTMLInputElement).checked).toBe(false);
+  });
+
+  it('starts from the profile\'s disabled skills, and switching the last one on saves an empty list', async () => {
+    const save = vi.fn<SaveRevision>(async () => ({ revision: REVISION }));
+    const off: SoulProfile = { ...sampleProfile, profile: { ...sampleProfile.profile, skillsDisabled: ['ship'] },
+      skills: sampleProfile.skills.map((k) => (k.name === 'ship' ? { ...k, enabled: false } : k)) };
+    const { dialog } = open(source({ profile: vi.fn(async () => off) }), vi.fn(), undefined, save);
+    await within(dialog).findByDisplayValue('Luna');
+    fireEvent.click(within(dialog).getByRole('tab', { name: 'Context' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Skills' }));
+    const ship = within(dialog).getByRole('switch', { name: 'ship on' }) as HTMLInputElement;
+    expect(ship.checked).toBe(false);
+    expect((within(dialog).getByRole('switch', { name: 'review on' }) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(ship);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    expect(save).toHaveBeenCalledWith('agent_p', expect.objectContaining({ edit: { skills: { disabled: [] }, files: {} } }));
+  });
+
   it('leaves appearance out of a save that did not touch the colour, and picking the same hue back is clean', async () => {
     const save = vi.fn<SaveRevision>(async () => ({ revision: REVISION }));
     const { dialog } = open(withHue(210), vi.fn(), undefined, save);

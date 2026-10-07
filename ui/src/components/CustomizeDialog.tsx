@@ -39,8 +39,11 @@ export interface RevisionEditRequest {
    * (null, back to the hue derived from the agent ID); absent leaves it.
    * `role`: soul.json's `role` (agent-bot-identity #535), at most 60
    * characters; empty removes it; absent leaves it.
+   * `skills`: soul.json's `skills.disabled` (agent-bot 0.10.43), the whole
+   * list of the package's skills switched off; empty removes the key;
+   * absent leaves it.
    */
-  edit: { name?: string; description?: string; appearance?: { hue: number } | null; role?: string; files: Record<string, string> };
+  edit: { name?: string; description?: string; appearance?: { hue: number } | null; role?: string; skills?: { disabled: string[] }; files: Record<string, string> };
 }
 
 /** The design's colour swatches, in degrees. */
@@ -134,8 +137,8 @@ function CustomizeBody({ soul, onClose, save, onReload, state, page = false }: {
   const [pane, setPane] = useState<Pane>({ section: 'sop' });
   const viewing = 'file' in pane ? pane.file : null;
   // hue: a number is a declared colour, null the derived one; undefined untouched.
-  const [draft, setDraft] = useState<{ name?: string; description?: string; hue?: number | null; role?: string }>({});
-  const [saved, setSaved] = useState<{ name?: string; description?: string; hue?: number | null; role?: string }>({});
+  const [draft, setDraft] = useState<{ name?: string; description?: string; hue?: number | null; role?: string; skillsDisabled?: string[] }>({});
+  const [saved, setSaved] = useState<{ name?: string; description?: string; hue?: number | null; role?: string; skillsDisabled?: string[] }>({});
   const [files, setFiles] = useState<Drafts>({});
   const [reason, setReason] = useState(() => t('edit.reasonDefault'));
   const [saving, setSaving] = useState(false);
@@ -161,13 +164,17 @@ function CustomizeBody({ soul, onClose, save, onReload, state, page = false }: {
   const baseHue = saved.hue !== undefined ? saved.hue
     : profile ? profile.profile.appearance?.hue ?? null : soul.hue ?? null;
   const hue = draft.hue !== undefined ? draft.hue : baseHue;
+  // The skills switched off (#64): the profile's list until a switch moves.
+  const baseDisabled = saved.skillsDisabled ?? profile?.profile.skillsDisabled ?? [];
+  const disabled = draft.skillsDisabled ?? baseDisabled;
   const harness = profile?.profile.harness ? harnessLabel(profile.profile.harness) : soulHarnessLabel(soul);
   const nameChanged = draft.name !== undefined && draft.name.trim() !== baseName;
   const descriptionChanged = draft.description !== undefined && draft.description.trim() !== baseDescription.trim();
   const changedFiles = Object.entries(files).filter(([, f]) => f.current !== f.original);
   const hueChanged = draft.hue !== undefined && draft.hue !== baseHue;
   const roleChanged = draft.role !== undefined && draft.role.trim() !== baseRole.trim();
-  const dirty = nameChanged || descriptionChanged || hueChanged || roleChanged || changedFiles.length > 0;
+  const skillsChanged = draft.skillsDisabled !== undefined && !sameNames(draft.skillsDisabled, baseDisabled);
+  const dirty = nameChanged || descriptionChanged || hueChanged || roleChanged || skillsChanged || changedFiles.length > 0;
   const valid = (!nameChanged || name.trim() !== '') && (!descriptionChanged || description.trim() !== '') && reason.trim() !== '';
   const editable = profile !== null;
 
@@ -179,6 +186,7 @@ function CustomizeBody({ soul, onClose, save, onReload, state, page = false }: {
     if (descriptionChanged) edit.description = description.trim();
     if (hueChanged) edit.appearance = draft.hue === null || draft.hue === undefined ? null : { hue: draft.hue };
     if (roleChanged) edit.role = role.trim();
+    if (skillsChanged) edit.skills = { disabled: [...disabled].sort() };
     setSaving(true);
     edited();
     try {
@@ -187,7 +195,7 @@ function CustomizeBody({ soul, onClose, save, onReload, state, page = false }: {
       setSaved((s) => ({ name: edit.name ?? s.name, description: edit.description ?? s.description,
         hue: edit.appearance === undefined ? s.hue : edit.appearance?.hue ?? null,
         // The saved role shows here before the next population read brings it.
-        role: edit.role ?? s.role }));
+        role: edit.role ?? s.role, skillsDisabled: edit.skills ? edit.skills.disabled : s.skillsDisabled }));
       setDraft({});
       setFiles((all) => Object.fromEntries(Object.entries(all).map(([path, f]) => [path, { original: f.current, current: f.current }])));
     } catch (failure) {
@@ -255,6 +263,8 @@ function CustomizeBody({ soul, onClose, save, onReload, state, page = false }: {
         )}
         {tab === 'context' && profile && (
           <ContextPanel profile={profile} pane={pane} onPane={setPane}
+            disabled={disabled} editable={editable}
+            onSkill={(name, on) => { setDraft((d) => ({ ...d, skillsDisabled: on ? disabled.filter((n) => n !== name) : [...disabled, name] })); edited(); }}
             edited={new Set(changedFiles.map(([path]) => path))}>
             {viewing && (profile.files.some((f) => f.path === viewing && editableFile(f))
               ? <FileEditor key={viewing} agentId={soul.agentId} path={viewing} draft={files[viewing]}
@@ -423,6 +433,8 @@ function List({ title, children }: { title: string; children: ReactNode }) {
 }
 
 const row = 'flex items-baseline gap-2 py-1.5';
+/** Whether two name lists hold the same names, in any order. */
+const sameNames = (a: readonly string[], b: readonly string[]) => a.length === b.length && [...a].sort().every((n, i) => n === [...b].sort()[i]);
 const commitText = (commit: string | null, t: Translate) => (commit ? t('edit.commit', { commit: shortCommit(commit) }) : t('edit.noCommit'));
 // Lovable's file list entry (mono text-xs, active bg-accent).
 const entry = 'flex w-full items-center gap-1 truncate px-2 py-1 text-left font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring';
@@ -435,9 +447,12 @@ const entry = 'flex w-full items-center gap-1 truncate px-2 py-1 text-left font-
  * files the harness loads; the right pane shows the chosen one, a text file
  * in the viewer or editor (`children`).
  */
-function ContextPanel({ profile, pane, onPane, edited, children }: {
+function ContextPanel({ profile, pane, onPane, edited, disabled, editable, onSkill, children }: {
   profile: NonNullable<ReturnType<typeof useSoulProfile>['profile']>;
-  pane: Pane; onPane: (pane: Pane) => void; edited: ReadonlySet<string>; children: ReactNode;
+  pane: Pane; onPane: (pane: Pane) => void; edited: ReadonlySet<string>;
+  /** The skills switched off, by name (#64); a switch moves one in or out. */
+  disabled: readonly string[]; editable: boolean; onSkill: (name: string, on: boolean) => void;
+  children: ReactNode;
 }) {
   const { t } = useI18n();
   const { resolved, override } = profile.sop;
@@ -492,10 +507,15 @@ function ContextPanel({ profile, pane, onPane, edited, children }: {
               )}
               {pane.section === 'skills' && (
                 <List title={t('edit.skills')}>
+                  {profile.skills.length > 0 && <li className="pb-1 text-xs text-muted-foreground">{t('edit.skillsHint')}</li>}
                   {profile.skills.length === 0 && <li className={`${row} text-muted-foreground`}>{t('none')}</li>}
                   {profile.skills.map((s) => (
-                    <li key={`${s.source}:${s.name}:${s.path ?? ''}`} className={row}>
-                      <span className="min-w-0 flex-1 font-mono [overflow-wrap:anywhere]">{s.name}</span>
+                    <li key={`${s.source}:${s.name}:${s.path ?? ''}`} className={`${row} items-center`}>
+                      {/* The design's small switch, as the sandbox toggle: off keeps the skill, unloaded. */}
+                      <input type="checkbox" role="switch" className="switch-sm" aria-label={t('edit.skillOn', { name: s.name })}
+                        checked={!disabled.includes(s.name)} disabled={!editable}
+                        onChange={(e) => onSkill(s.name, e.target.checked)} />
+                      <span className={`min-w-0 flex-1 font-mono [overflow-wrap:anywhere] ${disabled.includes(s.name) ? 'text-muted-foreground line-through' : ''}`}>{s.name}</span>
                       <span className="rounded border border-border px-1 text-[11px] text-muted-foreground">{s.source === 'sop' ? t('edit.skillSop') : t('edit.skillSoul')}</span>
                       <span className="font-mono text-[11px] text-muted-foreground">{commitText(s.commit, t)}</span>
                     </li>

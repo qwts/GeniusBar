@@ -407,6 +407,8 @@ export const en = {
   'edit.skills': 'Skills',
   'edit.skillSoul': 'own',
   'edit.skillSop': 'SOP',
+  'edit.skillOn': '{name} on',
+  'edit.skillsHint': 'A skill switched off stays in the package but is not loaded.',
   'edit.credentials': 'Credentials',
   'edit.files': 'Files',
   'edit.bytes': '{count} bytes',

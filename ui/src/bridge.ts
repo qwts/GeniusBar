@@ -1110,6 +1110,12 @@ export interface SoulProfileSkill {
   source: 'soul' | 'sop';
   path: string | null;
   commit: string | null;
+  /**
+   * False when soul.json `skills.disabled` names it (agent-bot 0.10.43): the
+   * skill stays in the package but is not loaded. True from an older
+   * agent-bot, which reports no such thing.
+   */
+  enabled: boolean;
 }
 
 /** A declared credential: its name and status, never a value. */
@@ -1138,6 +1144,8 @@ export interface SoulProfile {
     status: string | null;
     /** The declared look; null when the soul declares none or the bundle predates it. */
     appearance: SoulAppearance | null;
+    /** soul.json `skills.disabled` (agent-bot 0.10.43): the skills switched off, by name. */
+    skillsDisabled: string[];
   };
   files: SoulProfileFileEntry[];
   skills: SoulProfileSkill[];
@@ -1183,7 +1191,7 @@ export function normalizeSoulProfile(raw: unknown): SoulProfile | null {
   });
   const skills = rows(raw.skills).flatMap((s): SoulProfileSkill[] => {
     const name = text(s.name);
-    return name ? [{ name, source: s.source === 'sop' ? 'sop' : 'soul', path: text(s.path), commit: text(s.commit) }] : [];
+    return name ? [{ name, source: s.source === 'sop' ? 'sop' : 'soul', path: text(s.path), commit: text(s.commit), enabled: s.enabled !== false }] : [];
   });
   const credentials = rows(raw.credentials).flatMap((c): SoulProfileCredential[] => {
     const name = text(c.name);
@@ -1210,6 +1218,7 @@ export function normalizeSoulProfile(raw: unknown): SoulProfile | null {
       parentId: text(p.parentId),
       status: text(p.status),
       appearance: normalizeAppearance(p.appearance) ?? null,
+      skillsDisabled: Array.isArray(p.skillsDisabled) ? p.skillsDisabled.filter((n): n is string => typeof n === 'string' && n !== '') : [],
     },
     files,
     skills,

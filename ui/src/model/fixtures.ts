@@ -243,6 +243,7 @@ export const sampleProfile: SoulProfile = {
     parentId: null,
     status: 'active',
     appearance: null,
+    skillsDisabled: [],
   },
   files: [
     { path: 'soul.md', kind: 'soul', size: 214, modifiedAt: '2026-10-01T09:12:00.000Z', text: true },
@@ -252,9 +253,9 @@ export const sampleProfile: SoulProfile = {
     { path: 'skills/triage/diagram.png', kind: 'skill', size: 20480, modifiedAt: '2026-09-28T11:00:00.000Z', text: false },
   ],
   skills: [
-    { name: 'review', source: 'sop', path: 'sop/skills/review/SKILL.md', commit: '3f9c2a1d7e' },
-    { name: 'ship', source: 'sop', path: 'sop/skills/ship/SKILL.md', commit: '3f9c2a1d7e' },
-    { name: 'triage', source: 'soul', path: 'skills/triage/SKILL.md', commit: null },
+    { name: 'review', source: 'sop', path: 'sop/skills/review/SKILL.md', commit: '3f9c2a1d7e', enabled: true },
+    { name: 'ship', source: 'sop', path: 'sop/skills/ship/SKILL.md', commit: '3f9c2a1d7e', enabled: true },
+    { name: 'triage', source: 'soul', path: 'skills/triage/SKILL.md', commit: null, enabled: true },
   ],
   credentials: [{ name: 'luna-geniusbar', provider: 'github', status: 'declared' }],
   sop: {
