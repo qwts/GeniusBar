@@ -44,8 +44,25 @@ describe('soulStatus', () => {
     expect(statusText('idle', child, t)).toBe('Starting');
     expect(statusText('offline', left, t)).toBe('Unavailable');
     expect(statusText('awaiting', luna, t)).toBe('Waiting on you');
-    expect(statusText('working', luna, t)).toBe('Working');
+    expect(statusText('working', luna, t)).toBe('Working…');
     expect(statusText('paused', luna, t)).toBe('Paused');
+  });
+});
+
+describe('Desktop team card status (Lovable TeamCluster)', () => {
+  it('counts who waits and who works in the team, and outlines a team that waits', () => {
+    render(<Live awaiting={new Set(['agent_c'])} badges={{ ...noBadges, busy: new Set(['agent_p', 'agent_c']) }} />);
+    const card = screen.getByRole('region', { name: 'luna' });
+    expect(card.className).toContain('border-warning/70');
+    expect(within(card).getByText('1 waiting on you')).toBeTruthy();
+    expect(within(card).getByText('1 working')).toBeTruthy();
+  });
+
+  it('shows no pills and a plain border while nobody waits or works', () => {
+    render(<Live />);
+    const card = screen.getByRole('region', { name: 'luna' });
+    expect(card.className).not.toContain('border-warning/70');
+    expect(within(card).queryByText(/waiting on you|working/)).toBeNull();
   });
 });
 
@@ -102,7 +119,7 @@ describe('Desktop status dot', () => {
     expect(screen.getByRole('tooltip').textContent).toBe('Waiting on you');
     fireEvent.mouseLeave(dot(/^luna,/).parentElement!);
     fireEvent.mouseEnter(dot(/^agent_c,/).parentElement!);
-    expect(screen.getByRole('tooltip').textContent).toBe('Working');
+    expect(screen.getByRole('tooltip').textContent).toBe('Working…');
     expect(avatar(/^luna,/).getAttribute('aria-label')).toContain('Waiting on you');
     expect(avatar(/^old,/).getAttribute('aria-label')).not.toContain('Waiting on you');
   });

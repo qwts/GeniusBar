@@ -86,7 +86,7 @@ export function AuditLog({ agentId, roster = [] }: { agentId: string | null; ros
   }
 
   return (
-    <div className="p-4">
+    <div className="p-4 md:p-6">
       <div className="mb-3 flex items-center justify-end gap-2">
         {copy && (
           <span role="status" className={`text-xs ${copy === 'failed' ? 'error' : 'text-muted-foreground'}`}>

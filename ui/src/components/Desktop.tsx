@@ -1,5 +1,5 @@
 import { useContext, useEffect, useId, useMemo, useRef, useState, type PointerEvent, type ReactNode, type RefObject } from 'react';
-import { Archive, ChevronDown, Eye, EyeOff, MessageCircle, Monitor, MoreHorizontal, Palette, Plus, Radio, Shield, ShieldOff, Users, X } from 'lucide-react';
+import { Archive, ChevronDown, Eye, EyeOff, Monitor, MoreHorizontal, Palette, Plus, Radio, Shield, ShieldOff, Users, X } from 'lucide-react';
 import { displayHarness, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
 import { companionLabel, teamKeys, teamsOf, type Team } from '../model/fleet';
 import { useI18n } from '../lib/i18n';
@@ -147,6 +147,10 @@ function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unread
   const hidden = hiddenCount > 0
     ? (hiddenCount === 1 ? t('team.hiddenOne') : t('team.hiddenMany', { count: hiddenCount }))
     : null;
+  // The design's header pills: who in the team waits on you, and who works.
+  const everyone = [team.lead, ...team.members.map((m) => m.soul)];
+  const awaitingCount = everyone.filter((s) => status.awaiting.has(s.agentId)).length;
+  const workingCount = everyone.filter((s) => !status.awaiting.has(s.agentId) && status.busy.has(s.agentId)).length;
 
   const onDown = (e: PointerEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest('button')) return;
@@ -167,7 +171,7 @@ function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unread
     <section
       aria-label={leadHidden ? t('team.placeholder') : displayName(team.lead)}
       style={{ left: at.x, top: at.y, width: count > 0 ? CARD_W : SOLO_W }}
-      className={`absolute rounded-xl border border-border bg-card/75 shadow-lg backdrop-blur-md ${live ? 'z-20' : ''}`}
+      className={`absolute rounded-xl border bg-card/75 shadow-lg backdrop-blur-md ${awaitingCount > 0 ? 'border-warning/70' : 'border-border'} ${live ? 'z-20' : ''}`}
     >
       <div onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
         className={`flex touch-none items-center gap-2 p-2 ${live ? 'cursor-grabbing' : 'cursor-grab'}`}>
@@ -195,6 +199,16 @@ function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unread
               </p>
             </div>
           </>
+        )}
+        {awaitingCount > 0 && (
+          <span title={t('bar.approvals', { count: awaitingCount })} className="rounded-full bg-warning px-1.5 font-mono text-[10px] font-bold text-warning-foreground">
+            <span aria-hidden>{awaitingCount}</span><span className="sr-only">{t('bar.approvals', { count: awaitingCount })}</span>
+          </span>
+        )}
+        {workingCount > 0 && (
+          <span title={t('bar.working', { count: workingCount })} className="rounded-full bg-primary/20 px-1.5 font-mono text-[10px] text-primary">
+            <span aria-hidden>{workingCount}</span><span className="sr-only">{t('bar.working', { count: workingCount })}</span>
+          </span>
         )}
         <div className="relative">
           <button ref={moreButton} type="button" aria-haspopup="menu" aria-expanded={more}
@@ -261,7 +275,7 @@ function MenuBox({ label, onClose, align = 'center', children }: {
   useEffect(() => { first.current?.focus(); }, []);
   return (
     <div role="menu" aria-label={label}
-      className={`absolute top-full z-30 mt-1 grid min-w-44 rounded-md border border-border bg-popover p-1 text-sm shadow-xl ${align === 'right' ? 'right-0' : 'left-1/2 -translate-x-1/2'}`}
+      className={`absolute top-full z-30 mt-1 grid min-w-[8rem] rounded-md border border-border bg-popover p-1 text-sm shadow-md ${align === 'right' ? 'right-0' : 'left-1/2 -translate-x-1/2'}`}
       onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }}
       onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onClose(); }}>
       {children(first)}
@@ -290,7 +304,7 @@ function SoulMenu({ soul, team, onOpen, onCustomize, onArchive, onClose, done, a
         <>
           <button ref={first} type="button" role="menuitem" className={menuItem}
             onClick={() => { done(); onOpen(soul); }}>
-            <MessageCircle className="size-3.5" aria-hidden /> {t('bar.open')}
+            {t('bar.open')}
           </button>
           {onCustomize && (
             <button type="button" role="menuitem" aria-haspopup="dialog" className={menuItem}

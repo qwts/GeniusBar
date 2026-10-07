@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check } from 'lucide-react';
+import { Check, Circle, Loader2 } from 'lucide-react';
 import { displayName, type CensusRow } from '../model/census';
 import { savedBrief } from '../bridge';
 import { canLaunch, harnessOptions, MAX_BRIEF, MAX_HARNESS, normalPackagePath, preferredHarness, prefillHarness, suggestedName, type LaunchState } from '../model/launch';
@@ -9,6 +9,7 @@ import { chosenTemplate, CUSTOM_SOUL, initialChoice } from '../model/templates';
 import type { LaunchApi } from '../useLaunch';
 import { useSoulTemplates, type TemplateLister } from '../useSoulTemplates';
 import { ModelField } from './ModelField';
+import { Select } from './Select';
 
 interface LaunchFormProps {
   launcher: LaunchApi;
@@ -67,28 +68,29 @@ interface LaunchFormProps {
 }
 
 export function LaunchStatus({ state }: { state: LaunchState }) {
+  const { t } = useI18n();
   switch (state.phase) {
     case 'idle':
       return null;
     case 'requesting':
-      return <p className="muted small" role="status">Requesting launch…</p>;
+      return <p className="muted small" role="status">{t('launch.requesting')}</p>;
     case 'pending':
       return (
         <p className="muted small" role="status">
-          Waiting for the daemon to report <span className="selectable">({state.requestId})</span>.
+          {t('launch.pending')} <span className="selectable">({state.requestId})</span>.
           {state.note && <span className="block">{state.note}</span>}
         </p>
       );
     case 'launched':
       return (
         <p className="small" role="status">
-          Launched{state.agentId && <> as <span className="selectable">{state.agentId}</span></>}.
+          {state.agentId ? <span className="selectable">{t('launch.launchedAs', { agentId: state.agentId })}</span> : t('launch.launched')}
         </p>
       );
     case 'failed':
       return (
         <p className="error small" role="alert">
-          Launch failed: {state.detail ?? 'the daemon reported no details.'}
+          {t('launch.failed', { detail: state.detail ?? t('launch.failedNoDetail') })}
         </p>
       );
     case 'error':
@@ -96,12 +98,46 @@ export function LaunchStatus({ state }: { state: LaunchState }) {
   }
 }
 
+const PROGRESS = ['launch.progress.request', 'launch.progress.daemon', 'launch.progress.joined'] as const;
+
+/**
+ * The design's launch progress (Lovable launch dialog while busy): the
+ * request, the daemon starting it, and the companion joining, each done,
+ * running or waiting. GeniusBar knows only the request and the daemon's
+ * answer, so "Joined" turns when the daemon reports the launch.
+ */
+export function LaunchProgress({ state }: { state: LaunchState }) {
+  const { t } = useI18n();
+  const step = state.phase === 'requesting' ? 0 : state.phase === 'pending' ? 1 : 3;
+  return (
+    <div className="grid gap-2">
+      <ol className="m-0 grid list-none gap-2 p-0 text-sm" aria-live="polite" aria-label={t('launch.progress')}>
+        {PROGRESS.map((key, i) => (
+          <li key={key} className={`flex items-center gap-2 ${i <= step ? 'text-foreground' : 'text-muted-foreground'}`}>
+            {i < step ? <Check className="size-4 shrink-0 text-success" aria-hidden />
+              : i === step ? <Loader2 className="size-4 shrink-0 animate-spin text-primary" aria-hidden />
+              : <Circle className="size-4 shrink-0" aria-hidden />}
+            {t(key)}
+            <span className="sr-only">{i < step ? t('launch.progress.done') : i === step ? t('launch.progress.running') : ''}</span>
+          </li>
+        ))}
+      </ol>
+      {state.phase === 'pending' && (
+        <p className="m-0 font-mono text-[11px] text-muted-foreground">
+          <span className="selectable">{state.requestId}</span>
+          {state.note && <span className="block font-sans">{state.note}</span>}
+        </p>
+      )}
+    </div>
+  );
+}
+
 const OTHER = '__other';
 
 const radio = 'inline-flex min-h-9 items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring';
 const radioOn = 'border-primary bg-primary/10 text-foreground';
 const radioOff = 'border-border text-muted-foreground hover:bg-accent';
-const legend = 'mb-2 font-mono text-[11px] font-semibold uppercase tracking-wide text-muted-foreground';
+const legend = 'mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground';
 const field = 'h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm text-foreground';
 
 /**
@@ -203,6 +239,8 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
   const pathError = custom ? packageError : null;
 
   useEffect(() => setPackageError(initialPackageError), [initialPackageError]);
+  // While this form's launch runs, the design shows only its progress.
+  const busy = started && !canLaunch(launcher.state);
 
   return (
     <form
@@ -225,6 +263,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
         });
       }}
     >
+      {busy ? <LaunchProgress state={launcher.state} /> : <>
       <fieldset>
         <legend className={legend}>{t('launch.step.what')}</legend>
         {picker && (
@@ -233,13 +272,11 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
               <button key={tp.package} type="button" role="radio" aria-checked={selected === tp.package} tabIndex={selected === tp.package ? 0 : -1}
                 title={tp.description || undefined} onClick={() => setChoice(tp.package)}
                 className={`${radio} ${selected === tp.package ? radioOn : radioOff}`}>
-                {selected === tp.package && <Check className="size-3 shrink-0" aria-hidden />}
                 {tp.name}
               </button>
             ))}
             <button type="button" role="radio" aria-checked={custom} tabIndex={custom ? 0 : -1} onClick={() => setChoice(CUSTOM_SOUL)}
               className={`${radio} ${custom ? radioOn : radioOff}`}>
-              {custom && <Check className="size-3 shrink-0" aria-hidden />}
               {t('launch.custom')}
             </button>
           </div>
@@ -288,7 +325,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
       <fieldset>
         <legend className={legend}>{t('launch.step.harness')}</legend>
         {/* Free text, as before: "Other…" launches any harness string; the list only suggests. */}
-        <select aria-label={t('field.harness')} value={otherHarness ? OTHER : harness} className={field}
+        <Select aria-label={t('field.harness')} value={otherHarness ? OTHER : harness} wrapperClassName="w-full" className="h-9 pl-3 text-sm"
           onChange={(e) => {
             const other = e.target.value === OTHER;
             setOtherHarness(other);
@@ -298,7 +335,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
           {!harness && !otherHarness && <option value="" disabled>{t('launch.harnessPick')}</option>}
           {options.map((h) => <option key={h.id} value={h.id}>{h.label}{h.id === defaultHarness ? ` · ${t('launch.harnessDefault')}` : ''}</option>)}
           <option value={OTHER}>{t('harness.other')}</option>
-        </select>
+        </Select>
         {otherHarness && (
           <input type="text" aria-label={t('harness.otherLabel')} placeholder={t('harness.otherPlaceholder')} value={harness}
             maxLength={MAX_HARNESS} autoCapitalize="off" autoCorrect="off" spellCheck={false} autoComplete="off"
@@ -315,7 +352,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
         ) : (
           <>
             {accounts.length > 0 && (
-              <select aria-label={t('field.account')} value={otherAccount ? OTHER : account} className={`${field} font-mono text-xs`}
+              <Select aria-label={t('field.account')} value={otherAccount ? OTHER : account} wrapperClassName="w-full" className="h-9 pl-3 font-mono text-xs"
                 onChange={(e) => {
                   const other = e.target.value === OTHER;
                   setOtherAccount(other);
@@ -324,7 +361,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
                 {!account && !otherAccount && <option value="" disabled>{t('launch.accountPick')}</option>}
                 {accounts.map((a) => <option key={a} value={a}>{a}</option>)}
                 <option value={OTHER}>{t('launch.accountOther')}</option>
-              </select>
+              </Select>
             )}
             {otherAccount && (
               <input type="text" value={account} aria-label={accounts.length > 0 ? t('launch.accountOtherLabel') : t('field.account')}
@@ -346,19 +383,20 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
           <p className="text-xs text-muted-foreground">{t('launch.commsHint')}</p>
         </fieldset>
       )}
+      </>}
       {checkingPackage && <p className="muted small" role="status">{t('launch.checking')}</p>}
       {pathError && <p className="error small" role="alert">{pathError}</p>}
-      {started ? <LaunchStatus state={launcher.state} />
+      {started ? !busy && <LaunchStatus state={launcher.state} />
         : !ready && <p className="muted small">{t('launch.busy')}</p>}
-      <div className="flex items-center justify-end gap-2 pt-1">
+      {!busy && <div className="flex items-center justify-end gap-2 pt-1">
         {onCancel && (
           <button type="button" onClick={onCancel} className="h-9 rounded-md px-4 text-sm font-medium hover:bg-accent">{t('cancel')}</button>
         )}
         <button type="submit" disabled={!ready || checkingPackage || Boolean(pathError) || needsName || briefTooLong}
-          className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+          className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50">
           {t('launch.go')}
         </button>
-      </div>
+      </div>}
     </form>
   );
 }

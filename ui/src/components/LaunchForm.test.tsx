@@ -29,7 +29,9 @@ describe('LaunchForm after a launch (#116)', () => {
     fireEvent.submit(screen.getByRole('form'));
     expect(idle.launch).toHaveBeenCalledOnce();
     rerender(form({ ...idle, state: { phase: 'pending', requestId: 'r1', note: null } }, { initialPackagePath: '/souls/helper.soul', onLaunched }));
-    expect(launchButton().disabled).toBe(true);
+    // While it runs, the design shows only the progress: no Launch to press again.
+    expect(screen.queryByRole('button', { name: 'Launch' })).toBeNull();
+    expect(screen.getByRole('list', { name: 'Launch progress' }).textContent).toContain('Daemon starting it');
     expect(onLaunched).not.toHaveBeenCalled();
     const done = { ...idle, state: { phase: 'launched', requestId: 'r1', agentId: 'agent_new' } as LaunchState };
     rerender(form(done, { initialPackagePath: '/souls/helper.soul', onLaunched }));

@@ -57,11 +57,11 @@ export function ArchiveDialog({ soul, archiver, onCancel, onArchived }: {
   };
   const blocked = running === 'checking' || running === true;
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4"
       onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
       <section role="alertdialog" aria-modal="true" aria-labelledby={titleId}
         onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } }}
-        className="grid max-h-full w-full max-w-sm gap-3 overflow-y-auto rounded-lg border border-border bg-popover p-5 text-sm shadow-2xl">
+        className="grid max-h-full w-full max-w-sm gap-3 overflow-y-auto rounded-lg border border-border bg-background p-5 text-sm shadow-lg">
         <h2 id={titleId} className="m-0 flex items-center gap-2 text-base font-semibold tracking-tight">
           <Archive className="size-4 text-destructive" aria-hidden /> {t('bar.archiveConfirm', { name })}
         </h2>
@@ -101,7 +101,7 @@ export function ArchivedNotice({ text, onDone }: { text: string; onDone: () => v
     return () => clearTimeout(timer);
   }, [text, onDone]);
   return (
-    <p role="status" className="fixed bottom-10 left-1/2 z-50 m-0 max-w-[90%] -translate-x-1/2 rounded-md border border-border bg-popover px-3 py-2 text-xs text-foreground shadow-lg">
+    <p role="status" className="fixed right-6 bottom-6 z-50 m-0 w-[356px] max-w-[calc(100vw-3rem)] rounded-lg border border-border bg-background p-4 text-[13px] text-foreground shadow-lg">
       {text}
     </p>
   );

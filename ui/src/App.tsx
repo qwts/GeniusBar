@@ -9,7 +9,7 @@ import { CompanionWindow, Desktop } from './components/Desktop';
 import { FloatingDudle, type Stopper } from './components/FloatingDudle';
 import { FirstLaunch, type DevTools, type HarnessAuth, type Starter } from './components/FirstLaunch';
 import { FleetList, type Hiding } from './components/FleetList';
-import { HealthHeader } from './components/HealthHeader';
+import { HealthHeader, SetupHeader } from './components/HealthHeader';
 import { LaunchForm } from './components/LaunchForm';
 import { LaunchModal } from './components/LaunchModal';
 import { MenuBar } from './components/MenuBar';
@@ -157,6 +157,8 @@ export function App(props: AppProps) {
 }
 
 const footerIcon = 'rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground';
+// The setup footer's links (Lovable SetupPanel).
+const setupLink = 'text-info hover:underline';
 
 function LanguageSelect() {
   const { lang, setLang, t } = useI18n();
@@ -207,8 +209,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const awaitingIds = useMemo(() => new Set(waiting.map((w) => w.agentId)), [waiting]);
   const { sound, setSound } = useSound();
   const decide = chat?.decide;
-  const empty = emptyRosterText(connection);
-  const footer = footerStatus(connection);
+  const empty = emptyRosterText(connection, t);
+  const footer = footerStatus(connection, t);
   const showSetup = Boolean(setup && onSetup && (setup.running || needsSetup(connection)));
   const [launchingPackage, setLaunchingPackage] = useState(false);
   // A Finder-opened package fills the form until it is closed; after that a
@@ -327,7 +329,81 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     />
   );
 
-  const menu = (hiding?: Hiding) => (
+  // The footer: the design's icon row, the rest in the ⋯ menu (Lovable audit
+  // §4, §7). During setup the design's links lead it (Check for Updates…,
+  // Remove services…, Refresh), and the row keeps what still applies there:
+  // sound, language, history and the ⋯ menu's other actions.
+  const iconFooter = (inSetup: boolean) => (
+    <footer className={inSetup ? undefined : 'border-t border-border'}>
+      {inSetup && (
+        <div className="flex items-center justify-between gap-2 p-3 text-xs">
+          {canCheckUpdates && <button type="button" className={setupLink} onClick={() => updates?.act()}>{t('checkUpdates')}</button>}
+          {onRemoveServices && !setup?.running && <button type="button" className={setupLink} onClick={() => setPanel('remove')}>{t('remove.action')}</button>}
+          {onRefresh && <button type="button" className={setupLink} onClick={() => { setMetricsRefresh((value) => value + 1); onRefresh(); }}>{t('refresh')}</button>}
+        </div>
+      )}
+      <div className={`flex items-center gap-1.5 p-2 text-xs ${inSetup ? 'border-t border-border' : ''}`}>
+        {!inSetup && <FleetMode roster={roster} />}
+        <button type="button" aria-label={t('sound')} aria-pressed={sound} onClick={() => setSound(!sound)} className="rounded p-1 text-muted-foreground hover:text-foreground">
+          {sound ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />}
+        </button>
+        <LanguageSelect />
+        {!inSetup && footer && <span className={`min-w-0 truncate ${footer.isError ? 'error small' : 'muted small'}`}>{footer.text}</span>}
+        <span className="ml-auto flex shrink-0 items-center gap-0.5">
+          <button type="button" className={footerIcon} aria-label={t('auditTitle')} title={t('auditTitle')} aria-pressed={panel === 'audit'}
+            onClick={() => setPanel(panel === 'audit' ? null : 'audit')}>
+            <History className="size-3.5" aria-hidden />
+          </button>
+          {canLaunchPackage && (
+            <button type="button" className={footerIcon} aria-label={t('launchCompanion')} title={t('launchCompanion')} onClick={launchPackage}>
+              <Plus className="size-3.5" aria-hidden />
+            </button>
+          )}
+          {(openDesktop || canLaunchPackage || cliTools || (!inSetup && (canCheckUpdates || onRemoveServices || onRefresh))) && (
+            <FooterMenu items={[
+              openDesktop && { label: t('openDesktop'), run: openDesktop },
+              !inSetup && canCheckUpdates && { label: t('checkUpdates'), run: () => updates?.act() },
+              canLaunchPackage && { label: t('launchPackage'), run: launchPackage },
+              cliTools && { label: t('cli.action'), run: () => setPanel('cli') },
+              !inSetup && (onRefresh || (onRemoveServices && !setup?.running)) && 'separator',
+              !inSetup && onRefresh && { label: t('refresh'), run: () => { setMetricsRefresh((value) => value + 1); onRefresh(); } },
+              !inSetup && onRemoveServices && !setup?.running && { label: t('remove.action'), run: () => setPanel('remove'), destructive: true },
+            ]} />
+          )}
+        </span>
+      </div>
+      {/* The design's Audit log page (Lovable route /audit, "All activity"): every companion's records, in the menu. */}
+      {panel === 'audit' && (
+        <section className="border-t border-border" aria-label={t('auditTitle')}>
+          <div className="flex items-center gap-2 px-3 pt-2">
+            <h3 className="m-0 flex-1 text-sm font-medium">{t('auditTitle')} <span className="font-normal text-muted-foreground">· {t('allActivity')}</span></h3>
+            <button type="button" className={footerIcon} aria-label={t('close')} onClick={() => setPanel(null)}><X className="size-3.5" aria-hidden /></button>
+          </div>
+          <div className="max-h-72 overflow-y-auto"><AuditLog agentId={null} roster={roster} /></div>
+        </section>
+      )}
+      {panel === 'cli' && cliTools && (
+        <div className="border-t border-border px-3 py-2"><CliTools api={cliTools} startOpen onClose={() => setPanel(null)} /></div>
+      )}
+      {panel === 'remove' && onRemoveServices && (
+        <div className="border-t border-border px-3 py-2"><RemoveServices onRemove={onRemoveServices} startConfirming onClose={() => setPanel(null)} /></div>
+      )}
+    </footer>
+  );
+
+  // First-run setup takes over the popover (Lovable SetupPanel): a header,
+  // the steps, then the footer with the design's links. Approvals, the fleet
+  // and the cards wait until setup is done.
+  const setupMenu = setup && onSetup && (
+    <>
+      <SetupHeader connection={connection} running={setup.running} error={footer?.isError ? footer.text : null} />
+      {updates && <UpdateNotice status={updates.status} onAction={updates.act} />}
+      <SetupPanel setup={setup} onSetup={onSetup} existing={existingServices} />
+      {iconFooter(true)}
+    </>
+  );
+
+  const menu = (hiding?: Hiding) => showSetup && setupMenu ? setupMenu : (
     <>
       <HealthHeader connection={connection}><ApprovalCounts waiting={waiting.length} working={working} /></HealthHeader>
       {updates && <UpdateNotice status={updates.status} onAction={updates.act} />}
@@ -343,66 +419,13 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
       )}
       <ApprovalsList items={waiting} paused={paused} onOpen={open}
         onDecide={decide && ((proposalId, decision) => { void decide(proposalId, decision); })} />
-      {/* The setup panel replaces the fleet, which has nothing true to say yet. */}
-      {showSetup && setup && onSetup ? (
-        <SetupPanel setup={setup} onSetup={onSetup} existing={existingServices} />
-      ) : (
-        <FleetList forest={forest} paused={paused} unreadOf={unread} onOpen={open} hiding={hiding} onArchive={archiveWith && setArchiving}
-          awaiting={awaitingIds} busy={(badges ?? liveBadges).busy}
-          empty={!showStarter && empty && <p className="muted empty">{empty}</p>} />
-      )}
-      {launch && !showSetup && <DefaultHarness harnesses={launch.harnesses} />}
-      {!showSetup && <SandboxCard />}
-      {!showSetup && <IdentityAppsCard roster={roster} />}
-      {/* The design's footer icon row; the rest sits in the ⋯ menu (Lovable audit §4, §7). */}
-      <footer className="border-t border-border">
-        <div className="flex items-center gap-1.5 p-2 text-xs">
-          <FleetMode roster={roster} />
-          <button type="button" aria-label={t('sound')} aria-pressed={sound} onClick={() => setSound(!sound)} className="rounded p-1 text-muted-foreground hover:text-foreground">
-            {sound ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />}
-          </button>
-          <LanguageSelect />
-          {footer && <span className={`min-w-0 truncate ${footer.isError ? 'error small' : 'muted small'}`}>{footer.text}</span>}
-          <span className="ml-auto flex shrink-0 items-center gap-0.5">
-            <button type="button" className={footerIcon} aria-label={t('auditTitle')} title={t('auditTitle')} aria-pressed={panel === 'audit'}
-              onClick={() => setPanel(panel === 'audit' ? null : 'audit')}>
-              <History className="size-3.5" aria-hidden />
-            </button>
-            {canLaunchPackage && (
-              <button type="button" className={footerIcon} aria-label={t('launchCompanion')} title={t('launchCompanion')} onClick={launchPackage}>
-                <Plus className="size-3.5" aria-hidden />
-              </button>
-            )}
-            {(openDesktop || canCheckUpdates || canLaunchPackage || cliTools || onRemoveServices || onRefresh) && (
-              <FooterMenu items={[
-                openDesktop && { label: t('openDesktop'), run: openDesktop },
-                canCheckUpdates && { label: t('checkUpdates'), run: () => updates?.act() },
-                canLaunchPackage && { label: t('launchPackage'), run: launchPackage },
-                cliTools && { label: t('cli.action'), run: () => setPanel('cli') },
-                (onRefresh || (onRemoveServices && !setup?.running)) && 'separator',
-                onRefresh && { label: t('refresh'), run: () => { setMetricsRefresh((value) => value + 1); onRefresh(); } },
-                onRemoveServices && !setup?.running && { label: t('remove.action'), run: () => setPanel('remove'), destructive: true },
-              ]} />
-            )}
-          </span>
-        </div>
-        {/* The design's Audit log page (Lovable route /audit, "All activity"): every companion's records, in the menu. */}
-        {panel === 'audit' && (
-          <section className="border-t border-border" aria-label={t('auditTitle')}>
-            <div className="flex items-center gap-2 px-3 pt-2">
-              <h3 className="m-0 flex-1 text-sm font-medium">{t('auditTitle')} <span className="font-normal text-muted-foreground">· {t('allActivity')}</span></h3>
-              <button type="button" className={footerIcon} aria-label={t('close')} onClick={() => setPanel(null)}><X className="size-3.5" aria-hidden /></button>
-            </div>
-            <div className="max-h-72 overflow-y-auto"><AuditLog agentId={null} roster={roster} /></div>
-          </section>
-        )}
-        {panel === 'cli' && cliTools && (
-          <div className="border-t border-border px-3 py-2"><CliTools api={cliTools} startOpen onClose={() => setPanel(null)} /></div>
-        )}
-        {panel === 'remove' && onRemoveServices && (
-          <div className="border-t border-border px-3 py-2"><RemoveServices onRemove={onRemoveServices} startConfirming onClose={() => setPanel(null)} /></div>
-        )}
-      </footer>
+      <FleetList forest={forest} paused={paused} unreadOf={unread} onOpen={open} hiding={hiding} onArchive={archiveWith && setArchiving}
+        awaiting={awaitingIds} busy={(badges ?? liveBadges).busy}
+        empty={!showStarter && empty && <p className="muted empty">{empty}</p>} />
+      {launch && <DefaultHarness harnesses={launch.harnesses} />}
+      <SandboxCard />
+      <IdentityAppsCard roster={roster} />
+      {iconFooter(false)}
     </>
   );
 

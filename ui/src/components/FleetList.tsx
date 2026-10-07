@@ -96,7 +96,7 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty, onA
               </span>
             )}
             <span className={`text-[11px] ${state === 'awaiting' ? 'text-warning' : 'text-muted-foreground'}`}>
-              {state === 'awaiting' ? t('presence.awaiting') : t(`presence.${soul.presence}`)}
+              {state === 'awaiting' ? t('presence.awaiting') : state === 'working' ? t('status.working') : t(`presence.${soul.presence}`)}
             </span>
           </span>
         </button>

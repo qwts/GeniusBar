@@ -47,7 +47,7 @@ describe('App', () => {
     expect(roster.querySelectorAll('button.companion-row')).toHaveLength(3);
     cleanup();
     render(<App connection={sampleConnection} isStatic />);
-    expect(screen.getByRole('region', { name: 'Fleet' }).textContent).toBe('No companions yet. Your first companion will appear here.');
+    expect(screen.getByRole('region', { name: 'Fleet' }).textContent).toBe('No companions yet. Launch one to get started.');
   });
 
   it('opens a companion as a session in the popup, and goes back to the fleet', () => {
@@ -102,7 +102,7 @@ describe('App', () => {
     expect(chat.open).toHaveBeenLastCalledWith('user/agent_c');
     const session = screen.getByRole('region', { name: 'agent_c, agent_c' });
     expect(session.textContent).toContain('hello');
-    fireEvent.change(screen.getByRole('textbox', { name: 'Message to agent_c' }), { target: { value: 'yo' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message agent_c' }), { target: { value: 'yo' } });
     expect(chat.setDraft).toHaveBeenCalledWith('user/agent_c', 'yo');
     expect(chat.composers['user/agent_c'] ?? emptyComposer).toEqual(emptyComposer);
     fireEvent.click(screen.getByRole('button', { name: 'Back to fleet' }));
@@ -117,6 +117,18 @@ describe('App setup', () => {
     expect(screen.getByRole('region', { name: 'Setup' })).toBeTruthy();
     expect(screen.queryByRole('region', { name: 'Fleet' })).toBeNull();
     expect(screen.queryByText('No souls on this machine.')).toBeNull();
+  });
+
+  it('gives the whole menu to setup, with the design’s links (Lovable SetupPanel)', () => {
+    const unpaired = { ...disconnected, bridgeConnected: true, unpaired: true };
+    const onRefresh = vi.fn();
+    render(<App connection={unpaired} setup={idleSetup} onSetup={() => {}} onRefresh={onRefresh} onRemoveServices={vi.fn(async () => {})} />);
+    expect(screen.getByText('GeniusBar needs setup on this device. Choose Set up below.')).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Waiting for your approval' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect(onRefresh).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove services…' }));
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeTruthy();
   });
 
   it('keeps the fleet, not setup, while installed services are starting (#118)', () => {
@@ -359,7 +371,7 @@ describe('App setup', () => {
   it('keeps the plain empty text when the starter soul is not offered', () => {
     render(<App census={[]} connection={sampleConnection} isStatic />);
     expect(screen.queryByRole('form', { name: 'Start with Starter' })).toBeNull();
-    expect(screen.getByText('No companions yet. Your first companion will appear here.')).toBeTruthy();
+    expect(screen.getByText('No companions yet. Launch one to get started.')).toBeTruthy();
   });
 
   it('adds a companion from the footer +: the launch dialog with Starter preselected (#97)', async () => {
@@ -787,7 +799,7 @@ describe('App window mode', () => {
   it('opens the menu on its own while setup is needed', () => {
     const unpaired = { ...disconnected, bridgeConnected: true, unpaired: true };
     render(<App mode="window" connection={unpaired} setup={idleSetup} onSetup={() => {}} />);
-    expect(desktop().textContent).toContain('Open the GeniusBar menu above to set up.');
+    expect(desktop().textContent).toContain('Open GeniusBar in the menu bar to set up.');
     const menu = screen.getByRole('dialog', { name: 'GeniusBar menu' });
     expect(within(menu).getByRole('region', { name: 'Setup' })).toBeTruthy();
   });

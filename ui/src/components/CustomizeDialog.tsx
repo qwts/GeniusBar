@@ -91,7 +91,7 @@ export function CustomizeDialog({ soul, onClose, save = saveRevision }: { soul: 
   // Portalled to the body, as the ⓘ sheet: the companion window's transform
   // would contain the fixed overlay, and its title bar would take the drag.
   return createPortal(
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4"
       onPointerDown={(e) => { e.stopPropagation(); pressedBackdrop.current = e.target === e.currentTarget; }}
       onClick={(e) => { if (e.target === e.currentTarget && pressedBackdrop.current) onClose(); }}>
       <CustomizeBody key={generation} soul={soul} onClose={onClose} save={save} onReload={() => setGeneration((g) => g + 1)} />
@@ -168,15 +168,15 @@ function CustomizeBody({ soul, onClose, save, onReload }: { soul: CensusRow; onC
   return (
     <section role="dialog" aria-modal="true" aria-labelledby={titleId}
       onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }}
-      className="relative grid max-h-full w-full max-w-2xl gap-4 overflow-y-auto rounded-lg border border-border bg-popover p-6 shadow-2xl">
+      className="relative grid max-h-full w-full max-w-2xl gap-4 overflow-y-auto rounded-lg border border-border bg-background p-6 shadow-lg">
       <button type="button" onClick={onClose} aria-label={t('close')}
-        className="absolute top-4 right-4 rounded p-1 text-muted-foreground hover:text-foreground">
+        className="absolute top-4 right-4 rounded-sm text-foreground opacity-70 hover:opacity-100">
         <X className="size-4" aria-hidden />
       </button>
       <div className="flex items-center gap-3 pr-8">
         {/* The chosen colour, live, as the design's title. */}
         <SoulDudle soul={hue === null ? { ...soul, hue: undefined } : { ...soul, hue }} size={36} paused={false} />
-        <h2 id={titleId} className="m-0 truncate text-lg font-semibold tracking-tight">{baseName}</h2>
+        <h2 id={titleId} className="m-0 truncate text-lg leading-none font-semibold tracking-tight">{baseName}</h2>
         <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">{harness}</span>
       </div>
       {/* The session's segmented tabs, as the design's. */}
@@ -192,8 +192,8 @@ function CustomizeBody({ soul, onClose, save, onReload }: { soul: CensusRow; onC
           <button key={id} ref={id === 'profile' ? firstTab : undefined} id={`${ids}-tab-${id}`} type="button" role="tab"
             aria-selected={tab === id} aria-controls={`${ids}-panel`} tabIndex={tab === id ? 0 : -1}
             onClick={() => setTab(id)}
-            className={`rounded-md px-2.5 py-1 text-sm font-medium ${tab === id
-              ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+            className={`rounded-md px-3 py-1 text-sm font-medium ${tab === id
+              ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}>
             {t(`edit.${id}`)}
           </button>
         ))}
@@ -262,7 +262,7 @@ function CustomizeBody({ soul, onClose, save, onReload }: { soul: CensusRow; onC
         </button>
         {editable && (
           <button type="button" onClick={() => { void onSave(); }} disabled={!dirty || !valid || saving}
-            className="min-h-8 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+            className="min-h-8 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50">
             {t('edit.save')}
           </button>
         )}

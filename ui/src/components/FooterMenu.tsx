@@ -32,7 +32,7 @@ export function FooterMenu({ items }: { items: readonly (FooterItem | false | nu
       </button>
       {open && (
         <div role="menu" aria-label={t('more')}
-          className="absolute right-0 bottom-full z-50 mb-1 grid w-52 rounded-md border border-border bg-popover p-1 text-xs shadow-2xl">
+          className="absolute right-0 bottom-full z-50 mb-1 grid w-52 rounded-md border border-border bg-popover p-1 text-xs shadow-md">
           {shown.map((item, i) => {
             if (item === 'separator') return <div key={`sep-${i}`} role="separator" className="-mx-1 my-1 h-px bg-border" />;
             const ref = firstSet ? undefined : first;
@@ -40,7 +40,7 @@ export function FooterMenu({ items }: { items: readonly (FooterItem | false | nu
             return (
               <button key={item.label} ref={ref} type="button" role="menuitem"
                 onClick={() => { setOpen(false); item.run(); }}
-                className={`rounded-sm px-2 py-1.5 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-none ${item.destructive ? 'text-destructive' : ''}`}>
+                className={`rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none ${item.destructive ? 'text-destructive' : ''}`}>
                 {item.label}
               </button>
             );

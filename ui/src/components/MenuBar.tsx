@@ -1,8 +1,9 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
-import { Eye, History, LayoutGrid, Pause, Plus, Search, Zap } from 'lucide-react';
+import { Eye, History, Pause, Plus, Search, Zap } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { badgeText } from '../model/approvals';
-import { allSouls, displayHarness, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
+import { displayHarness, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
+import { teamsOf } from '../model/fleet';
 import { SoulDudle } from './FleetList';
 
 /** Closes on a pointer down outside `ref` while `open`. */
@@ -81,7 +82,7 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
   const now = useClock(paused);
   const clock = new Intl.DateTimeFormat(lang, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(now);
   const openPalette = () => { setViewOpen(false); onOpenChange(false); setPalette(true); };
-  const viewItem = 'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent focus-visible:bg-accent focus-visible:outline-none';
+  const viewItem = 'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none';
 
   return (
     <header className="relative z-40 flex h-8 shrink-0 items-center gap-1 bg-menubar px-2 text-[13px] text-foreground">
@@ -105,7 +106,7 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
         </button>
         {viewOpen && (
           <div role="menu" aria-label={t('menu.view')}
-            className="absolute top-full left-0 mt-1 min-w-[14rem] rounded-md border border-border bg-popover p-1 shadow-2xl">
+            className="absolute top-full left-0 mt-1 min-w-[12rem] rounded-md border border-border bg-popover p-1 shadow-md">
             <button type="button" role="menuitem" className={viewItem} onClick={openPalette}>
               <Search className="size-3.5" aria-hidden /> {t('bar.palette')}
               <span className="ml-auto pl-4 text-muted-foreground">⌘K</span>
@@ -136,10 +137,6 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
             <Pause className="size-3" aria-hidden /> {t('paused')}
           </button>
         )}
-        <button type="button" onClick={onReset} title={t('menu.resetLayout')} aria-label={t('menu.resetLayout')}
-          className="rounded p-0.5 text-foreground/90 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
-          <LayoutGrid className="size-4" aria-hidden />
-        </button>
         <div ref={item} className="relative" onKeyDown={(e) => { if (e.key === 'Escape') onOpenChange(false); }}>
           <button
             type="button"
@@ -160,7 +157,7 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
             {working > 0 && <span title={t('bar.working', { count: working })} aria-hidden className="font-mono text-[11px] text-foreground">{working}</span>}
             <span className={`dot dot-${tone}`} aria-hidden />
             {unread > 0 && (
-              <span title={t('newCount', { count: unread })} aria-hidden className="grid min-w-4 place-items-center rounded-full bg-warning px-1 font-mono text-[10px] font-bold leading-4 text-warning-foreground">
+              <span title={t('newCount', { count: unread })} aria-hidden className="grid min-w-4 place-items-center rounded-full bg-primary px-1 font-mono text-[10px] font-bold leading-4 text-primary-foreground">
                 {unread}
               </span>
             )}
@@ -225,9 +222,15 @@ function Palette({ forest, paused, onClose, onJump, onLaunch, onShowAll, hiddenC
   useEffect(() => () => before?.focus(), [before]);
   const query = q.trim().toLowerCase();
   const match = (s: CensusRow) => !query || `${displayName(s)} ${displayHarness(s)} ${s.agentId}`.toLowerCase().includes(query);
-  const teams = forest
-    .map((node) => ({ key: soulKey(node.soul), heading: displayName(node.soul), souls: allSouls([node]).filter(match) }))
-    .filter((team) => team.souls.length > 0);
+  // As the design (and the fleet list): teams under their lead's name, then
+  // every companion with no team pooled under "No team".
+  const grouped = teamsOf(forest);
+  const solos = grouped.filter((team) => team.members.length === 0).map((team) => team.lead).filter(match);
+  const teams = [
+    ...grouped.filter((team) => team.members.length > 0)
+      .map((team) => ({ key: soulKey(team.lead), heading: displayName(team.lead), souls: [team.lead, ...team.members.map((m) => m.soul)].filter(match) })),
+    ...(solos.length > 0 ? [{ key: 'solo', heading: t('team.none'), souls: solos }] : []),
+  ].filter((team) => team.souls.length > 0);
   const actions: PaletteAction[] = [];
   if (onLaunch) actions.push({ key: 'launch', label: t('bar.launch'), icon: Plus, run: onLaunch });
   if (onShowAll) actions.push({ key: 'showAll', label: t('bar.showAll', { count: hiddenCount }), icon: Eye, run: onShowAll });
@@ -266,33 +269,33 @@ function Palette({ forest, paused, onClose, onJump, onLaunch, onShowAll, hiddenC
         // Keep focus in the search box; the click still picks.
         onMouseDown={(e) => e.preventDefault()}
         onClick={run}
-        className={`flex w-full cursor-default items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${selected ? 'bg-accent' : ''}`}>
+        className={`flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-3 text-left text-sm ${selected ? 'bg-accent' : ''}`}>
         {children}
       </div>
     );
   };
   const listId = `${ids}-list`;
   return (
-    <div className="fixed inset-0 z-50 grid place-items-start justify-center bg-black/50 pt-[15vh]">
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4">
       <div ref={box} role="dialog" aria-modal="true" aria-label={t('bar.palette')}
         onKeyDown={(e) => {
           if (e.key === 'Escape') onClose();
           if (e.key === 'Tab') trapTab(e, box.current);
         }}
-        className="w-[30rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border bg-popover shadow-2xl">
+        className="w-full max-w-lg overflow-hidden rounded-lg border border-border bg-background shadow-lg">
         <div className="flex items-center gap-2 border-b border-border px-3">
-          <Search className="size-4 text-muted-foreground" aria-hidden />
+          <Search className="size-5 shrink-0 opacity-50" aria-hidden />
           <input autoFocus value={q} onChange={(e) => { setQ(e.target.value); setActive(0); }} onKeyDown={onInputKey}
             placeholder={t('bar.search')} aria-label={t('bar.search')}
             role="combobox" aria-expanded="true" aria-controls={listId} aria-autocomplete="list" aria-activedescendant={activeId}
-            className="h-11 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground" />
+            className="h-12 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground" />
         </div>
         <div className="max-h-80 overflow-y-auto p-1">
           {options.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">{t('bar.noResults')}</p>}
           <div id={listId} role="listbox" aria-label={t('bar.palette')}>
             {teams.map((team) => (
               <div key={team.key} role="group" aria-label={team.heading}>
-                <h3 aria-hidden className="m-0 px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">{team.heading}</h3>
+                <h3 aria-hidden className="m-0 px-2 py-1.5 text-xs font-medium text-muted-foreground">{team.heading}</h3>
                 {team.souls.map((soul) => option(`soul:${soulKey(soul)}`, (
                   <>
                     <SoulDudle soul={soul} size={18} paused={paused} />
@@ -306,9 +309,9 @@ function Palette({ forest, paused, onClose, onJump, onLaunch, onShowAll, hiddenC
             {shownActions.length > 0 && (
               <div role="group" aria-label={t('bar.actions')}>
                 {teams.length > 0 && <div role="presentation" className="-mx-1 my-1 h-px bg-border" />}
-                <h3 aria-hidden className="m-0 px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">{t('bar.actions')}</h3>
+                <h3 aria-hidden className="m-0 px-2 py-1.5 text-xs font-medium text-muted-foreground">{t('bar.actions')}</h3>
                 {shownActions.map((a) => option(`action:${a.key}`, (
-                  <><a.icon className="size-4 text-muted-foreground" aria-hidden /><span>{a.label}</span></>
+                  <><a.icon className="size-5 text-muted-foreground" aria-hidden /><span>{a.label}</span></>
                 )))}
               </div>
             )}

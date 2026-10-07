@@ -93,12 +93,12 @@ export function ToolApprovalCard({ e, name, onResolve, allowSession = false }: {
         <>
           <div className="mt-3 flex flex-wrap gap-2" title={unavailable}>
             <button type="button" disabled={!ready} title={unavailable} onClick={() => resolve('approved')}
-              className={`${BUTTON} bg-primary text-primary-foreground hover:bg-primary/90`}>
+              className={`${BUTTON} bg-primary text-primary-foreground shadow hover:bg-primary/90`}>
               {t('approve')}
             </button>
             <button type="button" disabled={!ready || !allowSession} title={allowSession ? unavailable : later}
               onClick={() => resolve('approved_session')}
-              className={`${BUTTON} bg-secondary text-secondary-foreground hover:bg-accent`}>
+              className={`${BUTTON} bg-secondary text-secondary-foreground shadow-sm hover:bg-accent`}>
               {t('approveSession')}
             </button>
             <button type="button" disabled={!ready} title={unavailable} onClick={() => resolve('denied')}

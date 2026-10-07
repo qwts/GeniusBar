@@ -55,7 +55,7 @@ describe('CompanionDetails', () => {
       expect(field('Managed')).toBe('Managed');
       expect(field('Agent comms')).toBe('On');
       expect(field('Agent id')).toBe(child.agentId);
-      for (const term of ['Account', 'Harness', 'Presence', 'Parent', 'Unacked', 'Last wake']) {
+      for (const term of ['Account', 'Harness', 'Presence', 'Parent', 'Unread', 'Last wake']) {
         expect(screen.getByText(term, { selector: 'dt' })).toBeTruthy();
       }
       expect(soulComms).toHaveBeenCalledWith(child.agentId);
@@ -73,7 +73,7 @@ describe('CompanionDetails', () => {
       render(<CompanionDetails soul={child} />);
       const toggle = await screen.findByRole('switch', { name: /Agent comms for/ });
       expect((toggle as HTMLInputElement).disabled).toBe(true);
-      expect(screen.getByText('Stop the companion to change')).toBeTruthy();
+      expect(screen.getByText('Stop it first to change this.')).toBeTruthy();
     });
 
     it('turns comms off through agent-bot when stopped, and shows a refusal', async () => {
@@ -155,7 +155,7 @@ describe('CompanionDetails', () => {
     await screen.findByText('claude-sonnet-4-6');
     expect(field('Model')).toBe('claude-sonnet-4-6from claude, 2 minutes ago');
     expect(field('Context')).toBe('12,345 tokensfrom claude, 2 minutes ago');
-    expect(field('Presence')).toBe('watching');
+    expect(field('Presence')).toBe('Starting');
     expect(runtimeMetrics).toHaveBeenCalledOnce();
   });
 
@@ -183,7 +183,7 @@ describe('CompanionDetails', () => {
     const error = await screen.findByText('Metrics collector (claude): Could not read session');
     expect(error.className).toContain('text-muted-foreground');
     expect(screen.queryByText(/Another soul error/)).toBeNull();
-    expect(field('Presence')).toBe('watching');
+    expect(field('Presence')).toBe('Starting');
   });
 
   it('refreshes on request and soul changes, ignoring a late reply for the previous soul', async () => {
@@ -204,9 +204,9 @@ describe('CompanionDetails', () => {
     render(<CompanionDetails soul={child} roster={sampleCensus} />);
     expect(field('Account')).toBe('user');
     expect(field('Harness')).toBe('unknown harness');
-    expect(field('Presence')).toBe('watching');
+    expect(field('Presence')).toBe('Starting');
     expect(field('Parent')).toBe('lunaagent_p');
-    expect(field('Unacked')).toBe('3');
+    expect(field('Unread')).toBe('3');
     expect(field('Last wake')).toBe('none');
     // Principal-client fields appear only when the row carries them.
     expect(screen.queryByText('Hardened')).toBeNull();
@@ -219,8 +219,8 @@ describe('CompanionDetails', () => {
     render(<CompanionDetails soul={luna} />);
     expect(field('Parent')).toBe('none');
     expect(field('Verification')).toBe('verified');
-    expect(field('Hardened')).toBe('yes');
-    expect(field('Daemon watching')).toBe('yes');
+    expect(field('Hardened')).toBe('On');
+    expect(field('Daemon watching')).toBe('On');
   });
 });
 
@@ -232,7 +232,7 @@ describe('CompanionSession', () => {
     const session = screen.getByRole('region', { name: 'agent_c, agent_c' });
     expect(within(session).getByRole('img', { name: 'Avatar for agent_c' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Chat' }).getAttribute('aria-selected')).toBe('true');
-    expect(screen.getByRole('textbox', { name: 'Message to agent_c' })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Message agent_c' })).toBeTruthy();
     expect(runtimeMetrics).not.toHaveBeenCalled();
     fireEvent.keyDown(screen.getByRole('tab', { name: 'Chat' }), { key: 'ArrowRight' });
     expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Delegation' }));
@@ -261,6 +261,13 @@ describe('CompanionSession', () => {
     expect(within(tree).getByRole('button', { current: true }).textContent).toContain('agent_c');
     fireEvent.click(within(tree).getByRole('button', { name: /luna/ }));
     expect(onOpen).toHaveBeenCalledWith(luna);
+  });
+
+  it('shows every team in the delegation tree, as the design does', () => {
+    render(<CompanionSession soul={child} forest={forest} roster={sampleCensus} paused onOpen={() => {}} onClose={() => {}} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Delegation' }));
+    const tree = screen.getByRole('list', { name: 'Delegation' });
+    expect(within(tree).getByRole('button', { name: /old/ })).toBeTruthy();
   });
 
   it('focuses Back in the popup, which closes it, as does Escape', () => {
@@ -301,7 +308,7 @@ describe('Details rows from the Lovable design (#122)', () => {
     expect(field('Wake on new messages')).toBe('On');
     expect(field('Harness sign-in')).toBe('Signed in');
     expect(field('GitHub App')).toBe('Connected · luna-bot');
-    for (const term of ['Agent id', 'Account', 'Harness', 'Presence', 'Parent', 'Unacked', 'Last wake', 'Verification', 'Hardened', 'Daemon watching']) {
+    for (const term of ['Agent id', 'Account', 'Harness', 'Presence', 'Parent', 'Unread', 'Last wake', 'Verification', 'Hardened', 'Daemon watching']) {
       expect(screen.getByText(term, { selector: 'dt' })).toBeTruthy();
     }
     expect(s.coldWake).toHaveBeenCalledWith(luna.agentId);
@@ -375,9 +382,21 @@ describe('Details rows from the Lovable design (#122)', () => {
     const chat = { entries: [], composer: emptyComposer, onDraft: () => {}, onSend: () => {} };
     render(withSource(s, <CompanionSession soul={luna} forest={forest} roster={sampleCensus} chat={chat} onOpen={() => {}} onClose={() => {}} />));
     expect((await screen.findByRole('alert')).textContent).toContain('codex sign-in expired');
-    expect(screen.getByRole('textbox', { name: 'Message to luna' })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Message luna' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Sign in again' }));
     expect(s.signIn).toHaveBeenCalledWith('codex', luna.agentId);
+  });
+
+  it('keeps the composer open for a left companion the daemon wakes on a message, closes it for one it does not', async () => {
+    const chat = { entries: [], composer: emptyComposer, onDraft: () => {}, onSend: () => {} };
+    const asleep = { ...luna, presence: 'left' as const, daemonWatching: true };
+    const { unmount } = render(withSource(source(), <CompanionSession soul={asleep} forest={forest} roster={sampleCensus} chat={chat} onOpen={() => {}} onClose={() => {}} />));
+    await screen.findByRole('textbox', { name: 'Message luna' });
+    expect((screen.getByRole('textbox', { name: 'Message luna' }) as HTMLTextAreaElement).disabled).toBe(false);
+    unmount();
+    const gone = { ...luna, presence: 'left' as const, daemonWatching: false };
+    render(withSource(source(), <CompanionSession soul={gone} forest={forest} roster={sampleCensus} chat={chat} onOpen={() => {}} onClose={() => {}} />));
+    expect((screen.getByRole('textbox', { name: 'Message luna' }) as HTMLTextAreaElement).disabled).toBe(true);
   });
 
   it('adds the Execution mode row: Safe Mode with its hint, switched to Auto-Pilot through agent-bot', async () => {
@@ -443,7 +462,7 @@ describe('Details rows from the Lovable design (#122)', () => {
     const chat = { entries: [], composer: emptyComposer, onDraft: () => {}, onSend: () => {} };
     render(withSource(s, <CompanionSession soul={luna} forest={forest} roster={sampleCensus} chat={chat} onOpen={() => {}} onClose={() => {}} />));
     expect(await screen.findByText('Auto-Pilot is on — luna runs tools without asking.')).toBeTruthy();
-    expect(screen.getByRole('textbox', { name: 'Message to luna' })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Message luna' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Turn off' }));
     expect(s.setMode).toHaveBeenCalledWith(luna.agentId, 'safe');
     await waitFor(() => expect(screen.queryByText('Auto-Pilot is on — luna runs tools without asking.')).toBeNull());

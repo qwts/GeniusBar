@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { AlarmClock, ArrowLeft, Cpu, Github, Info, LogIn, MousePointer2, Palette, Radio, ShieldCheck, X, Zap } from 'lucide-react';
+import { ArrowLeft, Cpu, Github, Info, LogIn, MousePointer2, Palette, Radio, ShieldCheck, X, Zap } from 'lucide-react';
 import { computerUseSupported, runtimeMetrics, setSoulComms, soulComms, type ComputerUseSwitch, type RuntimeMetrics, type RuntimeObservation, type SoulColdWake, type SoulComms, type SoulMode, type SoulModel, type SoulPopulation } from '../bridge';
 import {
   availabilityNote,
@@ -13,7 +13,6 @@ import {
 } from '../model/census';
 import type { ApprovalDecision, ChatEntry, Composer } from '../model/chat';
 import { dudleFor } from '../model/dudle';
-import { teamNodeOf } from '../model/fleet';
 import { useI18n, type Translate } from '../lib/i18n';
 import type { LaunchApi } from '../useLaunch';
 import { useSoulProfile } from '../useSoulProfile';
@@ -93,7 +92,7 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
         if (e.key === 'Escape') onClose();
       }}
     >
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-2 md:px-8">
         {showBack && (
           <button ref={back} type="button" aria-label={t('back')} title={t('back')} onClick={onClose}
             className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground">
@@ -129,7 +128,7 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
             tabIndex={active === id ? 0 : -1}
             onClick={() => setTab(id)}
             className={`rounded-md px-3 py-1 text-sm font-medium ${active === id
-              ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+              ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
           >
             {t(`tab.${id}`)}
           </button>
@@ -139,11 +138,7 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
       <div id={`${ids}-panel`} role="tabpanel" aria-labelledby={`${ids}-tab-${active}`}
         className={`flex min-h-0 flex-1 flex-col ${active === 'chat' ? '' : 'overflow-y-auto'}`}>
         {active === 'chat' && chat && (
-          <>
-            <SoulNotices key={soulKey(soul)} soul={soul} refresh={metricsRefresh} />
-            <Conversation name={name} entries={chat.entries} composer={chat.composer} onDraft={chat.onDraft} onSend={chat.onSend}
-              dudle={dudleFor(soul)} paused={paused} onResolve={chat.onResolve} />
-          </>
+          <ChatTab key={soulKey(soul)} soul={soul} chat={chat} paused={paused} refresh={metricsRefresh} />
         )}
         {active === 'tree' && <DelegationTree forest={forest} focus={soulKey(soul)} paused={paused} onOpen={onOpen} />}
         {active === 'details' && <CompanionDetails soul={soul} roster={roster} launch={launch} metricsRefresh={metricsRefresh} />}
@@ -153,8 +148,29 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
   );
 }
 
-function yesNo(value: boolean | null | undefined, t: Translate): string {
-  return value === true ? t('yes') : value === false ? t('no') : t('unknown');
+/**
+ * The chat tab: the soul's notices, then the conversation. As the design,
+ * the composer is disabled while the companion is unavailable (left and
+ * not woken by messages) or its harness sign-in has lapsed (the record
+ * the sign-in notice reads).
+ */
+function ChatTab({ soul, chat, paused, refresh }: { soul: CensusRow; chat: SoulChat; paused: boolean; refresh: number }) {
+  const population = useSoulPopulation(soul.agentId, refresh);
+  const signIn = population.record?.harnessAuth?.status;
+  // A left companion the daemon still watches is asleep: a message wakes it.
+  const gone = soul.presence === 'left' && !soul.daemonWatching;
+  const blocked = gone || signIn === 'expired' || signIn === 'signed-out';
+  return (
+    <>
+      <SoulNotices soul={soul} refresh={refresh} population={population} />
+      <Conversation name={displayName(soul)} entries={chat.entries} composer={chat.composer} onDraft={chat.onDraft} onSend={chat.onSend}
+        dudle={dudleFor(soul)} paused={paused} onResolve={chat.onResolve} disabled={blocked} />
+    </>
+  );
+}
+
+function onOff(value: boolean | null | undefined, t: Translate): string {
+  return value === true ? t('on') : value === false ? t('off') : t('unknown');
 }
 
 /**
@@ -402,7 +418,7 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
     [t('field.agentId'), <span className="selectable">{soul.agentId}</span>],
     [t('field.account'), soul.account],
     [t('field.harness'), displayHarness(soul)],
-    [t('field.presence'), soul.presence],
+    [t('field.presence'), t(`presence.${soul.presence}`)],
     [t('field.parent'), parent],
     [t('field.unacked'), String(soul.unacked)],
     [t('field.lastWake'), soul.lastWake ?? t('none')],
@@ -420,8 +436,8 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
   // Principal-client fields that R1's census did not carry; shown only
   // when the bridge supplies them.
   if (soul.verification !== undefined) rows.push([t('field.verification'), soul.verification ?? t('none')]);
-  if (soul.hardened !== undefined) rows.push([t('field.hardened'), yesNo(soul.hardened, t)]);
-  if (soul.daemonWatching !== undefined) rows.push([t('field.daemonWatching'), yesNo(soul.daemonWatching, t)]);
+  if (soul.hardened !== undefined) rows.push([t('field.hardened'), onOff(soul.hardened, t)]);
+  if (soul.daemonWatching !== undefined) rows.push([t('field.daemonWatching'), onOff(soul.daemonWatching, t)]);
   const model = observations.find((observation) => observation.metric === 'model_reported');
   const context = observations.find((observation) => observation.metric === 'context_used_tokens');
   if (model) rows.push([t('field.model'), metricValue(model)]);
@@ -507,7 +523,7 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
 
   // As the design's Details tab: a bordered list, sans labels and mono values.
   return (
-    <div className="grid gap-3 p-4">
+    <div className="grid gap-3 p-4 md:px-8">
       {note && <p className="muted m-0">{note}</p>}
       <dl className="m-0 divide-y divide-border rounded-md border border-border text-sm">
         {rows.map(([term, value]) => (
@@ -524,7 +540,7 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
       {launch && !launching && (
         <div className="flex justify-end">
           <button type="button" onClick={() => setLaunching(true)}
-            className="min-h-8 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+            className="min-h-8 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90">
             {t('launch')}
           </button>
         </div>
@@ -571,7 +587,6 @@ export function WakeRow({ soul, refresh = 0 }: { soul: CensusRow; refresh?: numb
   const name = displayName(soul);
   return (
     <label className="flex items-start gap-3 p-3">
-      <AlarmClock className="mt-0.5 size-4 text-muted-foreground" aria-hidden />
       <span className="flex-1">
         <span className="block text-sm font-medium">{t('details.wake')}</span>
         <span className="block text-xs text-muted-foreground">{locked ? t('comms.stopFirst') : t('details.wakeHint', { name })}</span>
@@ -770,18 +785,18 @@ export function InfoButton({ soul }: { soul: CensusRow }) {
           contain the fixed overlay, and a React pointerdown bubbling from the
           sheet would start a drag in the title bar that holds this button. */}
       {open && createPortal(
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4"
           onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
           onPointerDown={(e) => e.stopPropagation()}>
           <section role="dialog" aria-modal="true" aria-labelledby={titleId}
             onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } }}
-            className="relative grid w-full max-w-md gap-3 rounded-lg border border-border bg-popover p-5 shadow-2xl">
+            className="relative grid w-full max-w-md gap-3 rounded-lg border border-border bg-background p-6 shadow-lg">
             <button ref={close} type="button" onClick={() => setOpen(false)} aria-label={t('close')}
-              className="absolute top-3 right-3 rounded p-1 text-muted-foreground hover:text-foreground">
+              className="absolute top-4 right-4 rounded-sm text-foreground opacity-70 hover:opacity-100">
               <X className="size-4" aria-hidden />
             </button>
             <div>
-              <h2 id={titleId} className="m-0 text-base font-semibold">{t('details.title')} · {name}</h2>
+              <h2 id={titleId} className="m-0 text-lg leading-none font-semibold tracking-tight">{t('details.title')} · {name}</h2>
               <p className="m-0 text-sm text-muted-foreground">{displayHarness(soul)}</p>
             </div>
             <div className="divide-y divide-border rounded-md border border-border empty:hidden">
@@ -809,12 +824,11 @@ export function InfoButton({ soul }: { soul: CensusRow }) {
   );
 }
 
-/** The team a companion belongs to, as nested delegation (R6). */
+/** The whole fleet as nested delegation (R6), the focused companion highlighted. */
 export function DelegationTree({ forest, focus, paused, onOpen }:
   { forest: readonly SoulNode[]; focus: string; paused: boolean; onOpen: (soul: CensusRow) => void }) {
   const { t } = useI18n();
-  const root = teamNodeOf(forest, focus);
-  if (!root) return null;
+  if (forest.length === 0) return null;
   const node = (n: SoulNode): ReactNode => {
     const key = soulKey(n.soul);
     return (
@@ -836,5 +850,5 @@ export function DelegationTree({ forest, focus, paused, onOpen }:
       </li>
     );
   };
-  return <ul className="m-0 grid list-none gap-3 p-6" aria-label={t('tab.tree')}>{node(root)}</ul>;
+  return <ul className="m-0 grid list-none gap-3 p-6" aria-label={t('tab.tree')}>{forest.map(node)}</ul>;
 }
