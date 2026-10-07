@@ -8,6 +8,7 @@ import {
   applyStatusError,
   canLaunch,
   launchErrorText,
+  launchSandbox,
   launchParams,
   launchProblem,
   normalPackagePath,
@@ -169,5 +170,31 @@ describe('normalPackagePath (#116)', () => {
     const request: LaunchRequest = { account: 'user', target: { package: '/souls/a.soul/' }, harness: 'claude', name: '' };
     expect(launchProblem(request)).toBeNull();
     expect(launchParams(request).package).toBe('/souls/a.soul');
+  });
+});
+
+describe('launch sandbox: who the companion runs as (#66)', () => {
+  const sandboxed = { resolution: 'sandboxed', account: 'gb-luna' } as const;
+
+  it('reads it on a launched or refused result, and keeps it from a pending one', () => {
+    expect(applyStatus(pending, { status: 'launched', agentId: 'agent_9', sandbox: sandboxed }))
+      .toEqual({ phase: 'launched', requestId: 'launch_1', agentId: 'agent_9', sandbox: sandboxed });
+    expect(applyStatus(pending, { status: 'failed', detail: 'refused: child cap', sandbox: { resolution: 'unrestricted', account: 'owner' } }))
+      .toEqual({ phase: 'failed', requestId: 'launch_1', agentId: null, detail: 'refused: child cap', sandbox: { resolution: 'unrestricted', account: 'owner' } });
+    const told = applyStatus(pending, { status: 'pending', sandbox: sandboxed });
+    expect(told).toEqual({ ...pending, sandbox: sandboxed });
+    expect(applyStatus(told, { status: 'pending' })).toEqual(told);
+    expect(applyStatus(told, { status: 'launched', agentId: 'agent_9' })).toMatchObject({ phase: 'launched', sandbox: sandboxed });
+  });
+
+  it('leaves the state as before without one, or with a malformed one', () => {
+    for (const sandbox of [undefined, null, 'sandboxed', [], {}, { resolution: 'jailed', account: 'x' }, { resolution: 'sandboxed' },
+      { resolution: 'sandboxed', account: '  ' }, { resolution: 'sandboxed', account: 7 }, { resolution: 'sandboxed', account: 'a\nb' },
+      { resolution: 'sandboxed', account: 'x'.repeat(257) }]) {
+      expect(launchSandbox(sandbox)).toBeNull();
+      expect(applyStatus(pending, { status: 'launched', agentId: 'agent_9', sandbox }))
+        .toEqual({ phase: 'launched', requestId: 'launch_1', agentId: 'agent_9' });
+    }
+    expect(launchSandbox({ resolution: 'unrestricted', account: ' owner ', extra: true })).toEqual({ resolution: 'unrestricted', account: 'owner' });
   });
 });

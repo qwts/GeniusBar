@@ -17,6 +17,13 @@ describe('native window surfaces (#223)', () => {
     await expect(openSurface({ surface: 'audit' }, failing)).rejects.toBe('snapshot');
   });
 
+  it('passes a dropped package to the launch window (#98)', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); }) as never;
+    await openSurface({ surface: 'launch', package: '/souls/Luna.soul' }, fake);
+    expect(calls).toEqual([['open_surface', { surface: 'launch', soul: undefined, tab: undefined, action: undefined, package: '/souls/Luna.soul' }]]);
+  });
+
   it('syncs team windows: true only when the shell says so', async () => {
     const calls: unknown[] = [];
     const teams = [{ key: 'user/agent_p', x: 10, y: 20, width: 300, height: 176 }];

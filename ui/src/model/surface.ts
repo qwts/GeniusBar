@@ -17,6 +17,8 @@ export interface SurfaceQuery {
   tab: SessionTab | null;
   /** `archive`: the session opens with the Archive confirmation showing. */
   action: 'archive' | null;
+  /** Launch: a `.soul` package path to prefill (#98), decoded; null unless absolute. */
+  package: string | null;
 }
 
 const SURFACES: readonly Surface[] = ['tray', 'window', 'team', 'session', 'audit', 'customize', 'launch'];
@@ -36,6 +38,13 @@ export function queryTabOf(tab: SessionTab): QueryTab {
   return tab === 'tree' ? 'delegation' : tab;
 }
 
+/** A package path from the query: absolute, without control characters; anything else is none. */
+function packageOf(value: string | null): string | null {
+  // eslint-disable-next-line no-control-regex
+  if (!value || !value.startsWith('/') || /[\u0000-\u001f\u007f]/.test(value)) return null;
+  return value;
+}
+
 /** Reads `location.search`; anything malformed is dropped, never thrown. */
 export function parseSurface(search: string): SurfaceQuery {
   const params = new URLSearchParams(search);
@@ -46,5 +55,6 @@ export function parseSurface(search: string): SurfaceQuery {
     soul: soul ? soul : null,
     tab: sessionTabOf(params.get('tab')),
     action: params.get('action') === 'archive' ? 'archive' : null,
+    package: packageOf(params.get('package')),
   };
 }

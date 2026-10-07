@@ -1,6 +1,7 @@
 import { useEffect, useRef, type RefObject } from 'react';
 import type { SurfaceWindow } from '../bridge';
 import { TeamCard } from '../components/Desktop';
+import { DropCue } from '../components/DropCue';
 import { soulKey, type CensusRow } from '../model/census';
 import { teamsOf } from '../model/fleet';
 import { layoutActions, useLayout } from '../state/layout';
@@ -85,10 +86,12 @@ function useSavePosition(win: SurfaceWindow | null, key: string) {
  * collapse write the shared layout; the popup's coordinator then closes or
  * resizes this window.
  */
-export function TeamSurface({ soul: leadKey, census, chat, badges, win, isStatic = false, open }: SurfaceData & {
+export function TeamSurface({ soul: leadKey, census, chat, badges, win, isStatic = false, open, dropping = false }: SurfaceData & {
   /** The lead's roster key. */
   soul: string | null;
   open: OpenSurface | null;
+  /** A `.soul` package is dragged over the card (#98): its drop cue shows. */
+  dropping?: boolean;
 }) {
   const layout = useLayout();
   const { forest, awaiting, unread, badges: shownBadges } = useSurfaceFleet({ census, chat, badges });
@@ -110,10 +113,11 @@ export function TeamSurface({ soul: leadKey, census, chat, badges, win, isStatic
   };
   return (
     <SurfaceOpenerContext.Provider value={open}>
-      <div className="gb inline-block">
+      <div className="gb relative inline-block">
         <TeamCard team={team} layout={layout} paused={paused} unreadOf={unread} onOpen={(soul) => session(soul)}
           badges={shownBadges} onArchive={open ? (soul) => session(soul, 'archive') : undefined}
           awaiting={awaiting} cardRef={card} />
+        {dropping && <DropCue />}
       </div>
     </SurfaceOpenerContext.Provider>
   );

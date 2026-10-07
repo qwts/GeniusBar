@@ -616,6 +616,11 @@ export interface SurfaceRequest {
   soul?: string;
   tab?: QueryTab;
   action?: 'archive';
+  /**
+   * Launch only: a `.soul` package path (#98) the launch window opens
+   * prefilled with; an open launch window reloads with it.
+   */
+  package?: string;
 }
 
 /**
@@ -623,9 +628,9 @@ export interface SurfaceRequest {
  * Rejects outside the app, under a snapshot, and with a shell that has no
  * such command, so the caller keeps the in-popup view as its fallback.
  */
-export async function openSurface({ surface, soul, tab, action }: SurfaceRequest, invokeImpl: typeof invoke = invoke): Promise<void> {
+export async function openSurface({ surface, soul, tab, action, package: packagePath }: SurfaceRequest, invokeImpl: typeof invoke = invoke): Promise<void> {
   if (!inApp() && invokeImpl === invoke) throw new BridgeError('not-in-app', 'Native windows need the app.');
-  await invokeImpl('open_surface', { surface, soul, tab, action });
+  await invokeImpl('open_surface', { surface, soul, tab, action, ...(packagePath ? { package: packagePath } : {}) });
 }
 
 /** One team card's native window (#223), in logical screen points. */

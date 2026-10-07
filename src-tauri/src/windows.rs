@@ -108,6 +108,12 @@ pub fn page(surface: &str, params: &[(&str, Option<&str>)]) -> String {
     url
 }
 
+/// The script that loads `url` (from `page`) in place of an open window's
+/// page. `page` percent-encodes every value, so the URL holds no quote.
+pub fn navigate_script(url: &str) -> String {
+    format!("window.location.replace('{url}')")
+}
+
 /// Percent-encodes a query value; unreserved characters stay readable.
 fn encode(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
@@ -154,6 +160,7 @@ pub async fn open_surface(
     soul: Option<String>,
     tab: Option<String>,
     action: Option<String>,
+    package: Option<String>,
 ) -> Result<(), String> {
     let kind = Surface::parse(&surface).ok_or_else(|| format!("unknown surface {surface}"))?;
     if !app.state::<Mode>().single_instance() {
@@ -162,20 +169,29 @@ pub async fn open_surface(
     if kind.per_soul() && kind != Surface::Audit && soul.as_deref().unwrap_or("").is_empty() {
         return Err(format!("{surface} needs a soul"));
     }
+    // Only Launch takes a dropped `.soul` package (#98).
+    let package = package.filter(|p| kind == Surface::Launch && !p.is_empty());
     let label = label(kind, soul.as_deref());
-    if let Some(window) = app.get_webview_window(&label) {
-        let _ = window.unminimize();
-        window.show().map_err(|e| e.to_string())?;
-        return window.set_focus().map_err(|e| e.to_string());
-    }
     let url = page(
         kind.as_str(),
         &[
             ("soul", soul.as_deref()),
             ("tab", tab.as_deref()),
             ("action", action.as_deref()),
+            ("package", package.as_deref()),
         ],
     );
+    if let Some(window) = app.get_webview_window(&label) {
+        // A launch with a package is a fresh page: the open window loads it.
+        if package.is_some() {
+            window
+                .eval(navigate_script(&url))
+                .map_err(|e| e.to_string())?;
+        }
+        let _ = window.unminimize();
+        window.show().map_err(|e| e.to_string())?;
+        return window.set_focus().map_err(|e| e.to_string());
+    }
     let ((width, height), (min_width, min_height)) = kind.size();
     let tray = *app.state::<Mode>() == Mode::Tray;
     // A window needs the regular policy for keyboard focus and a Dock icon.
@@ -358,6 +374,24 @@ mod tests {
             ),
             "index.html?surface=session&soul=acct%2Fagent%20id&tab=audit"
         );
+    }
+
+    #[test]
+    fn launch_pages_carry_a_package_safely() {
+        let params = [
+            ("soul", None),
+            ("package", Some("/Users/me/It's mine.soul/")),
+        ];
+        let url = page("launch", &params);
+        assert_eq!(
+            url,
+            "index.html?surface=launch&package=%2FUsers%2Fme%2FIt%27s%20mine.soul%2F"
+        );
+        assert_eq!(
+            navigate_script(&url),
+            "window.location.replace('index.html?surface=launch&package=%2FUsers%2Fme%2FIt%27s%20mine.soul%2F')"
+        );
+        assert!(!url.contains('\''));
     }
 
     #[test]
