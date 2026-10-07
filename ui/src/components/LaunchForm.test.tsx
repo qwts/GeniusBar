@@ -288,20 +288,86 @@ describe('LaunchForm brief (#120)', () => {
     expect(launchButton().disabled).toBe(false);
   });
 
-  it('offers a blank brief on relaunch that keeps the saved one, and sends a new one when typed', () => {
+  const keepHint = 'What this companion is here to do. Leave blank to keep its current brief.';
+
+  it('prefills the saved brief on relaunch and sends none when it is kept', async () => {
     const launcher = launcherIn({ phase: 'idle' });
-    render(form(launcher, { soul: starter }));
-    // The census carries no saved brief, so a relaunch starts blank.
-    expect(briefField().value).toBe('');
-    expect(screen.getByText('What this companion is here to do. Leave blank to keep its current brief.')).toBeTruthy();
+    const loadBrief = vi.fn(async () => 'Review open PRs');
+    render(form(launcher, { soul: starter, loadBrief }));
+    await waitFor(() => expect(briefField().value).toBe('Review open PRs'));
+    expect(loadBrief).toHaveBeenCalledWith('agent_s');
+    expect(briefField().disabled).toBe(false);
+    expect(screen.getByText(keepHint)).toBeTruthy();
+    fireEvent.submit(screen.getByRole('form'));
+    // Unchanged, the saved brief stays as agent-bot has it.
+    expect(vi.mocked(launcher.launch).mock.calls[0][0]).not.toHaveProperty('brief');
+  });
+
+  it('sends an edited brief on relaunch', async () => {
+    const launcher = launcherIn({ phase: 'idle' });
+    render(form(launcher, { soul: starter, loadBrief: async () => 'Review open PRs' }));
+    await waitFor(() => expect(briefField().value).toBe('Review open PRs'));
+    fireEvent.change(briefField(), { target: { value: 'Review open PRs and close stale ones' } });
+    fireEvent.submit(screen.getByRole('form'));
+    expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ target: { soul: 'agent_s' }, brief: 'Review open PRs and close stale ones' }));
+  });
+
+  it('keeps the saved brief when the field is cleared or there is none', async () => {
+    const launcher = launcherIn({ phase: 'idle' });
+    render(form(launcher, { soul: starter, loadBrief: async () => 'Review open PRs' }));
+    await waitFor(() => expect(briefField().value).toBe('Review open PRs'));
+    fireEvent.change(briefField(), { target: { value: '' } });
     fireEvent.submit(screen.getByRole('form'));
     expect(vi.mocked(launcher.launch).mock.calls[0][0]).not.toHaveProperty('brief');
     cleanup();
     const again = launcherIn({ phase: 'idle' });
-    render(form(again, { soul: starter }));
-    fireEvent.change(briefField(), { target: { value: 'Review open PRs' } });
+    render(form(again, { soul: starter, loadBrief: async () => null }));
+    await waitFor(() => expect(briefField().disabled).toBe(false));
+    expect(briefField().value).toBe('');
+    expect(screen.getByText(keepHint)).toBeTruthy();
     fireEvent.submit(screen.getByRole('form'));
-    expect(again.launch).toHaveBeenCalledWith(expect.objectContaining({ target: { soul: 'agent_s' }, brief: 'Review open PRs' }));
+    expect(vi.mocked(again.launch).mock.calls[0][0]).not.toHaveProperty('brief');
+  });
+
+  it('waits on the field while the brief loads, without holding up the launch', async () => {
+    const launcher = launcherIn({ phase: 'idle' });
+    let answer: (text: string | null) => void = () => {};
+    const loadBrief = vi.fn(() => new Promise<string | null>((resolve) => { answer = resolve; }));
+    render(form(launcher, { soul: starter, loadBrief }));
+    expect(briefField().disabled).toBe(true);
+    expect(screen.getByText('Loading its current brief…')).toBeTruthy();
+    expect(launchButton().disabled).toBe(false);
+    fireEvent.submit(screen.getByRole('form'));
+    expect(vi.mocked(launcher.launch).mock.calls[0][0]).not.toHaveProperty('brief');
+    await waitFor(() => expect(loadBrief).toHaveBeenCalled());
+    answer('Review open PRs');
+    await waitFor(() => expect(briefField().value).toBe('Review open PRs'));
+  });
+
+  it('leaves the field blank and usable when the brief cannot be read', async () => {
+    const launcher = launcherIn({ phase: 'idle' });
+    render(form(launcher, { soul: starter, loadBrief: async () => { throw new Error('agent-bot unavailable'); } }));
+    await waitFor(() => expect(briefField().disabled).toBe(false));
+    expect(briefField().value).toBe('');
+    expect(screen.getByText(keepHint)).toBeTruthy();
+    fireEvent.change(briefField(), { target: { value: 'Triage the inbox' } });
+    fireEvent.submit(screen.getByRole('form'));
+    expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ target: { soul: 'agent_s' }, brief: 'Triage the inbox' }));
+  });
+
+  it('keeps what the owner typed over a late answer', async () => {
+    const launcher = launcherIn({ phase: 'idle' });
+    let answer: (text: string | null) => void = () => {};
+    const loadBrief = vi.fn(() => new Promise<string | null>((resolve) => { answer = resolve; }));
+    render(form(launcher, { soul: starter, loadBrief }));
+    // Should a value reach the field before the answer, it wins over the saved brief.
+    fireEvent.change(briefField(), { target: { value: 'Ship the release' } });
+    await waitFor(() => expect(loadBrief).toHaveBeenCalled());
+    answer('Review open PRs');
+    await waitFor(() => expect(briefField().disabled).toBe(false));
+    expect(briefField().value).toBe('Ship the release');
+    fireEvent.submit(screen.getByRole('form'));
+    expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ brief: 'Ship the release' }));
   });
 
   it('shows the brief for a template launch too', async () => {

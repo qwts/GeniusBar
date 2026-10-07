@@ -160,6 +160,7 @@ export const es: Catalog = {
   'launch.briefPlaceholder': 'p. ej. Mantén al día las notas de versión y señala lo que no esté claro',
   'launch.briefHint': 'Para qué está aquí este compañero. Lo lee en su primer turno.',
   'launch.briefKeep': 'Para qué está aquí este compañero. Déjalo en blanco para conservar su encargo actual.',
+  'launch.briefLoading': 'Cargando su encargo actual…',
   'launch.briefTooLong': 'El encargo tiene más de {max} caracteres.',
   'launch.go': 'Lanzar',
   'launch.comms': 'Comunicación entre agentes',

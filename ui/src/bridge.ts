@@ -301,6 +301,11 @@ export interface SoulPopulation {
    * bundle without the field. Optional so older fixtures still type.
    */
   computerUse?: boolean;
+  /**
+   * The brief the soul's last launch saved (#120, agent-bot-identity #502);
+   * absent when it has none or the bundle predates it.
+   */
+  brief?: string;
 }
 
 export function normalizeSoulPopulation(raw: unknown): SoulPopulation | null {
@@ -315,6 +320,7 @@ export function normalizeSoulPopulation(raw: unknown): SoulPopulation | null {
     appSlug: typeof raw.appSlug === 'string' && raw.appSlug !== '' ? raw.appSlug : null,
     harnessAuth,
     ...(typeof raw.computerUse === 'boolean' ? { computerUse: raw.computerUse } : {}),
+    ...(typeof raw.brief === 'string' && raw.brief.trim() !== '' ? { brief: raw.brief } : {}),
   };
 }
 
@@ -326,6 +332,16 @@ export async function soulPopulation(agentId: string, invokeImpl: typeof invoke 
   } catch {
     return null;
   }
+}
+
+/**
+ * The brief a soul's last launch saved (#120), for the launch dialog to
+ * prefill on relaunch; null when it has none. Rejects when agent-bot cannot
+ * say, so the dialog can tell "none" from "unknown".
+ */
+export async function savedBrief(agentId: string, invokeImpl: typeof invoke = invoke): Promise<string | null> {
+  if (!inApp() && invokeImpl === invoke) return null;
+  return normalizeSoulPopulation(await invokeImpl<unknown>('soul_population', { agent: agentId }))?.brief ?? null;
 }
 
 /**
