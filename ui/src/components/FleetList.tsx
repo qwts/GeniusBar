@@ -125,7 +125,7 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty, onA
   };
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col" aria-label={t('fleet')}>
+    <section className="flex flex-1 flex-col" aria-label={t('fleet')}>
       {forest.length === 0 ? empty : (
         <>
           <div className="relative border-b border-border p-2">
@@ -139,7 +139,7 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty, onA
               className="h-8 w-full rounded-md border-0 bg-muted pr-2 pl-7 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
-          <ul className="m-0 min-h-0 flex-1 list-none overflow-y-auto p-0 py-1">
+          <ul className="m-0 min-h-40 flex-1 list-none overflow-y-auto p-0 py-1">
             {ordered.length === 0 && <li className="px-3 py-2 text-sm text-muted-foreground">{t('bar.noResults')}</li>}
             {ordered.map((team, i) => (
               <li key={soulKey(team.lead)}>

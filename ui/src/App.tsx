@@ -426,7 +426,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   if (mode === 'tray') {
     // An open session keeps the update line above it, as the panel did before R6.
     return (
-      <main className="gb flex h-full flex-col bg-popover">
+      <main className="gb flex h-full flex-col overflow-y-auto bg-popover">
         {session ? <>{updates && <UpdateNotice status={updates.status} onAction={updates.act} />}{session}</> : menu()}
         {launchModal}
         {archiveUi}

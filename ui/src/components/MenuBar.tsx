@@ -143,7 +143,7 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
           {described && <span id={badge} hidden>{described}</span>}
           {open && (
             <div role="dialog" aria-label={t('bar.menu')}
-              className="absolute top-full right-0 mt-1.5 flex max-h-[calc(100vh-3rem)] w-[22rem] flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-2xl">
+              className="absolute top-full right-0 mt-1.5 flex max-h-[calc(100vh-3rem)] w-[22rem] flex-col overflow-y-auto rounded-lg border border-border bg-popover shadow-2xl">
               {children}
             </div>
           )}
