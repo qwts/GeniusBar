@@ -9,7 +9,7 @@ import { sampleCensus, sampleConnection } from '../model/fixtures';
 import { layoutActions } from '../state/layout';
 import { preferenceActions } from '../state/preferences';
 import { CompanionDetails } from './CompanionSession';
-import { liveSandbox, normalizeSandboxStatus, SandboxProvider, type SandboxSoul, type SandboxSource, type SandboxStatus } from './Sandbox';
+import { liveSandbox, normalizeSandboxPairings, normalizeSandboxStatus, SandboxProvider, type SandboxPairing, type SandboxSoul, type SandboxSource, type SandboxStatus } from './Sandbox';
 import { SandboxCard } from './SandboxCard';
 import { SandboxChip } from './SandboxChip';
 
@@ -41,10 +41,18 @@ function status(over: Partial<SandboxStatus> = {}): SandboxStatus {
   };
 }
 
-/** A fake agent-bot: `set` and `override` change what `status` reads next. */
-function fakeSource(initial: SandboxStatus) {
+/** A fake agent-bot: `set` and `override` change what `status` reads next; `approve` settles a pending pairing. */
+function fakeSource(initial: SandboxStatus, pairings: SandboxPairing[] = []) {
   let current = initial;
+  let pending = pairings;
   const source = {
+    pairings: vi.fn(async () => pending),
+    approve: vi.fn(async (code: string) => {
+      const row = pending.find((p) => p.code === code);
+      if (!row) throw new BridgeError('sandbox-failed', `no pending pairing has the code ${code}`);
+      pending = pending.map((p) => (p === row ? { ...p, state: 'approved', code: null } : p));
+      return { account: row.account, state: 'approved' };
+    }),
     status: vi.fn(async () => current),
     set: vi.fn(async (on: boolean) => {
       current = { ...current, enabled: on, souls: current.souls.map((s) => s.override === 'inherit'
@@ -255,20 +263,86 @@ describe('App window chrome', () => {
   });
 });
 
+describe('pairing approval (#66)', () => {
+  const waiting: SandboxPairing[] = [
+    { account: 'geniusbar-agent', kind: 'account', state: 'pending', code: 'K7M2PQ', at: '2026-10-07T20:00:00Z' },
+    { account: 'geniusbar-agent', kind: 'daemon', state: 'pending', code: 'W3XY9Z', at: '2026-10-07T20:01:00Z' },
+  ];
+
+  it('lists who is waiting under the pair step and approves with one click', async () => {
+    const source = fakeSource(status({ enabled: true }), waiting);
+    withSandbox(source, <SandboxCard />);
+    const list = await screen.findByRole('list', { name: 'Steps for you' });
+    const pair = within(list).getAllByRole('listitem').at(-1)!;
+    await within(pair).findByText(/^geniusbar-agent is waiting for your approval/);
+    expect(within(pair).getByText(/The agent-bot daemon in geniusbar-agent is waiting/)).toBeTruthy();
+    const approve = within(pair).getByRole('button', { name: 'Approve the pairing of geniusbar-agent, code K7M2PQ' });
+    fireEvent.click(approve);
+    await waitFor(() => expect(source.approve).toHaveBeenCalledWith('K7M2PQ'));
+    // Approved: the broker no longer lists it as pending, so the row goes; the daemon's stays.
+    await waitFor(() => expect(within(pair).queryByRole('button', { name: /code K7M2PQ/ })).toBeNull());
+    expect(within(pair).getByRole('button', { name: /code W3XY9Z/ })).toBeTruthy();
+    expect(source.pairings).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows the broker’s refusal under the step and keeps the row', async () => {
+    const source = fakeSource(status({ enabled: true }), waiting);
+    source.approve.mockRejectedValueOnce(new BridgeError('pairing-expired', 'the code K7M2PQ has expired'));
+    withSandbox(source, <SandboxCard />);
+    fireEvent.click(await screen.findByRole('button', { name: /code K7M2PQ/ }));
+    expect((await screen.findByRole('alert')).textContent).toBe('Not approved: the code K7M2PQ has expired');
+    expect(screen.getByRole('button', { name: /code K7M2PQ/ })).toBeTruthy();
+  });
+
+  it('asks the broker only while the account is being set up, and shows the step alone when it cannot', async () => {
+    const ready = fakeSource(status({ enabled: true, status: 'ready', steps: [] }), waiting);
+    withSandbox(ready, <SandboxCard />);
+    await screen.findByRole('switch', { name: 'Sandboxing' });
+    await waitFor(() => expect(ready.status).toHaveBeenCalled());
+    expect(ready.pairings).not.toHaveBeenCalled();
+    cleanup();
+    const broken = fakeSource(status({ enabled: true }), waiting);
+    broken.pairings.mockRejectedValue(new BridgeError('sandbox-failed', 'agent-comms: broker not running'));
+    withSandbox(broken, <SandboxCard />);
+    const list = await screen.findByRole('list', { name: 'Steps for you' });
+    await waitFor(() => expect(broken.pairings).toHaveBeenCalled());
+    expect(within(list).queryByRole('button', { name: /Approve the pairing/ })).toBeNull();
+    expect(within(list).getByText('Pair geniusbar-agent with the broker')).toBeTruthy();
+  });
+
+  it('reads the broker’s pairings as agent-comms prints them', () => {
+    expect(normalizeSandboxPairings({ pairings: [
+      { account: 'geniusbar-agent', uid: 503, state: 'pending', at: '2026-10-07T20:00:00Z', code: 'K7M2PQ' },
+      { account: 'geniusbar-agent', kind: 'daemon', uid: 503, state: 'approved', at: '2026-10-07T20:01:00Z', hardened: true },
+      { account: '', state: 'pending' },
+    ] })).toEqual([
+      { account: 'geniusbar-agent', kind: 'account', state: 'pending', code: 'K7M2PQ', at: '2026-10-07T20:00:00Z' },
+      { account: 'geniusbar-agent', kind: 'daemon', state: 'approved', code: null, at: '2026-10-07T20:01:00Z' },
+    ]);
+    expect(normalizeSandboxPairings({})).toBeNull();
+  });
+});
+
 describe('the agent-bot client', () => {
   it('asks the shell with the bridge commands and their arguments', async () => {
     vi.mocked(invoke).mockImplementation(async (command: string) => {
       if (command === 'sandbox_status') return status();
       if (command === 'sandbox_set') return { enabled: true, provider: 'standard_macos_account', account: 'geniusbar-agent' };
+      if (command === 'sandbox_pairings') return { pairings: [] };
+      if (command === 'sandbox_approve') return { account: 'geniusbar-agent', state: 'approved' };
       return soulRow('agent_1', { override: 'unrestricted', source: 'override' });
     });
     expect((await liveSandbox.status()).status).toBe('creating');
     await liveSandbox.set(true);
     expect((await liveSandbox.override('agent_1', 'unrestricted')).override).toBe('unrestricted');
+    expect(await liveSandbox.pairings()).toEqual([]);
+    expect(await liveSandbox.approve('K7M2PQ')).toEqual({ account: 'geniusbar-agent', state: 'approved' });
     expect(vi.mocked(invoke).mock.calls).toEqual([
       ['sandbox_status', {}],
       ['sandbox_set', { action: 'on' }],
       ['sandbox_override', { agent: 'agent_1', action: 'unrestricted' }],
+      ['sandbox_pairings', {}],
+      ['sandbox_approve', { code: 'K7M2PQ' }],
     ]);
   });
 

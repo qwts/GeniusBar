@@ -2137,6 +2137,130 @@ pub async fn sandbox_override<R: Runtime>(
 
 /// agent-bot's own rule for a sandbox account name, `^[a-z_][a-z0-9_-]{0,30}$`:
 /// a short macOS account name that lands in argv, never a shell.
+/// The pairings the broker knows (#66): `agent-comms broker pairings`, on
+/// the owner's private admin socket, answers `{pairings: [{account, kind?,
+/// uid, state, at, hardened?, code?}]}`; a pending one carries the code the
+/// account printed. Read-only.
+#[tauri::command]
+pub async fn sandbox_pairings<R: Runtime>(app: AppHandle<R>) -> Result<Value, BridgeError> {
+    let args = vec!["broker".into(), "pairings".into()];
+    let output = run_agent_comms(&app, args, "sandbox-unavailable").await?;
+    parse_agent_comms_json(
+        &output.stdout,
+        &output.stderr,
+        "agent-comms gave no pairings",
+        |value| value.get("pairings").and_then(Value::as_array).is_some(),
+    )
+}
+
+/// Approves a pending pairing by its code (`agent-comms broker approve
+/// CODE`), the owner's own step from the Sandboxing card; the broker
+/// answers `{account, state: "approved"}` (with `kind: "daemon"` for a
+/// daemon's). GeniusBar runs as the owner, whose admin socket this is.
+#[tauri::command]
+pub async fn sandbox_approve<R: Runtime>(
+    app: AppHandle<R>,
+    code: String,
+) -> Result<Value, BridgeError> {
+    let code = pairing_code(&code)?;
+    let args = vec!["broker".into(), "approve".into(), code.into()];
+    let output = run_agent_comms(&app, args, "sandbox-unavailable").await?;
+    parse_agent_comms_json(
+        &output.stdout,
+        &output.stderr,
+        "agent-comms did not approve the pairing",
+        |value| {
+            value.get("account").and_then(Value::as_str).is_some()
+                && value.get("state").and_then(Value::as_str) == Some("approved")
+        },
+    )
+}
+
+/// A pairing code as the broker mints them: six characters from its
+/// alphabet (no 0, O, 1, I), upper-cased here so a typed code passes too.
+fn pairing_code(code: &str) -> Result<String, BridgeError> {
+    let code = code.trim().to_ascii_uppercase();
+    let alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    if code.len() == 6 && code.chars().all(|c| alphabet.contains(c)) {
+        Ok(code)
+    } else {
+        Err(BridgeError::new(
+            "sandbox-invalid",
+            "a pairing code is six letters or digits",
+        ))
+    }
+}
+
+/// Runs the bundled agent-comms (`bin/agent-comms.mjs`) as `run_agent_bot`
+/// runs agent-bot: GeniusBar's host env names its broker.
+async fn run_agent_comms<R: Runtime>(
+    app: &AppHandle<R>,
+    args: Vec<std::ffi::OsString>,
+    unavailable_code: &str,
+) -> Result<tauri_plugin_shell::process::Output, BridgeError> {
+    let unavailable = |e: String| BridgeError::new(unavailable_code, &e);
+    let resources = app
+        .path()
+        .resource_dir()
+        .map_err(|e| unavailable(e.to_string()))?;
+    let mut argv: Vec<std::ffi::OsString> = vec![resources
+        .join("components")
+        .join("agent-comms")
+        .join("bin")
+        .join("agent-comms.mjs")
+        .into_os_string()];
+    argv.extend(args);
+    app.shell()
+        .sidecar("node")
+        .map_err(|e| unavailable(e.to_string()))?
+        .envs(HOST_ENV.iter().copied())
+        .args(argv)
+        .output()
+        .await
+        .map_err(|e| unavailable(e.to_string()))
+}
+
+/// agent-comms prints one pretty JSON document: its answer when `valid`
+/// accepts it, or `{ok: false, error: {code, message}}` on a refusal (also
+/// on stderr as `agent-comms: message`). Anything else is `sandbox-failed`
+/// with the last stderr line.
+fn parse_agent_comms_json(
+    stdout: &[u8],
+    stderr: &[u8],
+    fallback: &str,
+    valid: fn(&Value) -> bool,
+) -> Result<Value, BridgeError> {
+    if let Ok(value) = serde_json::from_slice::<Value>(stdout) {
+        if valid(&value) {
+            return Ok(value);
+        }
+        if let Some(error) = value
+            .get("error")
+            .filter(|_| value.get("ok") == Some(&Value::Bool(false)))
+        {
+            let code = error
+                .get("code")
+                .and_then(Value::as_str)
+                .unwrap_or("sandbox-failed");
+            let message = error
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or(fallback);
+            return Err(BridgeError::new(code, message));
+        }
+    }
+    let line = last_line(stderr);
+    let message = line.strip_prefix("agent-comms: ").unwrap_or(&line);
+    Err(BridgeError::new(
+        "sandbox-failed",
+        if message.is_empty() {
+            fallback
+        } else {
+            message
+        },
+    ))
+}
+
 fn valid_sandbox_account(name: &str) -> bool {
     let bytes = name.as_bytes();
     match bytes.split_first() {
@@ -2322,6 +2446,46 @@ mod sandbox_tests {
                 "{action} {account:?}"
             );
         }
+    }
+
+    #[test]
+    fn accepts_a_pairing_code_as_the_broker_mints_it() {
+        assert_eq!(pairing_code(" ab2c9z ").unwrap(), "AB2C9Z");
+        for bad in ["", "ABCDE", "ABCDEFG", "ABC0EF", "ABCOEF", "ABC-EF"] {
+            assert_eq!(pairing_code(bad).unwrap_err().code, "sandbox-invalid");
+        }
+    }
+
+    #[test]
+    fn reads_agent_comms_answers_and_refusals() {
+        let ok = parse_agent_comms_json(
+            b"{\n  \"pairings\": [\n    { \"account\": \"geniusbar-agent\", \"state\": \"pending\", \"code\": \"AB2C9Z\" }\n  ]\n}\n",
+            b"",
+            "no pairings",
+            |v| v.get("pairings").and_then(Value::as_array).is_some(),
+        )
+        .unwrap();
+        assert_eq!(ok["pairings"][0]["code"], "AB2C9Z");
+        let refused = parse_agent_comms_json(
+            b"{ \"ok\": false, \"error\": { \"code\": \"unknown-code\", \"message\": \"no pending pairing has that code\" } }\n",
+            b"agent-comms: no pending pairing has that code\n",
+            "not approved",
+            |v| v.get("state").and_then(Value::as_str) == Some("approved"),
+        )
+        .unwrap_err();
+        assert_eq!(refused.code, "unknown-code");
+        assert_eq!(refused.message, "no pending pairing has that code");
+        let broken = parse_agent_comms_json(
+            b"",
+            b"agent-comms: broker-unreachable: no broker socket\n",
+            "no pairings",
+            |_| true,
+        )
+        .unwrap_err();
+        assert_eq!(broken.code, "sandbox-failed");
+        assert_eq!(broken.message, "broker-unreachable: no broker socket");
+        let silent = parse_agent_comms_json(b"", b"", "no pairings", |_| true).unwrap_err();
+        assert_eq!(silent.message, "no pairings");
     }
 
     #[test]

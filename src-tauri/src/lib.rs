@@ -418,6 +418,8 @@ pub fn run() {
             bridge::sandbox_status,
             bridge::sandbox_set,
             bridge::sandbox_override,
+            bridge::sandbox_pairings,
+            bridge::sandbox_approve,
             bridge::list_soul_templates,
             bridge::soul_profile,
             bridge::soul_profile_file,
