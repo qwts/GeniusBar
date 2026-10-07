@@ -675,6 +675,22 @@ export async function syncTeamWindows(teams: readonly TeamWindowSpec[], invokeIm
 }
 
 /**
+ * The computer-use perimeter on the real screen (#122): `on` opens the
+ * click-through border and the Stop pill over the primary screen, off
+ * closes them. False means this shell keeps the in-popup perimeter.
+ */
+export async function syncPerimeter(on: boolean, invokeImpl: typeof invoke = invoke): Promise<boolean> {
+  if (!inApp() && invokeImpl === invoke) return false;
+  try {
+    return (await invokeImpl<unknown>('sync_perimeter', { on })) === true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/not found|not allowed/i.test(message)) return false;
+    throw new BridgeError('sync-failed', message || 'The shell could not sync the perimeter.');
+  }
+}
+
+/**
  * What a native surface does with its own window (#223), in logical points.
  * The pages take it as a prop, so tests and the preview pass a fake.
  */

@@ -1,11 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Every window gets the core APIs; the surface windows (#223) also move, size, drag and close themselves.",
+  "description": "Every window gets the core APIs; the surface windows (#223) also move, size, drag and close themselves; the perimeter and its pill (#122) only draw.",
   "windows": [
     "main",
     "desktop",
     "team-*",
+    "perimeter",
+    "halt",
     "session-*",
     "audit",
     "audit-*",

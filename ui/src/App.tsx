@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { History, Plus, Volume2, VolumeX, X } from 'lucide-react';
 import { ApprovalCounts, ApprovalsList } from './components/ApprovalsList';
 import { ArchiveDialog, ArchivedNotice, liveArchiver, type Archiver } from './components/ArchiveDialog';
-import { currentWindow, inApp, listSoulTemplates, liveComputerUse, openSurface, popupVisible, soulStopSupported, stopSoul, syncTeamWindows, type ComputerUseSwitch, type RemovedSoul, type SurfaceRequest, type TeamWindowSpec, shellLog } from './bridge';
+import { currentWindow, inApp, listSoulTemplates, liveComputerUse, openSurface, popupVisible, soulStopSupported, stopSoul, syncPerimeter, syncTeamWindows, type ComputerUseSwitch, type RemovedSoul, type SurfaceRequest, type TeamWindowSpec, shellLog } from './bridge';
 import { FooterMenu } from './components/FooterMenu';
 import { CompanionSession, ComputerUseContext, InfoButton, type SessionTab } from './components/CompanionSession';
 import { AuditWindow, CompanionWindow, Desktop } from './components/Desktop';
@@ -35,6 +35,7 @@ import { disconnected, emptyRosterText, footerStatus, healthHeader, type Connect
 import { updateNotice, type UpdateStatus } from './model/updates';
 import { desktopWindowsOn, layoutActions, useLayout } from './state/layout';
 import { SurfaceOpenerContext, type OpenSurface } from './surfaces/opener';
+import { usePerimeter } from './usePerimeter';
 import { useTeamWindows } from './useTeamWindows';
 import { usePreferences } from './state/preferences';
 import { DefaultHarness } from './components/DefaultHarness';
@@ -66,12 +67,15 @@ export interface NativeSurfaces {
   hide: () => Promise<void>;
   /** The coordinator's `sync_team_windows`. */
   sync: (teams: TeamWindowSpec[]) => Promise<boolean>;
+  /** The coordinator's `sync_perimeter` (#122); absent keeps the in-popup perimeter only. */
+  perimeter?: (on: boolean) => Promise<boolean>;
 }
 
 const liveSurfaces: NativeSurfaces = {
   open: (request) => openSurface(request),
   hide: () => currentWindow()?.hide() ?? Promise.resolve(),
   sync: (teams) => syncTeamWindows(teams),
+  perimeter: (on) => syncPerimeter(on),
 };
 
 interface AppProps {
@@ -230,7 +234,9 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   // The badges' population read also carries the hues souls declare (#64),
   // joined into the census here, before anything draws a Dudle.
   const badgeIds = useMemo(() => [...new Set(census.filter((s) => s.presence !== 'left').map((s) => s.agentId))], [census]);
-  const liveBadges = useBadges(badgeIds, !badges && mode === 'window' && inApp() && !isStatic);
+  // The tray popup reads them too (#122): it is the one that knows a soul
+  // drives the screen, and opens the perimeter over it.
+  const liveBadges = useBadges(badgeIds, !badges && inApp() && !isStatic);
   const hues = (badges ?? liveBadges).hues;
   // The same read carries the roles souls declare (agent-bot-identity #535).
   const roles = (badges ?? liveBadges).roles;
@@ -591,6 +597,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     : footer?.isError ? { text: footer.text, isError: true }
     : null;
   const shownBadges = badges ?? liveBadges;
+  // The perimeter and Stop pill over the real screen (#122) while a soul drives it.
+  usePerimeter(shownBadges.computerUse.size > 0, Boolean(native) && connection.lastRefresh !== null, native?.perimeter);
   const autopilot = fleetMode.mode === 'autopilot';
   const unreadTotal = unread ? roster.reduce((sum, soul) => sum + unread(soul), 0) : 0;
   const notice = showSetup ? t('setupHint')

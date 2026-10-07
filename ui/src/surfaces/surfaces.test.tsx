@@ -10,6 +10,7 @@ import { ProfileSourceContext, type ProfileSource } from '../useSoulProfile';
 import { AuditSurface } from './AuditSurface';
 import { CustomizeSurface } from './CustomizeSurface';
 import { LaunchSurface } from './LaunchSurface';
+import { HaltSurface, PerimeterSurface } from './PerimeterSurface';
 import { SessionSurface } from './SessionSurface';
 import { MOVE_SAVE_MS, TeamSurface, windowSizeFor } from './TeamSurface';
 
@@ -268,5 +269,36 @@ describe('TeamSurface drop cue (#98)', () => {
     expect(screen.queryByTestId('soul-drop-cue')).toBeNull();
     rerender(<TeamSurface {...data} soul="user/agent_p" win={null} open={null} dropping />);
     expect(screen.getByTestId('soul-drop-cue').className).toContain('border-dashed');
+  });
+});
+
+describe('PerimeterSurface and HaltSurface (#122)', () => {
+  it('draws the border on a transparent page', () => {
+    const { container } = render(<PerimeterSurface />);
+    expect(document.documentElement.classList.contains('gb-transparent')).toBe(true);
+    expect(container.querySelector('.perimeter')).not.toBeNull();
+    cleanup();
+    expect(document.documentElement.classList.contains('gb-transparent')).toBe(false);
+  });
+
+  it('names the soul driving the screen and halts it from Stop', async () => {
+    const stopped: string[] = [];
+    const stopper = { supported: async () => true, stop: async (id: string) => { stopped.push(id); return { agentId: id, stopped: true } as never; } };
+    const badges = { comms: new Set<string>(), computerUse: new Set(['agent_p']), busy: new Set<string>() };
+    render(<HaltSurface census={sampleCensus} badges={badges} stopper={stopper} />);
+    expect(document.documentElement.classList.contains('gb-transparent')).toBe(true);
+    const pill = await screen.findByRole('alert');
+    expect(pill.textContent).toContain('luna');
+    fireEvent.click(within(pill).getByRole('button', { name: 'Stop' }));
+    await waitFor(() => expect(stopped).toEqual(['agent_p']));
+    expect(within(pill).getByRole('button').textContent).toContain('Stopping');
+  });
+
+  it('shows nothing while no soul drives the screen, and no Stop without a stopper', () => {
+    const { container, rerender } = render(<HaltSurface census={sampleCensus} badges={{ comms: new Set(), computerUse: new Set(), busy: new Set() }} />);
+    expect(container.textContent).toBe('');
+    rerender(<HaltSurface census={sampleCensus} badges={{ comms: new Set(), computerUse: new Set(['agent_p']), busy: new Set() }} />);
+    expect(screen.getByRole('status').textContent).toContain('luna');
+    expect(screen.queryByRole('button')).toBeNull();
   });
 });

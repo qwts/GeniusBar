@@ -64,6 +64,33 @@ impl Surface {
 /// The team window for a lead.
 const TEAM_PREFIX: &str = "team-";
 
+/// The computer-use perimeter (#122): the orange border over the whole
+/// screen, click-through, while a soul drives the screen.
+pub const PERIMETER_LABEL: &str = "perimeter";
+/// The pill above it that names the soul and offers Stop; it takes clicks.
+pub const HALT_LABEL: &str = "halt";
+/// The pill's size in points, and its gap from the top of the screen.
+const HALT_SIZE: (f64, f64) = (480.0, 56.0);
+const HALT_TOP: f64 = 6.0;
+
+/// Where the perimeter and the pill go, in points, for a monitor whose
+/// top-left, size and scale are given in the shell's units: the perimeter
+/// covers the monitor, the pill sits centred along its top edge.
+pub fn perimeter_frame(
+    origin: (i32, i32),
+    size: (u32, u32),
+    scale: f64,
+) -> ((f64, f64), (f64, f64), (f64, f64)) {
+    let scale = if scale > 0.0 { scale } else { 1.0 };
+    let (x, y) = (f64::from(origin.0) / scale, f64::from(origin.1) / scale);
+    let (w, h) = (f64::from(size.0) / scale, f64::from(size.1) / scale);
+    let pill = (
+        (x + (w - HALT_SIZE.0) / 2.0).round(),
+        (y + HALT_TOP).round(),
+    );
+    ((x, y), (w, h), pill)
+}
+
 /// A short, label-safe form of a roster key (`account/agentId`): the key
 /// with anything outside `[A-Za-z0-9_-]` replaced, plus a hash so two keys
 /// that only differ in replaced characters still get different labels.
@@ -364,6 +391,92 @@ pub async fn sync_team_windows(
     }
 }
 
+/// The computer-use perimeter on the real screen (#122): while `on`, a
+/// click-through window over the whole primary screen draws the orange
+/// border and a small pill at its top names the soul and offers Stop; off
+/// closes both. The popup's coordinator calls it as the daemon's
+/// `computerUse` set fills and empties. False means this shell keeps the
+/// in-popup perimeter (another platform, or the in-window desktop).
+#[tauri::command]
+pub async fn sync_perimeter(app: tauri::AppHandle, on: bool) -> Result<bool, String> {
+    if !cfg!(target_os = "macos") || *app.state::<Mode>() != Mode::Tray {
+        return Ok(false);
+    }
+    let open = app.get_webview_window(PERIMETER_LABEL).is_some()
+        || app.get_webview_window(HALT_LABEL).is_some();
+    if !on {
+        for label in [HALT_LABEL, PERIMETER_LABEL] {
+            if let Some(window) = app.get_webview_window(label) {
+                let _ = window.close();
+            }
+        }
+        if open {
+            log_line(&app, "sync_perimeter: off");
+        }
+        return Ok(true);
+    }
+    if open {
+        return Ok(true);
+    }
+    let monitor = app
+        .primary_monitor()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "no primary monitor".to_string())?;
+    let position = monitor.position();
+    let size = monitor.size();
+    let ((x, y), (w, h), (px, py)) = perimeter_frame(
+        (position.x, position.y),
+        (size.width, size.height),
+        monitor.scale_factor(),
+    );
+    log_line(
+        &app,
+        &format!("sync_perimeter: on, screen {w}x{h} at {x},{y}"),
+    );
+    // The border: over everything, on every Space, and never in the way of
+    // the pointer (the soul is driving it).
+    let perimeter = WebviewWindowBuilder::new(
+        &app,
+        PERIMETER_LABEL,
+        WebviewUrl::App(page("perimeter", &[]).into()),
+    )
+    .title("GeniusBar")
+    .position(x, y)
+    .inner_size(w, h)
+    .decorations(false)
+    .transparent(true)
+    .shadow(false)
+    .resizable(false)
+    .always_on_top(true)
+    .visible_on_all_workspaces(true)
+    .skip_taskbar(true)
+    .focused(false)
+    .build()
+    .map_err(|e| format!("perimeter window: {e}"))?;
+    let _ = perimeter.set_ignore_cursor_events(true);
+    // The pill: the one part that takes a click (Stop).
+    let halt =
+        WebviewWindowBuilder::new(&app, HALT_LABEL, WebviewUrl::App(page("halt", &[]).into()))
+            .title("GeniusBar")
+            .position(px, py)
+            .inner_size(HALT_SIZE.0, HALT_SIZE.1)
+            .decorations(false)
+            .transparent(true)
+            .shadow(false)
+            .resizable(false)
+            .always_on_top(true)
+            .visible_on_all_workspaces(true)
+            .skip_taskbar(true)
+            .accept_first_mouse(true)
+            .focused(false)
+            .build();
+    if let Err(e) = halt {
+        let _ = perimeter.close();
+        return Err(format!("halt window: {e}"));
+    }
+    Ok(true)
+}
+
 /// A line from the popup's coordinator for `shell.log` (#223): the shell
 /// has no other view of why the page did or did not ask for windows.
 #[tauri::command]
@@ -478,6 +591,21 @@ mod tests {
             ["a/2"]
         );
         assert_eq!(close, [format!("team-{}", slug("a/9"))]);
+    }
+
+    #[test]
+    fn perimeter_covers_the_screen_and_centres_the_pill() {
+        let ((x, y), (w, h), (px, py)) = perimeter_frame((0, 0), (2880, 1800), 2.0);
+        assert_eq!((x, y), (0.0, 0.0));
+        assert_eq!((w, h), (1440.0, 900.0));
+        assert_eq!((px, py), (480.0, 6.0));
+        // A second monitor to the right, at 1x: offsets carry through.
+        let ((x, _), _, (px, py)) = perimeter_frame((1440, -100), (1000, 600), 1.0);
+        assert_eq!(x, 1440.0);
+        assert_eq!((px, py), (1700.0, -94.0));
+        // A bad scale never divides by zero.
+        let (_, (w, _), _) = perimeter_frame((0, 0), (800, 600), 0.0);
+        assert_eq!(w, 800.0);
     }
 
     #[test]
