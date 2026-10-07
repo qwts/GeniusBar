@@ -121,6 +121,52 @@ and carries the dmg, `GeniusBar_<version>_universal.app.tar.gz` with its
 prerelease titled "(unsigned)" with the dmg alone: no `latest.json` and no
 updater archive, so installed apps never update to it.
 
+### Windows
+
+`package.yml` also has a Windows job
+([ADR-0046](docs/decisions/ADR-0046-windows-pipe-transport-dpapi-store-and-logon-tasks.md)
+decision 8) that builds the x64 per-user NSIS installer on `windows-latest`.
+The Windows bundle carries the pinned `win-x64` Node as `node.exe`, MinGit
+(Git for Windows' command-line-only distribution, pinned in `components.json`
+as `mingit` by version and SHA-256, unpacked by `scripts/build-git.mjs`) under
+`git\`, and `bin\agent-bot.cmd`, `bin\agent-comms.cmd`, `bin\node.cmd` and
+`bin\git.cmd` in place of the `sh` shims; `src-tauri/tauri.windows.conf.json`
+is the Windows twin of `tauri.macos.conf.json`. There is no keyd on Windows
+(decision 3), so the Keychain add-on reports unavailable there.
+
+Signing uses Azure Trusted Signing through Tauri's `signCommand`
+(`artifact-signing-cli`), from six more repository **secrets**:
+
+| Secret | Value |
+| --- | --- |
+| `AZURE_TENANT_ID` | the App Registration's directory (tenant) ID |
+| `AZURE_CLIENT_ID` | its application (client) ID |
+| `AZURE_CLIENT_SECRET` | its client secret |
+| `AZURE_SIGNING_ENDPOINT` | the Trusted Signing account's endpoint, `https://<region>.codesigning.azure.net` |
+| `AZURE_SIGNING_ACCOUNT` | the Trusted Signing account name |
+| `AZURE_SIGNING_PROFILE` | the certificate profile name |
+
+All six give a signed installer; none give an `unsigned-dev` one, which
+SmartScreen warns on; a partial set fails the build. A signed installer,
+`GeniusBar_<version>_x64_signed-setup.exe`, and its `.sig` join the signed
+release, and `latest.json` gains a `windows-x86_64` entry pointing at it, so
+a Windows install updates from the same feed. An unsigned installer joins only
+an unsigned prerelease. When the two builds' signing modes differ, or the
+Windows job did not finish, the release goes out without Windows and the
+publish job says so.
+
+Until the Rust shell's Windows port (decision 7) has landed, the Windows job
+is advisory inside a full package or release run: a failure is annotated and
+never blocks the macOS release. Dispatched for Windows alone it fails like any
+job, which is how a branch is validated before it reaches `main`:
+
+```sh
+gh workflow run package.yml --ref <branch> -f platform=windows -f unsigned=true
+```
+
+`unsigned=true` packages without the Azure secrets, which is what allows a
+ref that is not yet on `main`; the macOS job is skipped by `platform=windows`.
+
 The updater key and endpoint are build-time configuration, not code
 (ADR-0004 decision 8). A build without them, such as `npm run
 build:unsigned`, runs with updates off and shows "Updates Off in This Build"

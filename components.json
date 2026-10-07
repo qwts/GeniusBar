@@ -12,6 +12,10 @@
     "version": "2.56.0",
     "sha256": "26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3"
   },
+  "mingit": {
+    "version": "2.56.0.2",
+    "sha256": "da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be"
+  },
   "components": {
     "agent-comms": {
       "repo": "qwts/agent-comms",

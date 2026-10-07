@@ -1,0 +1,32 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeDevCommand": "node scripts/fetch-components.mjs && node scripts/build-git.mjs && npm --prefix ui run dev",
+    "beforeBuildCommand": "node scripts/fetch-components.mjs && node scripts/build-git.mjs && npm --prefix ui run build"
+  },
+  "bundle": {
+    "targets": [
+      "nsis"
+    ],
+    "externalBin": [
+      "binaries/node"
+    ],
+    "resources": {
+      "../bin/agent-comms": null,
+      "../bin/agent-bot": null,
+      "../bin/node": null,
+      "../bin/git": null,
+      "resources/git-templates/": null,
+      "../bin/agent-comms.cmd": "bin/agent-comms.cmd",
+      "../bin/agent-bot.cmd": "bin/agent-bot.cmd",
+      "../bin/node.cmd": "bin/node.cmd",
+      "../bin/git.cmd": "bin/git.cmd",
+      "resources/git/": "git/"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}

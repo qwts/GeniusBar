@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { MANIFEST_PLATFORMS, updaterConfig, updaterManifest } from './updater.mjs';
+import { MANIFEST_PLATFORMS, WINDOWS_MANIFEST_PLATFORMS, updaterConfig, updaterManifest } from './updater.mjs';
 
 const b64 = (text) => Buffer.from(text).toString('base64');
 const PUBKEY = b64('untrusted comment: minisign public key: D51590362A882FEF\nRWTvL4gqNpAV1d4olkJEv7sxQuSTQ7uQFh0jwYWCBz1g33WnwOpnmbxO\n');
@@ -87,4 +87,19 @@ test('the manifest rejects a bad version, URL, or empty signature', () => {
   assert.throws(() => updaterManifest({ version: 'v1.2.3', url, signature: 's' }), /semver/);
   assert.throws(() => updaterManifest({ version: '1.2.3', url: 'http://example.com/a', signature: 's' }), /https/);
   assert.throws(() => updaterManifest({ version: '1.2.3', url, signature: ' \n' }), /signature/);
+});
+
+test('a signed Windows installer joins the manifest beside the darwin entries (ADR-0046 decision 8)', () => {
+  const url = 'https://github.com/example/geniusbar/releases/download/v1.2.3/GeniusBar_1.2.3_universal.app.tar.gz';
+  const installer = 'https://github.com/example/geniusbar/releases/download/v1.2.3/GeniusBar_1.2.3_x64_signed-setup.exe';
+  const manifest = updaterManifest({ version: '1.2.3', url, signature: 'mac\n', windows: { url: installer, signature: 'win\n' } });
+  assert.deepEqual(Object.keys(manifest.platforms), [...MANIFEST_PLATFORMS, ...WINDOWS_MANIFEST_PLATFORMS]);
+  assert.deepEqual(manifest.platforms['windows-x86_64'], { signature: 'win', url: installer });
+  assert.deepEqual(manifest.platforms['darwin-aarch64'], { signature: 'mac', url });
+  // Without a signed Windows build the manifest is the macOS one, so a Windows install sees no update.
+  const macOnly = updaterManifest({ version: '1.2.3', url, signature: 'mac' });
+  assert.deepEqual(Object.keys(macOnly.platforms), MANIFEST_PLATFORMS);
+  // The Windows entry is checked like the macOS one.
+  assert.throws(() => updaterManifest({ version: '1.2.3', url, signature: 's', windows: { url: 'http://x/setup.exe', signature: 's' } }), /https/);
+  assert.throws(() => updaterManifest({ version: '1.2.3', url, signature: 's', windows: { url: installer, signature: ' ' } }), /Windows update signature/);
 });

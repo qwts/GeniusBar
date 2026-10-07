@@ -9,6 +9,12 @@
 # releases/latest, and no latest.json or updater archive is attached, so no
 # installed app can update to it.
 #
+# The Windows installer (ADR-0046 decision 8) joins the release of its own
+# signing mode: a signed installer and its signature join the signed
+# release, with a windows-x86_64 entry in latest.json; an unsigned one joins
+# only the unsigned prerelease. When the modes differ, or the Windows job
+# did not finish, the release goes out without Windows and says so.
+#
 # Every action is pinned to a 40-hex commit (ENG-0355, ENG-0282).
 name: Release
 
@@ -89,6 +95,12 @@ jobs:
       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+      AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+      AZURE_SIGNING_PROFILE: ${{ secrets.AZURE_SIGNING_PROFILE }}
 
   publish:
     name: Publish GitHub release
@@ -104,6 +116,9 @@ jobs:
       UPDATER_ARTIFACTS: ${{ needs.build.outputs.updater_artifacts }}
       TAG: ${{ needs.validate.outputs.tag }}
       VERSION: ${{ needs.build.outputs.version }}
+      WINDOWS_ARTIFACT: ${{ needs.build.outputs.windows_artifact_name }}
+      WINDOWS_SIGNING_MODE: ${{ needs.build.outputs.windows_signing_mode }}
+      WINDOWS_UPDATER_ARTIFACTS: ${{ needs.build.outputs.windows_updater_artifacts }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -117,6 +132,12 @@ jobs:
         with:
           name: ${{ needs.build.outputs.artifact_name }}
           path: dist
+      - name: Download this run's Windows artifact
+        if: needs.build.outputs.windows_artifact_name != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.build.outputs.windows_artifact_name }}
+          path: dist
 
       - name: Validate assets and write the update manifest
         env:
@@ -125,6 +146,7 @@ jobs:
           set -euo pipefail
           dmg="GeniusBar_${VERSION}_universal_${SIGNING_MODE}.dmg"
           archive="GeniusBar_${VERSION}_universal.app.tar.gz"
+          installer="GeniusBar_${VERSION}_x64_${WINDOWS_SIGNING_MODE}-setup.exe"
           if [ "$SIGNING_MODE" = signed ]; then
             # A signed release is what installed apps update to, so it must
             # carry updates (ADR-0004 decision 6).
@@ -136,6 +158,28 @@ jobs:
           else
             expected="$dmg"
           fi
+          # The Windows installer joins a release of its own signing mode
+          # (ADR-0046 decision 8): an unsigned installer never rides a signed
+          # release, and a signed one is not spent on an unsigned prerelease.
+          windows=false
+          if [ -z "$WINDOWS_ARTIFACT" ]; then
+            # The job may have chosen a signing mode before failing; only a
+            # staged artifact means there is an installer.
+            echo '::warning::No Windows installer: the Windows job did not finish. The release goes out without one.'
+          elif [ "$WINDOWS_SIGNING_MODE" != "$SIGNING_MODE" ]; then
+            echo "::warning::The Windows build is $WINDOWS_SIGNING_MODE while the macOS build is $SIGNING_MODE; the installer stays a workflow artifact."
+            rm -f "dist/$installer" "dist/$installer.sig"
+          elif [ "$SIGNING_MODE" = signed ]; then
+            if [ "$WINDOWS_UPDATER_ARTIFACTS" != true ]; then
+              echo '::error::A signed Windows installer needs its updater signature.'
+              exit 1
+            fi
+            windows=true
+            expected=$(printf '%s\n' "$expected" "$installer" "$installer.sig" | sort)
+          else
+            windows=true
+            expected=$(printf '%s\n' "$expected" "$installer" | sort)
+          fi
           actual=$(find dist -maxdepth 1 -type f -printf '%f\n' | sort)
           if [ "$actual" != "$expected" ]; then
             printf '::error::Expected only:\n%s\nfound:\n%s\n' "$expected" "$actual"
@@ -143,7 +187,11 @@ jobs:
           fi
           if [ "$SIGNING_MODE" = signed ]; then
             url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$TAG/$archive"
-            node scripts/updater.mjs manifest "$VERSION" "$url" "dist/$archive.sig" > dist/latest.json
+            entries=()
+            if [ "$windows" = true ]; then
+              entries=(--windows "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$TAG/$installer" "dist/$installer.sig")
+            fi
+            node scripts/updater.mjs manifest "$VERSION" "$url" "dist/$archive.sig" "${entries[@]}" > dist/latest.json
             latest="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/latest/download/latest.json"
             if [ "$ENDPOINT" != "$latest" ]; then
               echo "::warning::GENIUSBAR_UPDATER_ENDPOINT is $ENDPOINT, not this repository's $latest."
@@ -160,10 +208,11 @@ jobs:
             title="GeniusBar $VERSION"
             if [ -n "$existing" ]; then
               # Replaces an earlier unsigned prerelease of the same tag.
-              stale="GeniusBar_${VERSION}_universal_unsigned-dev.dmg"
-              if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qxF "$stale"; then
-                gh release delete-asset "$TAG" "$stale" --yes
-              fi
+              for stale in "GeniusBar_${VERSION}_universal_unsigned-dev.dmg" "GeniusBar_${VERSION}_x64_unsigned-dev-setup.exe"; do
+                if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qxF "$stale"; then
+                  gh release delete-asset "$TAG" "$stale" --yes
+                fi
+              done
               gh release upload "$TAG" dist/* --clobber
               gh release edit "$TAG" --verify-tag --draft=false --prerelease=false --latest --title "$title"
             else
@@ -181,6 +230,6 @@ jobs:
               gh release create "$TAG" dist/* --verify-tag --prerelease --latest=false \
                 --title "$title" --generate-notes \
                 --notes '> [!WARNING]
-          > Unsigned development build: ad-hoc signed, not notarized, not trusted by Gatekeeper, and never offered as an update.'
+          > Unsigned development build: ad-hoc signed, not notarized, not trusted by Gatekeeper, and never offered as an update. A Windows installer here is unsigned too, and SmartScreen warns on it.'
             fi
           fi

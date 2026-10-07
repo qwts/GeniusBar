@@ -1,12 +1,17 @@
-# Reusable macOS packaging for #10 (ADR-0004 decisions 5 and 6), after
+# Reusable packaging for #10 (ADR-0004 decisions 5 and 6), after
 # cartograph's package.yml. All five Apple secrets produce a Developer ID
 # signed, notarized universal app and dmg; none produce an explicitly labeled
 # unsigned-dev (ad-hoc) build; a partial set fails. The updater key and
 # endpoint are repository variables (decision 8), and only a signed build
 # carries updater artifacts.
 #
+# The Windows job (ADR-0046 decision 8) builds the x64 NSIS per-user
+# installer the same way: all six Azure secrets sign it through Trusted
+# Signing, none leave it unsigned-dev, a partial set fails, and only a signed
+# build carries the updater signature. `platform` runs one job or both.
+#
 # Every action is pinned to a 40-hex commit (ENG-0355, ENG-0282).
-name: Package macOS
+name: Package
 
 on:
   workflow_dispatch:
@@ -16,6 +21,17 @@ on:
         required: false
         type: string
         default: ''
+      platform:
+        description: Which packages to build
+        required: false
+        type: choice
+        options: [all, macos, windows]
+        default: all
+      unsigned:
+        description: Windows only - package without signing secrets, which allows a ref that is not on main
+        required: false
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       ref:
@@ -23,6 +39,11 @@ on:
         required: false
         type: string
         default: ''
+      platform:
+        description: all, macos or windows
+        required: false
+        type: string
+        default: all
     secrets:
       CSC_LINK:
         required: false
@@ -38,6 +59,18 @@ on:
         required: false
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
         required: false
+      AZURE_TENANT_ID:
+        required: false
+      AZURE_CLIENT_ID:
+        required: false
+      AZURE_CLIENT_SECRET:
+        required: false
+      AZURE_SIGNING_ENDPOINT:
+        required: false
+      AZURE_SIGNING_ACCOUNT:
+        required: false
+      AZURE_SIGNING_PROFILE:
+        required: false
     outputs:
       signing_mode:
         description: signed or unsigned-dev
@@ -51,6 +84,15 @@ on:
       artifact_name:
         description: Uploaded macOS artifact name
         value: ${{ jobs.package.outputs.artifact_name }}
+      windows_signing_mode:
+        description: signed or unsigned-dev for the Windows job
+        value: ${{ jobs.package-windows.outputs.signing_mode }}
+      windows_updater_artifacts:
+        description: true when the Windows artifact holds a signed updater signature
+        value: ${{ jobs.package-windows.outputs.updater_artifacts }}
+      windows_artifact_name:
+        description: Uploaded Windows artifact name; empty when the Windows job did not finish
+        value: ${{ jobs.package-windows.outputs.artifact_name }}
 
 permissions:
   contents: read
@@ -58,6 +100,7 @@ permissions:
 jobs:
   package:
     name: macOS universal bundle
+    if: inputs.platform != 'windows'
     runs-on: macos-latest
     timeout-minutes: 90
     outputs:
@@ -325,6 +368,231 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "artifact_name=geniusbar-${version}-macos-universal-${SIGNING_MODE}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload versioned artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.metadata.outputs.artifact_name }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  package-windows:
+    name: Windows x64 installer
+    # ADR-0046 decision 8. Dispatched for Windows alone, a failure fails the
+    # run, so a branch's Windows build can be validated. Inside a full
+    # package or release run the job is advisory until the Rust shell's
+    # Windows port (decision 7) has landed: a failure is annotated, and the
+    # release goes out without a Windows installer.
+    if: inputs.platform != 'macos'
+    continue-on-error: ${{ inputs.platform != 'windows' }}
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      signing_mode: ${{ steps.signing.outputs.mode }}
+      updater_artifacts: ${{ steps.updater.outputs.artifacts }}
+      artifact_name: ${{ steps.metadata.outputs.artifact_name }}
+    steps:
+      # As the macOS job: signing secrets only ever reach code that is
+      # already on main (#92). An explicitly unsigned dispatch uses no
+      # secret, so it may package a branch for testing.
+      - name: Resolve the ref and verify it is on main
+        id: ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REF: ${{ inputs.ref || github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          UNSIGNED: ${{ inputs.unsigned }}
+        run: |
+          set -euo pipefail
+          sha=$(gh api "repos/$REPO/commits/$REF" --jq .sha)
+          status=$(gh api "repos/$REPO/compare/$DEFAULT_BRANCH...$sha" --jq .status)
+          case "$status" in
+            identical|behind) ;;
+            *)
+              if [ "$UNSIGNED" = true ]; then
+                echo "::warning::Packaging $REF ($sha) unsigned: it is not on $DEFAULT_BRANCH ($status)."
+              else
+                echo "::error::Refusing to package $REF ($sha): it is not on $DEFAULT_BRANCH ($status)."
+                exit 1
+              fi ;;
+          esac
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.ref.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      # No build cache here either: a release must not reuse artifacts a PR
+      # run could have written.
+      - name: Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Install
+        run: npm ci && npm --prefix ui ci
+      # The pinned win-x64 Node, checksum-verified, becomes the .exe sidecar.
+      - name: Fetch bundled components
+        run: node scripts/fetch-components.mjs --target x86_64-pc-windows-msvc
+      # The bundled git is MinGit (ADR-0046 decision 6), the pinned Git for
+      # Windows release unpacked whole; keyd has no Windows build (decision 3).
+      - name: Unpack bundled MinGit
+        run: node scripts/build-git.mjs --target x86_64-pc-windows-msvc
+
+      # An unsigned dispatch never sees the Azure secrets; a partial set
+      # fails here, before anything is built.
+      - name: Select signing mode
+        id: signing
+        env:
+          AZURE_TENANT_ID: ${{ !inputs.unsigned && secrets.AZURE_TENANT_ID || '' }}
+          AZURE_CLIENT_ID: ${{ !inputs.unsigned && secrets.AZURE_CLIENT_ID || '' }}
+          AZURE_CLIENT_SECRET: ${{ !inputs.unsigned && secrets.AZURE_CLIENT_SECRET || '' }}
+          AZURE_SIGNING_ENDPOINT: ${{ !inputs.unsigned && secrets.AZURE_SIGNING_ENDPOINT || '' }}
+          AZURE_SIGNING_ACCOUNT: ${{ !inputs.unsigned && secrets.AZURE_SIGNING_ACCOUNT || '' }}
+          AZURE_SIGNING_PROFILE: ${{ !inputs.unsigned && secrets.AZURE_SIGNING_PROFILE || '' }}
+        run: node scripts/signing-secrets.mjs windows "$RUNNER_TEMP/signing.json" >> "$GITHUB_OUTPUT"
+
+      # The same updater key and endpoint as macOS: one feed serves both.
+      - name: Generate updater configuration
+        id: updater
+        env:
+          SIGNED: ${{ steps.signing.outputs.signed }}
+          GENIUSBAR_UPDATER_PUBKEY: ${{ vars.GENIUSBAR_UPDATER_PUBKEY }}
+          GENIUSBAR_UPDATER_ENDPOINT: ${{ vars.GENIUSBAR_UPDATER_ENDPOINT }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: node scripts/updater.mjs config "$RUNNER_TEMP/updater.json" >> "$GITHUB_OUTPUT"
+
+      # The Trusted Signing client Tauri's signCommand runs; it reads the
+      # tenant, client and secret from the environment of the build below.
+      - name: Install the Azure Trusted Signing client
+        if: steps.signing.outputs.signed == 'true'
+        run: cargo install artifact-signing-cli --version 0.11.0 --locked
+
+      - name: Build signed installer
+        if: steps.signing.outputs.signed == 'true'
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ steps.updater.outputs.artifacts == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ steps.updater.outputs.artifacts == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+        run: npm run package:windows -- --config "$RUNNER_TEMP/updater.json" --config "$RUNNER_TEMP/signing.json"
+
+      - name: Build unsigned-dev installer
+        if: steps.signing.outputs.signed == 'false'
+        run: npm run package:windows -- --config "$RUNNER_TEMP/updater.json"
+
+      - name: Locate the installer
+        id: bundles
+        run: |
+          set -euo pipefail
+          bundle=src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis
+          installer=$(find "$bundle" -maxdepth 1 -name '*-setup.exe' -print -quit)
+          test -n "$installer" && test -f "$installer"
+          echo "installer=$installer" >> "$GITHUB_OUTPUT"
+
+      # The installer is exercised the way an owner's PC would: a silent
+      # per-user install, then the shims a soul gets, through PATH.
+      - name: Install silently
+        id: install
+        shell: pwsh
+        env:
+          INSTALLER: ${{ steps.bundles.outputs.installer }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $target = Join-Path $env:RUNNER_TEMP 'GeniusBar'
+          $installer = (Resolve-Path $env:INSTALLER).Path
+          $process = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$target") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "the installer exited with $($process.ExitCode)" }
+          # /D is NSIS's install directory switch; the per-user default is the fallback.
+          $dir = @($target, (Join-Path $env:LOCALAPPDATA 'GeniusBar')) | Where-Object { Test-Path (Join-Path $_ 'GeniusBar.exe') } | Select-Object -First 1
+          if (-not $dir) { throw 'GeniusBar.exe was not installed' }
+          Get-ChildItem -Recurse -Depth 1 $dir | Select-Object -ExpandProperty FullName
+          "dir=$dir" >> $env:GITHUB_OUTPUT
+
+      - name: Expected component versions
+        run: |
+          set -euo pipefail
+          echo "NODE_VERSION=$(node -p 'require("./components.json").node.version')" >> "$GITHUB_ENV"
+          echo "GIT_VERSION=$(node --input-type=module -e 'import { mingitRelease } from "./scripts/build-git.mjs"; console.log(mingitRelease().gitVersion)')" >> "$GITHUB_ENV"
+
+      # ADR-0046 decisions 5 and 6: the .cmd shims run the bundled node.exe
+      # and MinGit from PATH, as a soul's harness does, with nothing else on
+      # it; the sh shims and git-templates of the macOS bundle are absent.
+      - name: Verify bundled Node, MinGit and the .cmd shims
+        shell: cmd
+        env:
+          DIR: ${{ steps.install.outputs.dir }}
+        run: |
+          set "PATH=%DIR%\bin;%SystemRoot%\System32;%SystemRoot%"
+          if not exist "%DIR%\node.exe" exit /b 1
+          if not exist "%DIR%\git\cmd\git.exe" exit /b 1
+          if not exist "%DIR%\components\agent-bot\agent-bot.mjs" exit /b 1
+          if not exist "%DIR%\components\agent-comms\bin\agent-comms.mjs" exit /b 1
+          if not exist "%DIR%\components\npm\bin\npm-cli.js" exit /b 1
+          if exist "%DIR%\bin\node" exit /b 1
+          if exist "%DIR%\git-templates" exit /b 1
+          node -p process.version | findstr /x "v%NODE_VERSION%" || exit /b 1
+          node -e "process.exit(0)" || exit /b 1
+          git --version | findstr /c:"git version %GIT_VERSION%" || exit /b 1
+          git init -q "%RUNNER_TEMP%\repo" || exit /b 1
+          if not exist "%RUNNER_TEMP%\repo\.git\info\exclude" exit /b 1
+          git -C "%RUNNER_TEMP%\repo" -c user.name=ci -c user.email=ci@example.invalid commit -q --allow-empty -m init || exit /b 1
+          git -C "%RUNNER_TEMP%\repo" worktree add -q "%RUNNER_TEMP%\wt" || exit /b 1
+          git clone -q --depth 1 https://github.com/qwts/agent-sop "%RUNNER_TEMP%\sop" || exit /b 1
+
+      - name: Verify Trusted Signing signatures
+        if: steps.signing.outputs.signed == 'true'
+        shell: pwsh
+        env:
+          DIR: ${{ steps.install.outputs.dir }}
+          INSTALLER: ${{ steps.bundles.outputs.installer }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($file in @((Resolve-Path $env:INSTALLER).Path, (Join-Path $env:DIR 'GeniusBar.exe'))) {
+            $signature = Get-AuthenticodeSignature -FilePath $file
+            if ($signature.Status -ne 'Valid') { throw "$file is not validly signed: $($signature.Status)" }
+            Write-Host "$file signed by $($signature.SignerCertificate.Subject)"
+          }
+          $node = Get-AuthenticodeSignature -FilePath (Join-Path $env:DIR 'node.exe')
+          if ($node.Status -ne 'Valid') { Write-Host "::warning::node.exe is not signed by the build ($($node.Status))" }
+
+      - name: Verify unsigned-dev boundary
+        if: steps.signing.outputs.signed == 'false'
+        shell: pwsh
+        env:
+          INSTALLER: ${{ steps.bundles.outputs.installer }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $signature = Get-AuthenticodeSignature -FilePath (Resolve-Path $env:INSTALLER).Path
+          if ($signature.Status -eq 'Valid') { throw 'unsigned-dev installer unexpectedly has a valid signature' }
+          # An unsigned build is never published as an update.
+          if (Test-Path "$env:INSTALLER.sig") { throw 'unsigned-dev build produced updater artifacts' }
+
+      # The installer is the updater artifact on Windows (Tauri signs the
+      # NSIS installer itself), so one file carries both names' jobs.
+      - name: Stage versioned artifacts
+        id: metadata
+        env:
+          SIGNING_MODE: ${{ steps.signing.outputs.mode }}
+          UPDATER_ARTIFACTS: ${{ steps.updater.outputs.artifacts }}
+          INSTALLER: ${{ steps.bundles.outputs.installer }}
+        run: |
+          set -euo pipefail
+          version=$(node -p 'require("./src-tauri/tauri.conf.json").version')
+          mkdir -p dist
+          installer="GeniusBar_${version}_x64_${SIGNING_MODE}-setup.exe"
+          cp "$INSTALLER" "dist/$installer"
+          if [ "$UPDATER_ARTIFACTS" = true ]; then
+            test -s "$INSTALLER.sig"
+            cp "$INSTALLER.sig" "dist/$installer.sig"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=geniusbar-${version}-windows-x64-${SIGNING_MODE}" >> "$GITHUB_OUTPUT"
 
       - name: Upload versioned artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
