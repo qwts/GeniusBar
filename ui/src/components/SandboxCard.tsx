@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Check, Circle, Copy, Loader2, Shield } from 'lucide-react';
 import { useI18n, type Translate } from '../lib/i18n';
 import type { MessageKey } from '../locales/en';
-import { useSandbox, type SandboxPairing, type SandboxStatus, type SandboxStep } from './Sandbox';
+import { useSandbox, type SandboxPairing, type SandboxSop, type SandboxStatus, type SandboxStep } from './Sandbox';
 import { Select } from './Select';
 
 const RUN_TEXT: Record<string, MessageKey> = {
@@ -27,6 +27,13 @@ export function sandboxStatusText(status: SandboxStatus, t: Translate): string {
  * and after every change. Hidden while the bundled agent-bot has no
  * `sandbox`.
  */
+/** One line on the SOP pack's say: its rules when it decides, else agent-bot's reason it does not. */
+export function sopText(sop: SandboxSop, t: Translate): string | null {
+  if (sop.state === 'none') return null;
+  if (sop.state === 'ok') return t('sandbox.sop', { repository: sop.repository ?? '', commit: (sop.commit ?? '').slice(0, 7), count: sop.rules });
+  return t('sandbox.sopOther', { message: sop.message ?? sop.state });
+}
+
 export function SandboxCard() {
   const { t } = useI18n();
   const sb = useSandbox();
@@ -68,6 +75,7 @@ export function SandboxCard() {
               : <Circle className="size-3" aria-hidden />}
             {sandboxStatusText(status, t)}
           </p>
+          {status.sop && sopText(status.sop, t) && <p className="m-0 text-[11px] text-muted-foreground">{sopText(status.sop, t)}</p>}
           {steps.length > 0 && (
             <SandboxSteps steps={steps} account={status.account} pending={sb.pending ?? []} saving={sb.saving}
               failure={sb.failure?.scope.startsWith('pairing:') ? sb.failure.message : null} onApprove={sb.approve} />

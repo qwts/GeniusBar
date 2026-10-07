@@ -31,13 +31,13 @@ const steps: SandboxStatus['steps'] = [
 ];
 
 const soulRow = (agentId: string, over: Partial<SandboxSoul> = {}): SandboxSoul => ({
-  agentId, name: agentId, override: 'inherit', sandboxed: false, runsAs: 'me', source: 'global', ...over,
+  agentId, name: agentId, override: 'inherit', sandboxed: false, runsAs: 'me', source: 'global', rule: null, reason: null, ...over,
 });
 
 function status(over: Partial<SandboxStatus> = {}): SandboxStatus {
   return {
     enabled: false, provider: 'standard_macos_account', account: 'geniusbar-agent', status: 'creating',
-    steps, souls: [soulRow(luna.agentId), soulRow(child.agentId)], ...over,
+    steps, souls: [soulRow(luna.agentId), soulRow(child.agentId)], sop: null, ...over,
   };
 }
 
@@ -260,6 +260,55 @@ describe('App window chrome', () => {
     fireEvent.click(screen.getByRole('button', { name: 'GeniusBar menu' }));
     const menu = screen.getByRole('dialog', { name: 'GeniusBar menu' });
     expect(await within(menu).findByRole('region', { name: 'Sandboxing' })).toBeTruthy();
+  });
+});
+
+describe('the SOP pack’s persona mapping (#66)', () => {
+  const sop = { state: 'ok', decides: true, repository: 'qwts/sop', commit: 'abcdef0123456789abcdef0123456789abcdef01', rules: 2, message: null };
+
+  it('names the pack and its rules on the card, or agent-bot’s reason it decides nothing', async () => {
+    const source = fakeSource(status({ enabled: true, sop }));
+    withSandbox(source, <SandboxCard />);
+    expect((await screen.findByText('SOP pack qwts/sop@abcdef0 decides: 2 rules')).className).toContain('text-muted-foreground');
+    cleanup();
+    withSandbox(fakeSource(status({ enabled: true, sop: { ...sop, state: 'unrecorded', decides: false, rules: 0, message: 'the SOP’s persona mapping is not recorded; run `agent-bot sop persona` to record it' } })), <SandboxCard />);
+    await screen.findByText('SOP pack: the SOP’s persona mapping is not recorded; run `agent-bot sop persona` to record it');
+    cleanup();
+    // No SOP at all, or an older agent-bot: nothing said.
+    withSandbox(fakeSource(status({ enabled: true, sop: { ...sop, state: 'none', decides: false, rules: 0 } })), <SandboxCard />);
+    await screen.findByRole('switch', { name: 'Sandboxing' });
+    expect(screen.queryByText(/SOP pack/)).toBeNull();
+  });
+
+  it('offers only inherit on a pack-decided soul, and says which rule decided', async () => {
+    const decided = soulRow(luna.agentId, { sandboxed: true, runsAs: 'gb-reviewer', source: 'sop', rule: 'soul:luna',
+      reason: null });
+    const source = fakeSource(status({ enabled: true, souls: [decided, soulRow(child.agentId)], sop }));
+    withSandbox(source, <SandboxChip soul={luna} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Sandbox for/ }));
+    expect(screen.getByText('Decided by your SOP pack (rule soul:luna); change persona.toml there.')).toBeTruthy();
+    const always = screen.getByRole('menuitemradio', { name: 'Always sandboxed' });
+    expect(always.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(always);
+    expect(source.override).not.toHaveBeenCalled();
+    expect(screen.getByRole('menuitemradio', { name: /Use GeniusBar setting/ }).getAttribute('aria-disabled')).toBeNull();
+  });
+
+  it('shows agent-bot’s reason when the pack wants a sandbox the switch has off', async () => {
+    const row = soulRow(luna.agentId, { source: 'sop', rule: 'role:auditor', reason: 'the SOP decides sandboxed as geniusbar-agent, but features.persona-accounts is off (agent-bot sandbox on turns it on); runs unrestricted' });
+    withSandbox(fakeSource(status({ souls: [row, soulRow(child.agentId)], sop })), <SandboxChip soul={luna} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Sandbox for/ }));
+    expect(screen.getByText(/features.persona-accounts is off/)).toBeTruthy();
+  });
+
+  it('reads the pack fields as agent-bot prints them, and an older agent-bot without them', () => {
+    const parsed = normalizeSandboxStatus({ ...status(), sop: { state: 'ok', decides: true, repository: 'qwts/sop', commit: 'c0ffee', recordedAt: 'x', message: null, rules: [{ match: 'soul', value: 'luna', sandbox: 'sandboxed', account: null }], default: { sandbox: null, account: null } },
+      souls: [{ agentId: 'a', name: 'A', override: 'inherit', sandboxed: true, runsAs: 'gb', source: 'sop', sop: { decides: true, state: 'ok', rule: 'soul:luna', sandbox: 'sandboxed', account: 'gb' } }] });
+    expect(parsed?.sop).toEqual({ state: 'ok', decides: true, repository: 'qwts/sop', commit: 'c0ffee', rules: 1, message: null });
+    expect(parsed?.souls[0]).toMatchObject({ source: 'sop', rule: 'soul:luna', reason: null });
+    const older = normalizeSandboxStatus({ ...status(), sop: undefined, souls: [{ agentId: 'a', override: 'inherit', sandboxed: false, runsAs: 'me', source: 'global' }] });
+    expect(older?.sop).toBeNull();
+    expect(older?.souls[0]).toMatchObject({ source: 'global', rule: null, reason: null });
   });
 });
 
