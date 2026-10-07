@@ -63,6 +63,17 @@ test('launch forwards a string brief and drops any other brief (#120)', async ()
   assert.equal('brief' in seen[2], false);
 });
 
+test('launch forwards a string role and drops any other role (agent-bot-identity#535)', async () => {
+  const seen = [];
+  const h = harness({ launch: async (args) => { seen.push(args); return { requestId: 'r', status: 'pending' }; } });
+  await h.handle(JSON.stringify({ id: 1, method: 'launch', params: { account: 'me', package: '/p.soul', harness: 'claude', role: 'Researcher' } }));
+  await h.handle(JSON.stringify({ id: 2, method: 'launch', params: { account: 'me', soul: 'agent_1', harness: 'claude' } }));
+  await h.handle(JSON.stringify({ id: 3, method: 'launch', params: { account: 'me', package: '/p.soul', harness: 'claude', role: 7 } }));
+  assert.equal(seen[0].role, 'Researcher');
+  assert.equal('role' in seen[1], false);
+  assert.equal('role' in seen[2], false);
+});
+
 test('rejects malformed and unknown requests without calling the client', async () => {
   const h = harness({ census: async () => assert.fail('called') });
   await h.handle('not json');

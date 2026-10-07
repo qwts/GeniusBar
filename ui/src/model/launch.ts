@@ -36,7 +36,17 @@ export interface LaunchRequest {
    * on relaunch. Blank sends no `brief`, which leaves a saved one as it is.
    */
   brief?: string;
+  /**
+   * A short role for a new soul (agent-bot-identity #535): agent-bot writes
+   * it into the spawned soul's manifest, and the fleet shows it instead of
+   * the harness. Only a package launch sends it; an existing soul keeps the
+   * role in its soul.json. Blank sends nothing.
+   */
+  role?: string;
 }
+
+/** agent-comms' bound on a launch role, in characters after trimming. */
+export const MAX_ROLE = 60;
 
 /**
  * Harnesses agent-bot's daemon can drive today (its ACP registry's enabled
@@ -146,6 +156,8 @@ export function launchParams(request: LaunchRequest): Record<string, string | bo
   if (model) params.model = model;
   const brief = briefText(request.brief);
   if (brief) params.brief = brief;
+  const role = request.role?.trim();
+  if ('package' in request.target && role) params.role = role;
   return params;
 }
 

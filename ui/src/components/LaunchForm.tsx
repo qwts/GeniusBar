@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, Circle, Loader2 } from 'lucide-react';
 import { displayName, type CensusRow } from '../model/census';
 import { savedBrief } from '../bridge';
-import { canLaunch, harnessOptions, MAX_BRIEF, MAX_HARNESS, normalPackagePath, preferredHarness, prefillHarness, suggestedName, type LaunchStage, type LaunchState } from '../model/launch';
+import { canLaunch, harnessOptions, MAX_BRIEF, MAX_HARNESS, MAX_ROLE, normalPackagePath, preferredHarness, prefillHarness, suggestedName, type LaunchStage, type LaunchState } from '../model/launch';
 import { useI18n } from '../lib/i18n';
 import { radioGroupKeys } from '../lib/radioGroup';
 import { chosenTemplate, CUSTOM_SOUL, initialChoice } from '../model/templates';
@@ -185,6 +185,8 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
   // An existing soul keeps its name (#79): the form has no Name for it.
   // A copied folder starts blank, since it becomes a new companion (#110).
   const [name, setName] = useState(soul || copyOf ? '' : suggestedName(packageName));
+  // A short role for the new soul (agent-bot-identity #535); an existing soul keeps its own.
+  const [role, setRole] = useState('');
   // The package's manifest arrives after the form opened (agent-bot's locate
   // runs behind the Finder open): it prefills what the owner has not typed yet.
   // The brief (#120): what this companion is here to do. A relaunch reads
@@ -268,6 +270,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
           ...(comms === undefined ? {} : { comms }),
           ...(model?.trim() ? { model: model.trim() } : {}),
           ...(brief.trim() && brief !== saved ? { brief } : {}),
+          ...(!soul && role.trim() ? { role: role.trim() } : {}),
         });
       }}
     >
@@ -303,13 +306,21 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
             onBlur={(e) => setPackagePath(normalPackagePath(e.target.value))} />
         )}
         {!soul && (
-          <label className="grid gap-1">
-            <span className="text-sm font-medium">{t('launch.name')}</span>
-            {/* Not a person's name: keep the web view from offering contact AutoFill (#80). */}
-            <input value={name} placeholder={copyOf ? t('launch.nameRequired') : t('launch.nameOptional')} autoComplete="off" className={field}
-              required={Boolean(copyOf)} aria-describedby={copyOf ? 'launch-copy-hint' : undefined}
-              onChange={(e) => { setTouched((was) => ({ ...was, name: true })); setName(e.target.value); }} />
-          </label>
+          /* As the design: Name and Role side by side. */
+          <div className="grid grid-cols-2 gap-2">
+            <label className="grid gap-1">
+              <span className="text-sm font-medium">{t('launch.name')}</span>
+              {/* Not a person's name: keep the web view from offering contact AutoFill (#80). */}
+              <input value={name} placeholder={copyOf ? t('launch.nameRequired') : t('launch.nameOptional')} autoComplete="off" className={field}
+                required={Boolean(copyOf)} aria-describedby={copyOf ? 'launch-copy-hint' : undefined}
+                onChange={(e) => { setTouched((was) => ({ ...was, name: true })); setName(e.target.value); }} />
+            </label>
+            <label className="grid gap-1">
+              <span className="text-sm font-medium">{t('launch.role')}</span>
+              <input value={role} placeholder={t('launch.roleOptional')} autoComplete="off" maxLength={MAX_ROLE} className={field}
+                onChange={(e) => setRole(e.target.value)} />
+            </label>
+          </div>
         )}
         {!soul && copyOf && (
           <p id="launch-copy-hint" className="text-xs text-muted-foreground">{t('launch.copyHint', { name: copyOf.name || copyOf.agentId })}</p>

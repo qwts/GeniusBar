@@ -162,6 +162,8 @@ export const es: Catalog = {
   'launch.custom': 'Soul propio',
   'launch.templateErrors': 'No se pudieron leer algunas plantillas de soul.',
   'launch.name': 'Nombre',
+  'launch.role': 'Rol',
+  'launch.roleOptional': 'Opcional, p. ej. Investigador',
   'launch.nameOptional': 'Opcional',
   'launch.nameRequired': 'Obligatorio',
   'launch.copyHint': 'Se convierte en un nuevo compañero copiado de {name}, así que dale un nombre propio.',

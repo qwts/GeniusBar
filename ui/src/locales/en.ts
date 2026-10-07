@@ -161,6 +161,8 @@ export const en = {
   'launch.custom': 'Custom soul',
   'launch.templateErrors': 'Some soul templates could not be read.',
   'launch.name': 'Name',
+  'launch.role': 'Role',
+  'launch.roleOptional': 'Optional, e.g. Researcher',
   'launch.nameOptional': 'Optional',
   'launch.nameRequired': 'Required',
   'launch.copyHint': 'It becomes a new companion copied from {name}, so give it a name of its own.',

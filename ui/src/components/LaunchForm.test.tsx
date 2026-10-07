@@ -92,6 +92,20 @@ describe('LaunchForm package path (#116)', () => {
   });
 });
 
+describe('LaunchForm role (agent-bot-identity#535)', () => {
+  it('sends a typed role, trimmed, with a package launch and nothing when blank', () => {
+    const launcher = launcherIn({ phase: 'idle' });
+    render(form(launcher, { initialPackagePath: '/souls/helper.soul' }));
+    const role = screen.getByLabelText('Role') as HTMLInputElement;
+    expect(role.maxLength).toBe(60);
+    fireEvent.submit(screen.getByRole('form'));
+    expect(Object.hasOwn(vi.mocked(launcher.launch).mock.calls[0][0], 'role')).toBe(false);
+    fireEvent.change(role, { target: { value: '  Researcher ' } });
+    fireEvent.submit(screen.getByRole('form'));
+    expect(launcher.launch).toHaveBeenLastCalledWith(expect.objectContaining({ target: { package: '/souls/helper.soul' }, role: 'Researcher' }));
+  });
+});
+
 const starter: CensusRow = { account: 'user', agentId: 'agent_s', name: 'Starter', harness: 'claude', parent: null, presence: 'left', unacked: 0, lastWake: null };
 
 describe('LaunchForm relaunching an existing companion (#79)', () => {
@@ -100,8 +114,10 @@ describe('LaunchForm relaunching an existing companion (#79)', () => {
     render(form(launcher, { soul: starter }));
     expect(screen.queryByText('Name')).toBeNull();
     expect(screen.queryByPlaceholderText('Optional')).toBeNull();
+    expect(screen.queryByLabelText('Role')).toBeNull();
     fireEvent.submit(screen.getByRole('form'));
     expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ target: { soul: 'agent_s' }, name: '' }));
+    expect(Object.hasOwn(vi.mocked(launcher.launch).mock.calls[0][0], 'role')).toBe(false);
   });
 
   it('ignores a package name and harness preference for an existing soul', () => {
