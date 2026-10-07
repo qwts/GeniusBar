@@ -312,15 +312,8 @@ pub async fn sync_team_windows(
             .focused(false);
         builder.build().map_err(|e| e.to_string())?;
     }
-    for team in &teams {
-        let label = format!("{TEAM_PREFIX}{}", slug(&team.key));
-        if let Some(window) = app.get_webview_window(&label) {
-            let _ = window.set_size(tauri::LogicalSize::new(
-                team.width.max(120.0),
-                team.height.max(48.0),
-            ));
-        }
-    }
+    // A window already open keeps its size and place: its page fits itself
+    // to the card (and to a menu hanging off it) and the person drags it.
     Ok(true)
 }
 

@@ -27,7 +27,7 @@ import './styles.css';
 // renders the same popup statically and changes nothing: no inbox polling
 // or acks, and no Finder-opened packages taken from the queue.
 function Live({ snapshot }: { snapshot: SnapshotOptions | null }) {
-  const { census, connection, refresh } = useCensus();
+  const { census, connection, refresh, settled } = useCensus();
   const select = useSnapshot(snapshot, census, connection, refresh);
   const { setup, existing, runSetup } = useSetup(() => { void refresh?.(); });
   const chat = useChat({ enabled: inApp() && !snapshot, roster: census });
@@ -108,7 +108,7 @@ function Live({ snapshot }: { snapshot: SnapshotOptions | null }) {
   const [mode, setMode] = useState<AppMode>('tray');
   useEffect(() => { invoke<AppMode>('app_mode').then(setMode, () => {}); }, []);
   return (
-    <App mode={mode} census={census} connection={connection} onRefresh={refresh} setup={setup} isStatic={Boolean(snapshot)} select={select}
+    <App mode={mode} census={census} connection={connection} rosterSettled={settled} onRefresh={refresh} setup={setup} isStatic={Boolean(snapshot)} select={select}
       onSetup={(migrate) => { void runSetup(migrate); }} existingServices={existing} cliTools={cliTools} chat={snapshot ? undefined : chat} launcher={launcher} starter={starter} harnessAuth={harnessAuth}
       devTools={devTools} openedPackage={openedPackage} updates={updates}
       onOpenDesktop={inApp() && !snapshot ? () => { void openDesktop().catch(() => {}); } : undefined}

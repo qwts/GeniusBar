@@ -72,5 +72,21 @@ describe('useCensus', () => {
     bridge.souls = [{ account: 'a', agentId: 'agent_gone', presence: 'left' }];
     const { result } = renderHook(() => useCensus(true, async () => null));
     await waitFor(() => expect(result.current.census).toHaveLength(1));
+    // Settled all the same: the roster will not shrink from a later read.
+    await waitFor(() => expect(result.current.settled).toBe(true));
+  });
+
+  it('is settled once the population has been read, whatever it said', async () => {
+    bridge.souls = [{ account: 'a', agentId: 'agent_here', presence: 'joined' }];
+    let release: () => void = () => {};
+    const reads = vi.fn(() => new Promise<{ agentId: string; comms: boolean; managed: boolean; status: string | null }[]>((resolve) => {
+      release = () => resolve([]);
+    }));
+    const { result } = renderHook(() => useCensus(true, reads));
+    await waitFor(() => expect(result.current.census).toHaveLength(1));
+    expect(result.current.settled).toBe(false);
+    await act(async () => { release(); });
+    await waitFor(() => expect(result.current.settled).toBe(true));
+    expect(renderHook(() => useCensus(false)).result.current.settled).toBe(true);
   });
 });

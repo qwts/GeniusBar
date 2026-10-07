@@ -82,6 +82,17 @@ describe('the popup\'s native windows (#223)', () => {
     expect(surfaces.sync).not.toHaveBeenCalled();
   });
 
+  it('waits for the population read too, so an archived soul never flashes a card', async () => {
+    vi.useFakeTimers();
+    const { surfaces } = fakeSurfaces();
+    const { rerender } = render(<App census={sampleCensus} connection={connected} surfaces={surfaces} rosterSettled={false} />);
+    await act(async () => { vi.advanceTimersByTime(500); });
+    expect(surfaces.sync).not.toHaveBeenCalled();
+    rerender(<App census={sampleCensus} connection={connected} surfaces={surfaces} rosterSettled />);
+    await act(async () => { vi.advanceTimersByTime(200); });
+    expect(surfaces.sync).toHaveBeenCalledTimes(1);
+  });
+
   it('changes nothing outside the app', () => {
     render(<App census={sampleCensus} connection={connected} onRefresh={() => {}} />);
     fireEvent.click(screen.getByRole('button', { name: 'More' }));

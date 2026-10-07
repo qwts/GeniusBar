@@ -137,6 +137,8 @@ interface AppProps {
   popupShowing?: () => Promise<boolean>;
   /** The popup's native windows (#223); the live tray popup uses the shell's when absent, null keeps every view in the popup. */
   surfaces?: NativeSurfaces | null;
+  /** False while archived souls may still be in the census (#223): no team window until agent-bot's population has been read once. */
+  rosterSettled?: boolean;
   /** Sandboxing (agent-bot `sandbox`, #66); the app uses agent-bot when absent, null hides it. */
   sandboxSource?: SandboxSource | null;
   /** GitHub identities (agent-bot `identity apps`, #67); the app uses agent-bot when absent, null hides them. */
@@ -216,7 +218,7 @@ function LanguageSelect() {
 
 // The GeniusBar menu (the tray popup's content, and the toolbar popover in
 // window mode) and, from it, one companion's session.
-function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onOpenDesktop, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, floatingButton = false, archiver, stopper, pauser, computerUseSwitch, templateLister, popupShowing, surfaces }: AppProps) {
+function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onOpenDesktop, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, floatingButton = false, archiver, stopper, pauser, computerUseSwitch, templateLister, popupShowing, surfaces, rosterSettled = true }: AppProps) {
   const { t, lang } = useI18n();
   // Only the live tray popup opens native windows (#223); --window and snapshots keep theirs.
   const native = mode !== 'tray' ? null : surfaces === undefined ? (inApp() && !isStatic ? liveSurfaces : null) : surfaces;
@@ -337,7 +339,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   }, [launcher, roster, defaultHarness]);
   const layout = useLayout();
   // The popup keeps each team's native window in step (#223), once a census has come.
-  useTeamWindows(forest, layout, Boolean(native) && connection.lastRefresh !== null, native?.sync);
+  useTeamWindows(forest, layout, Boolean(native) && connection.lastRefresh !== null && rosterSettled, native?.sync);
   const desktopOn = desktopWindowsOn(layout);
   // The menu bar's Auto-Pilot banner and amber G (Lovable MenuBar): window mode only.
   const fleetMode = useFleetMode(mode === 'window' ? roster : NO_CENSUS);
