@@ -426,6 +426,24 @@ describe('Details rows from the Lovable design (#122)', () => {
     expect(s.setColdWake).toHaveBeenCalledWith(luna.agentId, false);
   });
 
+  it('gives the ⓘ sheet\'s GitHub App row the key and Rotate key once agent-bot lists its Apps', async () => {
+    const { InfoButton } = await import('./CompanionSession');
+    const { IdentityAppsProvider } = await import('./IdentityApps');
+    const rotateKey = vi.fn(async (slug: string) => ({ id: '1', slug, installUrl: '', retired: null }));
+    const apps = {
+      list: vi.fn(async () => [{ slug: 'luna-bot', botLogin: 'luna-bot[bot]', issuerPresent: true, keyPresent: true,
+        key: { fingerprint: 'SHA256:abc=', updatedAt: null }, installations: [], harnesses: [], souls: [luna.agentId], liveMint: { status: 'ready' as const } }]),
+      create: vi.fn(), createStatus: vi.fn(), cancelCreate: vi.fn(), connect: vi.fn(), rotateKey, assign: vi.fn(), open: vi.fn(),
+    };
+    render(<IdentityAppsProvider source={apps}>{withSource(source(), <InfoButton soul={luna} />)}</IdentityAppsProvider>);
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+    const sheet = screen.getByRole('dialog', { name: 'Details · luna' });
+    expect(await within(sheet).findByText('Connected · key SHA256:abc=')).toBeTruthy();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Rotate key' }));
+    expect(rotateKey).toHaveBeenCalledWith('luna-bot', 'Choose the new private key for luna-bot (.pem)');
+    expect(await within(sheet).findByText(/New key in use for luna-bot\./)).toBeTruthy();
+  });
+
   it('shows the expired sign-in banner above the chat only', async () => {
     const s = source({ population: vi.fn(async () => ({ ...record, harnessAuth: { status: 'expired' as const, harness: 'codex', since: null } })) });
     const chat = { entries: [], composer: emptyComposer, onDraft: () => {}, onSend: () => {} };
