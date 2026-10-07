@@ -14,3 +14,4 @@ Records are never rewritten after acceptance; supersede them instead.
 | ID | Title | Status |
 | --- | --- | --- |
 | [ADR-0004](ADR-0004-tauri-menubar-app-with-a-node-sidecar.md) | GeniusBar is a Tauri menubar app with a bundled Node sidecar | Proposed |
+| [ADR-0046](ADR-0046-windows-pipe-transport-dpapi-store-and-logon-tasks.md) | Windows runs the same services over a named pipe, a DPAPI store, and logon tasks | Proposed |
