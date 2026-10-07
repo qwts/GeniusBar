@@ -364,7 +364,7 @@ function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = 
         className={`flex flex-col items-center gap-0.5 rounded-lg p-1 ${bare ? 'shrink-0' : 'w-full'} ${selected ? 'bg-accent' : 'hover:bg-accent/50'}`}
       >
         <span className="relative">
-          <SoulDudle soul={soul} size={size} paused={paused} />
+          <SoulDudle soul={soul} size={size} paused={paused} state={state === 'awaiting' || state === 'working' ? state : undefined} />
           {unread > 0 && (
             <span className="absolute -top-1 -right-1.5 min-w-[14px] rounded-full bg-primary px-0.5 text-center font-mono text-[10px] font-bold leading-[14px] text-primary-foreground ring-2 ring-card" aria-hidden>
               {unread > 9 ? '9+' : unread}
@@ -372,7 +372,7 @@ function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = 
           )}
           {comms && (
             <span className="absolute -top-1 -left-1.5 flex size-3.5 items-center justify-center rounded-full bg-success ring-2 ring-card" aria-hidden>
-              <Radio className="size-2 text-[oklch(0.2_0.03_155)]" />
+              <Radio className="size-2 text-success-foreground" />
             </span>
           )}
           {computer && (

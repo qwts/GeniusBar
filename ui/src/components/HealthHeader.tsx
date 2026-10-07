@@ -12,7 +12,7 @@ export function HealthHeader({ connection, children }: { connection: ConnectionS
   const header = healthHeader(connection, t);
   const note = credentialNote(connection);
   return (
-    <header className="border-b border-border px-3 py-2.5">
+    <header className="border-b border-border p-3">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <h1 className="m-0 flex-1 text-sm font-semibold">GeniusBar</h1>
         <div role="status" aria-label={header.label} className="min-w-0">

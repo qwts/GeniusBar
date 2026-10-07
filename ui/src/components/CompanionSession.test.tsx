@@ -237,7 +237,11 @@ describe('CompanionSession', () => {
     fireEvent.keyDown(screen.getByRole('tab', { name: 'Chat' }), { key: 'ArrowRight' });
     expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Delegation' }));
     expect(screen.getByRole('tabpanel').textContent).toContain('luna');
-    fireEvent.keyDown(screen.getByRole('tab', { name: 'Delegation' }), { key: 'ArrowRight' });
+    // The design's order puts Details last, so Left from Chat wraps to it.
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Delegation' }), { key: 'ArrowLeft' });
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Chat' }));
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Chat' }), { key: 'ArrowLeft' });
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Details' }));
     expect(field('Account')).toBe('user');
     expect(runtimeMetrics).toHaveBeenCalledOnce();
   });
@@ -245,6 +249,7 @@ describe('CompanionSession', () => {
   it('opens on the details without chat', () => {
     render(<CompanionSession soul={luna} forest={forest} roster={sampleCensus} paused onOpen={() => {}} onClose={() => {}} />);
     expect(screen.queryByRole('tab', { name: 'Chat' })).toBeNull();
+    expect(screen.getByRole('tab', { name: 'Details' }).getAttribute('aria-selected')).toBe('true');
     expect(field('Harness')).toBe('codex');
   });
 

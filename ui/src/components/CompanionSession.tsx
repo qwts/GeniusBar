@@ -71,16 +71,17 @@ interface CompanionSessionProps {
 
 /**
  * One companion's session (R6): a header, then Chat, its team's delegation
- * tree, and the read-only details with Launch. Without chat it opens on
- * the details.
+ * tree, its audit log, and the read-only details with Launch, in the
+ * design's order. Without chat it opens on the details.
  */
 export function CompanionSession({ soul, forest, roster, paused = false, chat, launch, onOpen, onClose, showBack = false, metricsRefresh = 0, initialTab }: CompanionSessionProps) {
   const { t } = useI18n();
   const ids = useId();
   const back = useRef<HTMLButtonElement>(null);
-  const tabs: Tab[] = chat ? ['chat', 'tree', 'details', 'audit'] : ['details', 'tree', 'audit'];
-  const [tab, setTab] = useState<Tab>(initialTab && tabs.includes(initialTab) ? initialTab : tabs[0]);
-  const active = tabs.includes(tab) ? tab : tabs[0];
+  const tabs: Tab[] = chat ? ['chat', 'tree', 'audit', 'details'] : ['tree', 'audit', 'details'];
+  const first: Tab = chat ? 'chat' : 'details';
+  const [tab, setTab] = useState<Tab>(initialTab && tabs.includes(initialTab) ? initialTab : first);
+  const active = tabs.includes(tab) ? tab : first;
   const name = displayName(soul);
   useEffect(() => { if (showBack) back.current?.focus(); }, [showBack]);
 
@@ -109,7 +110,7 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
       {/* The design's segmented tabs, at the header's right. */}
       {showBack && <SandboxChip soul={soul} />}
       {showBack && <InfoButton soul={soul} />}
-      <div role="tablist" aria-label={name} className="ml-auto flex gap-0.5 rounded-lg bg-muted p-1"
+      <div role="tablist" aria-label={name} className="ml-auto flex h-9 items-center gap-0.5 rounded-lg bg-muted p-1"
         onKeyDown={(e) => {
           const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
           if (!step) return;
@@ -127,7 +128,7 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
             aria-controls={`${ids}-panel`}
             tabIndex={active === id ? 0 : -1}
             onClick={() => setTab(id)}
-            className={`rounded-md px-2.5 py-1 text-xs font-medium ${active === id
+            className={`rounded-md px-3 py-1 text-sm font-medium ${active === id
               ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
           >
             {t(`tab.${id}`)}

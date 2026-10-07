@@ -35,7 +35,11 @@ describe('FleetMode', () => {
     await waitFor(() => expect(screen.getByText('Auto-Pilot')).toBeTruthy());
     expect(setMode).toHaveBeenCalledTimes(1);
     expect(setMode).toHaveBeenCalledWith(luna.agentId, 'autopilot');
-    expect((screen.getByRole('switch', { name: 'Auto-Pilot for every companion' }) as HTMLInputElement).checked).toBe(true);
+    const on = screen.getByRole('switch', { name: 'Auto-Pilot for every companion' }) as HTMLInputElement;
+    expect(on.checked).toBe(true);
+    // The design's small switch, amber when on, from classes rather than an inline style.
+    expect(on.className).toBe('switch-sm switch-warning');
+    expect(on.getAttribute('style')).toBeNull();
     fireEvent.click(screen.getByRole('switch', { name: 'Auto-Pilot for every companion' }));
     await waitFor(() => expect(screen.getByText('Safe Mode')).toBeTruthy());
     expect(setMode).toHaveBeenCalledTimes(3);

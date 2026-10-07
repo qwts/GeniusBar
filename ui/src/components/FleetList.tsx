@@ -4,11 +4,22 @@ import { availabilityNote, displayHarness, displayName, soulKey, type CensusRow,
 import { dudleFor } from '../model/dudle';
 import { companionLabel, searchTeams, teamKeys, teamsOf } from '../model/fleet';
 import { useI18n } from '../lib/i18n';
-import { Dudle } from './Dudle';
+import { Dudle, type DudleState } from './Dudle';
 
-/** A soul's Dudle, faded once it has left. */
-export function SoulDudle({ soul, size, paused, label }: { soul: CensusRow; size: number; paused: boolean; label?: string }) {
-  return <Dudle spec={dudleFor(soul)} diameter={size} paused={paused} label={label} dim={soul.presence === 'left'} />;
+/**
+ * A soul's Dudle, faded once it has left. `state` animates the face as the
+ * design's `state={c.presence}` does: bouncing while it waits on you, eyes
+ * moving while it works.
+ */
+export function SoulDudle({ soul, size, paused, label, state }: { soul: CensusRow; size: number; paused: boolean; label?: string; state?: DudleState }) {
+  return <Dudle spec={dudleFor(soul)} diameter={size} paused={paused} label={label} dim={soul.presence === 'left'} state={state} />;
+}
+
+/** The face for a companion: waiting on you first, then mid-turn, else idle. */
+export function dudleState(agentId: string, awaiting?: ReadonlySet<string>, busy?: ReadonlySet<string>): DudleState {
+  if (awaiting?.has(agentId)) return 'awaiting';
+  if (busy?.has(agentId)) return 'working';
+  return 'idle';
 }
 
 /** Window mode only: which companions the desktop hides. */
@@ -30,6 +41,10 @@ interface FleetListProps {
   empty?: ReactNode;
   /** Asks to archive a soul (#94); without it rows have no Archive button. */
   onArchive?: (soul: CensusRow) => void;
+  /** Agent IDs with a proposal waiting on the owner: bouncing face, "Waiting for you". */
+  awaiting?: ReadonlySet<string>;
+  /** Agent IDs mid-turn (daemon status `busy`): the working face. */
+  busy?: ReadonlySet<string>;
 }
 
 /**
@@ -37,7 +52,7 @@ interface FleetListProps {
  * subagents indented beneath, with a search over name, ID and harness.
  * Every companion opens, 'left' ones included.
  */
-export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty, onArchive }: FleetListProps) {
+export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty, onArchive, awaiting, busy }: FleetListProps) {
   const { t } = useI18n();
   const [query, setQuery] = useState('');
   const teams = useMemo(() => teamsOf(forest), [forest]);
@@ -56,18 +71,19 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty, onA
     const hidden = hiding?.hidden.includes(key) ?? false;
     const name = displayName(soul);
     const note = availabilityNote(soul);
+    const state = soul.presence === 'left' ? 'offline' : dudleState(soul.agentId, awaiting, busy);
     return (
-      <li key={key} className="group flex items-center gap-1 px-2">
+      <li key={key} className="group flex items-center gap-2 px-2">
         <button
           type="button"
-          className={`companion-row flex min-h-7 min-w-0 flex-1 items-center gap-2 rounded-md py-1 pr-1 text-left text-sm hover:bg-accent ${hidden ? 'text-muted-foreground' : ''}`}
+          className={`companion-row flex min-h-7 min-w-0 flex-1 items-center gap-2 rounded py-1 pr-1 text-left text-sm hover:bg-accent ${hidden ? 'opacity-50' : ''}`}
           style={{ paddingLeft: 4 + depth * 14 }}
           title={t('showDetails', { name })}
           aria-label={companionLabel(soul, t, unread)}
           aria-description={t('showsDetails')}
           onClick={() => onOpen(soul)}
         >
-          <SoulDudle soul={soul} size={18} paused={paused} />
+          <SoulDudle soul={soul} size={18} paused={paused} state={state} />
           <span className="flex min-w-0 flex-col">
             <span className="truncate">{name}</span>
             {note && <span className="truncate text-[11px] text-muted-foreground">{note}</span>}
@@ -79,8 +95,8 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty, onA
                 {t('newCount', { count: unread })}
               </span>
             )}
-            <span className="text-[11px] text-muted-foreground">
-              {t(`presence.${soul.presence}`)}
+            <span className={`text-[11px] ${state === 'awaiting' ? 'text-warning' : 'text-muted-foreground'}`}>
+              {state === 'awaiting' ? t('presence.awaiting') : t(`presence.${soul.presence}`)}
             </span>
           </span>
         </button>
@@ -136,6 +152,7 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty, onA
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t('bar.search')}
               aria-label={t('bar.search')}
+              autoFocus
               className="h-8 w-full rounded-md border-0 bg-muted pr-2 pl-7 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
