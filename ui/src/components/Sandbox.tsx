@@ -32,6 +32,19 @@ export interface SandboxSoul {
   source: 'global' | 'override';
 }
 
+/**
+ * A pairing the broker knows (`agent-comms broker pairings`, #66): an
+ * account's, or its agent-bot daemon's; a pending one carries the code the
+ * account printed, which the owner approves from the Sandboxing card.
+ */
+export interface SandboxPairing {
+  account: string;
+  kind: 'account' | 'daemon';
+  state: string;
+  code: string | null;
+  at: string | null;
+}
+
 /** `agent-bot sandbox status --json`. */
 export interface SandboxStatus {
   enabled: boolean;
@@ -72,6 +85,20 @@ function normalizeStep(raw: unknown): SandboxStep | null {
   };
 }
 
+export function normalizeSandboxPairings(raw: unknown): SandboxPairing[] | null {
+  if (!isRecord(raw) || !Array.isArray(raw.pairings)) return null;
+  return raw.pairings.flatMap((row): SandboxPairing[] => {
+    if (!isRecord(row) || typeof row.account !== 'string' || row.account === '' || typeof row.state !== 'string') return [];
+    return [{
+      account: row.account,
+      kind: row.kind === 'daemon' ? 'daemon' : 'account',
+      state: row.state,
+      code: typeof row.code === 'string' && row.code !== '' ? row.code : null,
+      at: typeof row.at === 'string' ? row.at : null,
+    }];
+  });
+}
+
 export function normalizeSandboxStatus(raw: unknown): SandboxStatus | null {
   if (!isRecord(raw) || typeof raw.enabled !== 'boolean' || typeof raw.account !== 'string'
     || typeof raw.status !== 'string' || !STATUSES.includes(raw.status)) return null;
@@ -93,6 +120,10 @@ export interface SandboxSource {
   set: (on: boolean) => Promise<unknown>;
   /** Owner-gated as `set` is. */
   override: (agentId: string, override: SandboxOverride) => Promise<SandboxSoul>;
+  /** The broker's pairings (`agent-comms broker pairings`); rejects when the broker cannot be asked. */
+  pairings: () => Promise<SandboxPairing[]>;
+  /** Approves a pending pairing by its code (`agent-comms broker approve CODE`), as the owner. */
+  approve: (code: string) => Promise<unknown>;
 }
 
 async function call<T>(command: string, args: Record<string, unknown>, normalize: (raw: unknown) => T | null, fallback: string): Promise<T> {
@@ -113,6 +144,8 @@ export const liveSandbox: SandboxSource = {
   status: () => call('sandbox_status', {}, normalizeSandboxStatus, 'agent-bot gave no sandbox status'),
   set: (on) => call('sandbox_set', { action: on ? 'on' : 'off' }, (raw) => (isRecord(raw) ? raw : null), 'agent-bot gave no sandbox setting'),
   override: (agentId, override) => call('sandbox_override', { agent: agentId, action: override }, normalizeSandboxSoul, 'agent-bot gave no sandbox override'),
+  pairings: () => call('sandbox_pairings', {}, normalizeSandboxPairings, 'agent-comms gave no pairings'),
+  approve: (code) => call('sandbox_approve', { code }, (raw) => (isRecord(raw) ? raw : null), 'agent-comms did not approve the pairing'),
 };
 
 /** The live source inside the app (not in static renders); null elsewhere, which hides sandboxing. */
@@ -124,19 +157,26 @@ export interface SandboxApi {
   /** Nothing to show: no source, or the bundled agent-bot has no `sandbox`. */
   hidden: boolean;
   status: SandboxStatus | null;
-  /** What is waiting on agent-bot: `switch`, or a soul's agent ID. */
+  /**
+   * The pairings waiting on the owner (state `pending`), read with the
+   * status while the sandbox is on and its account not ready; null when the
+   * broker could not be asked (the card then shows only the step).
+   */
+  pending: SandboxPairing[] | null;
+  /** What is waiting on agent-bot: `switch`, a soul's agent ID, or `pairing:CODE`. */
   saving: string | null;
-  /** The last failure and what it was for: `read`, `switch`, or a soul's agent ID. */
+  /** The last failure and what it was for: `read`, `switch`, a soul's agent ID, or `pairing:CODE`. */
   failure: { scope: string; message: string } | null;
   reload: () => void;
   setEnabled: (on: boolean) => void;
   setOverride: (agentId: string, override: SandboxOverride) => void;
+  approve: (code: string) => void;
   soul: (agentId: string) => SandboxSoul | null;
 }
 
 const HIDDEN: SandboxApi = {
-  hidden: true, status: null, saving: null, failure: null,
-  reload: () => {}, setEnabled: () => {}, setOverride: () => {}, soul: () => null,
+  hidden: true, status: null, pending: null, saving: null, failure: null,
+  reload: () => {}, setEnabled: () => {}, setOverride: () => {}, approve: () => {}, soul: () => null,
 };
 
 const SandboxContext = createContext<SandboxApi>(HIDDEN);
@@ -153,6 +193,7 @@ export function useSandbox(): SandboxApi {
  */
 export function SandboxProvider({ source, children }: { source: SandboxSource | null; children: ReactNode }) {
   const [status, setStatus] = useState<SandboxStatus | null>(null);
+  const [pending, setPending] = useState<SandboxPairing[] | null>(null);
   const [unsupported, setUnsupported] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
   const [failure, setFailure] = useState<{ scope: string; message: string } | null>(null);
@@ -166,6 +207,12 @@ export function SandboxProvider({ source, children }: { source: SandboxSource | 
         setStatus(next);
         setUnsupported(false);
         setFailure((f) => (f?.scope === 'read' ? null : f));
+        // The owner's approval is a step only while the account is being set up.
+        if (!next.enabled || next.status === 'ready' || next.status === 'unsupported') { setPending(null); return; }
+        source.pairings().then(
+          (rows) => { if (ticket.current === mine) setPending(rows.filter((row) => row.state === 'pending' && row.code !== null)); },
+          () => { if (ticket.current === mine) setPending(null); },
+        );
       },
       (error: unknown) => {
         if (ticket.current !== mine) return;
@@ -189,12 +236,14 @@ export function SandboxProvider({ source, children }: { source: SandboxSource | 
   const api = useMemo<SandboxApi>(() => source ? {
     hidden: unsupported,
     status: unsupported ? null : status,
+    pending: unsupported ? null : pending,
     saving,
     failure,
     reload,
     setEnabled: (on) => change('switch', () => source.set(on)),
     setOverride: (agentId, override) => change(agentId, () => source.override(agentId, override)),
+    approve: (code) => change(`pairing:${code}`, () => source.approve(code)),
     soul: (agentId) => (unsupported ? null : status?.souls.find((s) => s.agentId === agentId) ?? null),
-  } : HIDDEN, [source, unsupported, status, saving, failure, reload, change]);
+  } : HIDDEN, [source, unsupported, status, pending, saving, failure, reload, change]);
   return <SandboxContext.Provider value={api}>{children}</SandboxContext.Provider>;
 }

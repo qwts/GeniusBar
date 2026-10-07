@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Check, Circle, Copy, Loader2, Shield } from 'lucide-react';
 import { useI18n, type Translate } from '../lib/i18n';
 import type { MessageKey } from '../locales/en';
-import { useSandbox, type SandboxStatus, type SandboxStep } from './Sandbox';
+import { useSandbox, type SandboxPairing, type SandboxStatus, type SandboxStep } from './Sandbox';
 import { Select } from './Select';
 
 const RUN_TEXT: Record<string, MessageKey> = {
@@ -68,15 +68,25 @@ export function SandboxCard() {
               : <Circle className="size-3" aria-hidden />}
             {sandboxStatusText(status, t)}
           </p>
-          {steps.length > 0 && <SandboxSteps steps={steps} account={status.account} />}
+          {steps.length > 0 && (
+            <SandboxSteps steps={steps} account={status.account} pending={sb.pending ?? []} saving={sb.saving}
+              failure={sb.failure?.scope.startsWith('pairing:') ? sb.failure.message : null} onApprove={sb.approve} />
+          )}
         </>
       )}
     </section>
   );
 }
 
-/** The owner's undone steps: who runs each, its commands with a copy button, and its note. */
-function SandboxSteps({ steps, account }: { steps: readonly SandboxStep[]; account: string }) {
+/**
+ * The owner's undone steps: who runs each, its commands with a copy button,
+ * and its note. The pair step also lists the pairings waiting on the owner,
+ * each with Approve (#66): the step's second command, as one click.
+ */
+function SandboxSteps({ steps, account, pending, saving, failure, onApprove }: {
+  steps: readonly SandboxStep[]; account: string; pending: readonly SandboxPairing[];
+  saving: string | null; failure: string | null; onApprove: (code: string) => void;
+}) {
   const { t } = useI18n();
   const [copied, setCopied] = useState<string | null>(null);
   const copy = (command: string) => {
@@ -106,6 +116,20 @@ function SandboxSteps({ steps, account }: { steps: readonly SandboxStep[]; accou
                 </button>
               </span>
             ))}
+            {step.id === 'pair' && pending.map((row) => (
+              <span key={`${row.kind}:${row.account}:${row.code}`} className="flex items-center gap-2 rounded border border-border px-1.5 py-1">
+                <span className="min-w-0 flex-1">
+                  {t(row.kind === 'daemon' ? 'sandbox.pendingDaemon' : 'sandbox.pending', { account: row.account })}
+                  {' '}<code className="font-mono text-[11px]">{row.code}</code>
+                </span>
+                <button type="button" onClick={() => onApprove(row.code ?? '')} disabled={saving !== null}
+                  aria-label={t('sandbox.approveLabel', { account: row.account, code: row.code ?? '' })}
+                  className="h-6 shrink-0 rounded-md bg-primary px-2 text-[11px] font-medium text-primary-foreground outline-none hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
+                  {saving === `pairing:${row.code}` ? t('sandbox.approving') : t('sandbox.approve')}
+                </button>
+              </span>
+            ))}
+            {step.id === 'pair' && failure && <span className="text-[11px] text-destructive" role="alert">{t('sandbox.approveFailed', { message: failure })}</span>}
             {step.note && <span className="text-[11px] text-muted-foreground">{step.note}</span>}
           </li>
         ))}
