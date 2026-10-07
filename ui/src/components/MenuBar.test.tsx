@@ -3,11 +3,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import { emptyChat } from '../model/chat';
 import { sampleApprovals, sampleCensus, sampleConnection, samplePaused } from '../model/fixtures';
+import { layoutActions } from '../state/layout';
+import type { LaunchApi } from '../useLaunch';
 import type { Pauser } from '../usePause';
 import type { ChatApi } from '../useChat';
 import { MenuBar } from './MenuBar';
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); globalThis.localStorage?.clear(); layoutActions.forget(); });
 
 const bar = (approvals: number, unread = 0) => (
   <MenuBar open={false} onOpenChange={vi.fn()} tone="ok" title="ok" onReset={vi.fn()} unread={unread}
@@ -141,5 +143,94 @@ describe('the "Companions paused" chip (#122, agent-bot soul pause)', () => {
     fireEvent.keyDown(screen.getByRole('button', { name: 'Companion quick actions' }), { key: 'Enter' });
     expect(screen.queryByRole('button', { name: /Pause all|Resume/ })).toBeNull();
     expect(pauser.list).not.toHaveBeenCalled();
+  });
+});
+
+describe('the ⌘K palette’s actions and keys (#122)', () => {
+  const launcher = (): LaunchApi => ({ state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() });
+  const desk = (withLauncher = true) => render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic
+    launcher={withLauncher ? launcher() : undefined} />);
+  const openPalette = () => {
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    return screen.getByRole('dialog', { name: 'Jump to companion' });
+  };
+  const desktop = () => screen.getByRole('main', { name: 'Fleet' });
+
+  it('lists "Launch a companion…" below the companions, and opens the launch dialog from it', () => {
+    desk();
+    const palette = openPalette();
+    const options = within(palette).getAllByRole('option');
+    const launch = within(palette).getByRole('option', { name: 'Launch a companion…' });
+    expect(options[options.length - 1]).toBe(launch);
+    expect(options.length).toBeGreaterThan(1);
+    expect(within(palette).queryByRole('option', { name: /Show all hidden/ })).toBeNull();
+    fireEvent.click(launch);
+    expect(screen.queryByRole('dialog', { name: 'Jump to companion' })).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Launch a new companion' })).toBeTruthy();
+  });
+
+  it('offers no launch entry without a launcher', () => {
+    desk(false);
+    expect(within(openPalette()).queryByRole('option', { name: 'Launch a companion…' })).toBeNull();
+  });
+
+  it('offers "Show all hidden (N)" only while companions are hidden, and restores them', () => {
+    desk();
+    act(() => { layoutActions.setHidden('user/agent_c', true); layoutActions.setHidden('user/agent_p', true); });
+    expect(within(desktop()).queryByRole('button', { name: /^agent_c,/ })).toBeNull();
+    const palette = openPalette();
+    fireEvent.click(within(palette).getByRole('option', { name: 'Show all hidden (2)' }));
+    expect(screen.queryByRole('dialog', { name: 'Jump to companion' })).toBeNull();
+    expect(within(desktop()).getByRole('button', { name: /^agent_c,/ })).toBeTruthy();
+    expect(within(openPalette()).queryByRole('option', { name: /Show all hidden/ })).toBeNull();
+  });
+
+  it('filters the actions with the companions as you type', () => {
+    desk();
+    const palette = openPalette();
+    const input = within(palette).getByRole('combobox', { name: 'Search companions…' });
+    fireEvent.change(input, { target: { value: 'launch' } });
+    expect(within(palette).getAllByRole('option').map((o) => o.textContent)).toEqual(['Launch a companion…']);
+    fireEvent.change(input, { target: { value: 'luna' } });
+    expect(within(palette).queryByRole('option', { name: 'Launch a companion…' })).toBeNull();
+  });
+
+  it('moves aria-activedescendant with the arrow keys, wraps, and opens the highlighted companion on Enter', () => {
+    desk();
+    const palette = openPalette();
+    const input = within(palette).getByRole('combobox', { name: 'Search companions…' });
+    const listbox = within(palette).getByRole('listbox');
+    expect(input.getAttribute('aria-controls')).toBe(listbox.id);
+    expect(input.getAttribute('aria-expanded')).toBe('true');
+    const options = within(palette).getAllByRole('option');
+    const active = () => input.getAttribute('aria-activedescendant');
+    expect(active()).toBe(options[0].id);
+    expect(options[0].getAttribute('aria-selected')).toBe('true');
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(active()).toBe(options[1].id);
+    expect(options[1].getAttribute('aria-selected')).toBe('true');
+    expect(options[0].getAttribute('aria-selected')).toBe('false');
+    fireEvent.keyDown(input, { key: 'ArrowUp' });
+    fireEvent.keyDown(input, { key: 'ArrowUp' });
+    expect(active()).toBe(options[options.length - 1].id);
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(active()).toBe(options[1].id);
+    const name = options[1].querySelector('span')!.textContent!;
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(screen.queryByRole('dialog', { name: 'Jump to companion' })).toBeNull();
+    expect(screen.getByRole('dialog', { name })).toBeTruthy();
+  });
+
+  it('starts the highlight over at the top when the query changes', () => {
+    desk();
+    const palette = openPalette();
+    const input = within(palette).getByRole('combobox');
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.change(input, { target: { value: 'agent_c' } });
+    const [first] = within(palette).getAllByRole('option');
+    expect(input.getAttribute('aria-activedescendant')).toBe(first.id);
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(screen.getByRole('dialog', { name: 'agent_c' })).toBeTruthy();
   });
 });
