@@ -22,14 +22,33 @@ export interface SandboxStep {
   note?: string;
 }
 
-/** What one soul gets: its override, whether it is sandboxed and the account it runs as. */
+/**
+ * What one soul gets: its override, whether it is sandboxed and the account
+ * it runs as. `source` says who decided: the SOP pack's persona mapping
+ * (`sop`, agent-bot 0.10.45, #66), the soul's override, or the switch. A
+ * pack-decided soul takes no override but `inherit`; agent-bot refuses the
+ * others, so the chip offers only that one. `reason` is agent-bot's note
+ * when the pack wants a sandbox the switch has off.
+ */
 export interface SandboxSoul {
   agentId: string;
   name: string;
   override: SandboxOverride;
   sandboxed: boolean;
   runsAs: string;
-  source: 'global' | 'override';
+  source: 'global' | 'override' | 'sop';
+  rule: string | null;
+  reason: string | null;
+}
+
+/** The SOP pack's persona mapping as `sandbox status` reports it (absent on an older agent-bot). */
+export interface SandboxSop {
+  state: string;
+  decides: boolean;
+  repository: string | null;
+  commit: string | null;
+  rules: number;
+  message: string | null;
 }
 
 /**
@@ -53,6 +72,7 @@ export interface SandboxStatus {
   status: SandboxAccountStatus;
   steps: SandboxStep[];
   souls: SandboxSoul[];
+  sop: SandboxSop | null;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -69,7 +89,21 @@ export function normalizeSandboxSoul(raw: unknown): SandboxSoul | null {
     override: raw.override as SandboxOverride,
     sandboxed: raw.sandboxed,
     runsAs: raw.runsAs,
-    source: raw.source === 'override' ? 'override' : 'global',
+    source: raw.source === 'override' ? 'override' : raw.source === 'sop' ? 'sop' : 'global',
+    rule: isRecord(raw.sop) && typeof raw.sop.rule === 'string' ? raw.sop.rule : null,
+    reason: typeof raw.reason === 'string' && raw.reason !== '' ? raw.reason : null,
+  };
+}
+
+function normalizeSop(raw: unknown): SandboxSop | null {
+  if (!isRecord(raw) || typeof raw.state !== 'string') return null;
+  return {
+    state: raw.state,
+    decides: raw.decides === true,
+    repository: typeof raw.repository === 'string' ? raw.repository : null,
+    commit: typeof raw.commit === 'string' ? raw.commit : null,
+    rules: Array.isArray(raw.rules) ? raw.rules.length : 0,
+    message: typeof raw.message === 'string' && raw.message !== '' ? raw.message : null,
   };
 }
 
@@ -109,6 +143,7 @@ export function normalizeSandboxStatus(raw: unknown): SandboxStatus | null {
     status: raw.status as SandboxAccountStatus,
     steps: Array.isArray(raw.steps) ? raw.steps.map(normalizeStep).filter((s): s is SandboxStep => s !== null) : [],
     souls: Array.isArray(raw.souls) ? raw.souls.map(normalizeSandboxSoul).filter((s): s is SandboxSoul => s !== null) : [],
+    sop: normalizeSop(raw.sop),
   };
 }
 

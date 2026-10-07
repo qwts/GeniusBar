@@ -48,6 +48,9 @@ export function SandboxChip({ soul }: { soul: CensusRow }) {
     ['sandboxed', t('sandbox.always')],
     ['unrestricted', t('sandbox.never')],
   ];
+  // The pack decided: agent-bot refuses every override but inherit, so the
+  // other two are offered disabled, with the rule that decided.
+  const decided = row.source === 'sop';
   const choose = (value: SandboxOverride) => {
     setOpen(false);
     button.current?.focus();
@@ -69,12 +72,15 @@ export function SandboxChip({ soul }: { soul: CensusRow }) {
         <div ref={menu} role="menu" aria-label={t('sandbox.title')} onKeyDown={menuKeys}
           className="absolute top-full right-0 z-50 mt-1 w-64 rounded-md border border-border bg-popover p-1 shadow-md">
           <p className="m-0 px-2 py-1.5 text-xs text-muted-foreground">{runsAsText(row, t)}</p>
+          {decided && <p className="m-0 px-2 pb-1.5 text-[11px] text-muted-foreground">{t('sandbox.bySop', { rule: row.rule ?? '' })}</p>}
+          {row.reason && <p className="m-0 px-2 pb-1.5 text-[11px] text-muted-foreground">{row.reason}</p>}
           {failure && <p role="alert" className="m-0 px-2 pb-1.5 text-[11px] text-destructive">{t('sandbox.failed', { message: failure })}</p>}
           <div role="separator" className="-mx-1 my-1 h-px bg-muted" />
           {choices.map(([value, label]) => (
             <button key={value} type="button" role="menuitemradio" aria-checked={row.override === value}
-              onClick={() => choose(value)}
-              className="relative flex w-full items-center rounded-sm py-1.5 pr-2 pl-8 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none">
+              aria-disabled={decided && value !== 'inherit' ? true : undefined}
+              onClick={() => { if (!(decided && value !== 'inherit')) choose(value); }}
+              className={`relative flex w-full items-center rounded-sm py-1.5 pr-2 pl-8 text-left text-sm focus-visible:bg-accent focus-visible:outline-none ${decided && value !== 'inherit' ? 'opacity-50' : 'hover:bg-accent'}`}>
               {/* As Radix DropdownMenuRadioItem: the dot centred in a 3.5 box. */}
               <span className="absolute left-2 flex size-3.5 items-center justify-center" aria-hidden>
                 {row.override === value && <span className="size-2 rounded-full bg-current" />}
