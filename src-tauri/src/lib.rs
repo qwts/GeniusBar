@@ -431,6 +431,8 @@ pub fn run() {
             bridge::identity_app_connect,
             bridge::identity_app_rotate_key,
             bridge::identity_app_assign,
+            bridge::identity_app_remove,
+            bridge::identity_addon_set,
             bridge::identity_app_open,
             tray::set_tray_badge,
             updates::update_status,

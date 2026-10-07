@@ -10,7 +10,7 @@ import { layoutActions } from '../state/layout';
 import { preferenceActions } from '../state/preferences';
 import { CompanionDetails } from './CompanionSession';
 import {
-  GitHubAppRow, identityStatus, IdentityAppsProvider, liveIdentityApps, normalizeIdentityApps,
+  GitHubAppRow, identityStatus, IdentityAppsProvider, liveIdentityApps, normalizeIdentityApps, normalizeIdentityAppsList,
   type IdentityApp, type IdentityAppsSource, type IdentityCreateStatus,
 } from './IdentityApps';
 import { IdentityAppsCard } from './IdentityAppsCard';
@@ -29,12 +29,20 @@ function app(slug: string, over: Partial<IdentityApp> = {}): IdentityApp {
   };
 }
 
-/** A fake agent-bot: `assign` moves the soul, `create` completes on the second status read. */
-function fakeSource(initial: IdentityApp[], over: Partial<IdentityAppsSource> = {}) {
+/**
+ * A fake agent-bot: `assign` moves the soul or harness, `create` completes on
+ * the second status read, `remove` drops an App no harness or soul uses, and
+ * `setAddon` switches the add-on. `addons` undefined is an older bundle.
+ */
+function fakeSource(initial: IdentityApp[], over: Partial<IdentityAppsSource> = {}, addon?: boolean) {
   let current = initial;
+  let enabled = addon;
   let reads = 0;
   const source = {
-    list: vi.fn(async () => current),
+    list: vi.fn(async () => ({
+      apps: enabled === false ? [] : current,
+      addons: enabled === undefined ? null : { 'github-identity': enabled },
+    })),
     create: vi.fn(async () => ({ handle: 1, localUrl: 'http://127.0.0.1:5123/?state=ab' })),
     createStatus: vi.fn(async (): Promise<IdentityCreateStatus> => (++reads < 2
       ? { status: 'pending', localUrl: 'http://127.0.0.1:5123/?state=ab' }
@@ -48,8 +56,24 @@ function fakeSource(initial: IdentityApp[], over: Partial<IdentityAppsSource> = 
     assign: vi.fn(async (slug: string, target: { soul: string } | { harness: string }) => {
       if ('soul' in target) {
         current = current.map((a) => ({ ...a, souls: a.slug === slug ? [...a.souls, target.soul] : a.souls.filter((s) => s !== target.soul) }));
+      } else {
+        current = current.map((a) => ({ ...a, harnesses: a.slug === slug ? [...a.harnesses, target.harness] : a.harnesses.filter((h) => h !== target.harness) }));
       }
       return { slug, ...target };
+    }),
+    remove: vi.fn(async (slug: string) => {
+      const gone = current.find((a) => a.slug === slug);
+      if (gone && (gone.harnesses.length > 0 || gone.souls.length > 0)) {
+        throw new BridgeError('identity-app-assigned',
+          `${slug} is still used by ${[...gone.harnesses.map((h) => `harness ${h}`), ...gone.souls.map((s) => `soul ${s}`)].join(', ')}; assign them another App first.`);
+      }
+      current = current.filter((a) => a.slug !== slug);
+      return { slug, id: '1', removed: { storeItem: null, configRecord: true } };
+    }),
+    setAddon: vi.fn(async (_name: 'github-identity', next: boolean) => {
+      const changed = enabled !== next;
+      enabled = next;
+      return { addon: 'github-identity', enabled: next, changed };
     }),
     open: vi.fn(async () => {}),
     ...over,
@@ -278,6 +302,103 @@ describe('IdentityAppsCard', () => {
     expect(await screen.findByText('linked-bot[bot]')).toBeTruthy();
   });
 
+  it('switches the add-on on through agent-bot when the list reports it', async () => {
+    const source = fakeSource([app('luna-bot')], {}, false);
+    withIdentities(source, <IdentityAppsCard />);
+    const toggle = await screen.findByRole('switch', { name: 'github-identity add-on' }) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    expect(toggle.disabled).toBe(false);
+    await expand();
+    expect(screen.getByText(/Off: companions act on GitHub as your account/)).toBeTruthy();
+    expect(screen.queryByText(/config\.json/)).toBeNull();
+    fireEvent.click(toggle);
+    expect(source.setAddon).toHaveBeenCalledWith('github-identity', true);
+    expect(toggle.disabled).toBe(true);
+    expect(screen.getByRole('status').textContent).toBe('Waiting for your approval…');
+    await waitFor(() => expect(toggle.checked).toBe(true));
+    expect(toggle.disabled).toBe(false);
+    expect(await screen.findByText('luna-bot[bot]')).toBeTruthy();
+    fireEvent.click(toggle);
+    expect(source.setAddon).toHaveBeenLastCalledWith('github-identity', false);
+    await waitFor(() => expect(toggle.checked).toBe(false));
+    expect(screen.queryByRole('list', { name: 'GitHub Apps' })).toBeNull();
+  });
+
+  it('shows a refused switch and leaves the add-on as it was', async () => {
+    const source = fakeSource([], {
+      setAddon: vi.fn(async () => { throw new BridgeError('identity-app-owner-required', 'The owner did not approve.'); }),
+    }, false);
+    withIdentities(source, <IdentityAppsCard />);
+    const toggle = await screen.findByRole('switch', { name: 'github-identity add-on' }) as HTMLInputElement;
+    fireEvent.click(toggle);
+    expect((await screen.findByRole('alert')).textContent).toBe('GitHub identity unchanged: The owner did not approve.');
+    expect(toggle.checked).toBe(false);
+  });
+
+  it('keeps the switch read-only, and offers no Remove…, for an older bundle', async () => {
+    const source = fakeSource([app('luna-bot')]);
+    withIdentities(source, <IdentityAppsCard />);
+    const toggle = await screen.findByRole('switch', { name: 'github-identity add-on' }) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    expect(toggle.disabled).toBe(true);
+    fireEvent.click(toggle);
+    expect(source.setAddon).not.toHaveBeenCalled();
+    await expand();
+    expect(screen.getByText('luna-bot[bot]')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Remove…' })).toBeNull();
+  });
+
+  it('removes an App after asking, and says it stays on GitHub', async () => {
+    const source = fakeSource([app('luna-bot'), app('other-bot')], {}, true);
+    withIdentities(source, <IdentityAppsCard />);
+    await expand();
+    const rows = within(await screen.findByRole('list', { name: 'GitHub Apps' })).getAllByRole('listitem');
+    fireEvent.click(within(rows[0]).getByRole('button', { name: 'Remove…' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Forget luna-bot[bot] on this Mac?' });
+    expect(dialog.textContent).toContain('Its private key and its local record');
+    expect(dialog.textContent).toContain('The App itself stays on GitHub');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(source.remove).not.toHaveBeenCalled();
+    fireEvent.click(within(rows[0]).getByRole('button', { name: 'Remove…' }));
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove' }));
+    expect(source.remove).toHaveBeenCalledWith('luna-bot');
+    expect(await screen.findByText('Forgot luna-bot[bot] on this Mac. The App is still on GitHub.')).toBeTruthy();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    await waitFor(() => expect(screen.queryByText('luna-bot[bot]')).toBeNull());
+    expect(screen.getByText('other-bot[bot]')).toBeTruthy();
+  });
+
+  it('shows agent-bot\'s refusal naming who still uses the App, and keeps it', async () => {
+    const source = fakeSource([app('luna-bot', { harnesses: ['codex'], souls: [luna.agentId] })], {}, true);
+    withIdentities(source, <IdentityAppsCard roster={sampleCensus} />);
+    await expand();
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove…' }));
+    const dialog = screen.getByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
+    expect((await within(dialog).findByRole('alert')).textContent)
+      .toBe(`GitHub identity unchanged: luna-bot is still used by harness codex, soul ${luna.agentId}; assign them another App first.`);
+    expect((within(dialog).getByRole('button', { name: 'Remove' }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByText('luna-bot[bot]')).toBeTruthy();
+  });
+
+  it('uses an App for a harness through agent-bot', async () => {
+    const source = fakeSource([app('luna-bot', { harnesses: ['claude'] }), app('keyless', { keyPresent: false })], {}, true);
+    withIdentities(source, <IdentityAppsCard roster={sampleCensus} />);
+    await expand();
+    const rows = within(await screen.findByRole('list', { name: 'GitHub Apps' })).getAllByRole('listitem');
+    expect(within(rows[1]).queryByRole('combobox')).toBeNull();
+    const select = within(rows[0]).getByRole('combobox', { name: 'Use luna-bot[bot] for a harness' }) as HTMLSelectElement;
+    const options = [...select.options].map((o) => o.textContent);
+    expect(options[0]).toBe('Use for a harness…');
+    expect(options).toContain('opencode');
+    expect(options).not.toContain('Claude Code');
+    fireEvent.change(select, { target: { value: 'opencode' } });
+    expect(source.assign).toHaveBeenCalledWith('luna-bot', { harness: 'opencode' });
+    await waitFor(() => expect(rows[0].textContent).toContain('Harnesses: claude, opencode'));
+  });
+
   it('sits below Sandboxing in the menu', async () => {
     render(<App census={sampleCensus} connection={sampleConnection} isStatic sandboxSource={null} identityAppsSource={fakeSource([app('luna-bot')])} />);
     expect(await screen.findByRole('region', { name: 'GitHub identity' })).toBeTruthy();
@@ -291,6 +412,13 @@ describe('agent-bot identity calls', () => {
     expect(apps?.[0].botLogin).toBe('a[bot]');
     expect(identityStatus(apps![0])).toBe('unknown');
     expect(normalizeIdentityApps({})).toBeNull();
+  });
+
+  it('reads the add-on state from the envelope, and none from an older bundle', () => {
+    expect(normalizeIdentityAppsList({ apps: [], addons: { 'github-identity': false } })).toEqual({ apps: [], addons: { 'github-identity': false } });
+    expect(normalizeIdentityAppsList({ apps: [] })?.addons).toBeNull();
+    expect(normalizeIdentityAppsList({ apps: [], addons: { 'github-identity': 'on' } })?.addons).toBeNull();
+    expect(normalizeIdentityAppsList({})).toBeNull();
   });
 
   it('reads the key fingerprint, and null from an older bundle or a malformed key', () => {
@@ -310,17 +438,23 @@ describe('agent-bot identity calls', () => {
 
   it('invokes the shell commands with their arguments', async () => {
     vi.mocked(invoke).mockImplementation(async (command: string) => {
-      if (command === 'identity_apps_list') return { apps: [] };
+      if (command === 'identity_apps_list') return { apps: [], addons: { 'github-identity': true } };
+      if (command === 'identity_addon_set') return { addon: 'github-identity', enabled: false, changed: true };
+      if (command === 'identity_app_remove') return { slug: 'a', id: '1', removed: { storeItem: { store: 'keychain', name: 'agent-bot.app.a/github-app/a', existed: true }, configRecord: true } };
       if (command === 'identity_app_create') return { handle: 3, localUrl: 'http://127.0.0.1:1/' };
       if (command === 'identity_app_assign') return { slug: 'a', soul: 'agent_1' };
       return { id: '1', slug: 'a', installUrl: 'https://github.com/apps/a/installations/new', retired: 'SHA256:x' };
     });
-    expect(await liveIdentityApps.list()).toEqual([]);
+    expect(await liveIdentityApps.list()).toEqual({ apps: [], addons: { 'github-identity': true } });
     expect(await liveIdentityApps.create()).toEqual({ handle: 3, localUrl: 'http://127.0.0.1:1/' });
     await liveIdentityApps.connect('12', 'pick');
     await liveIdentityApps.rotateKey('a', 'pick');
     await liveIdentityApps.assign('a', { soul: 'agent_1' });
     await liveIdentityApps.assign('a', { harness: 'codex' });
+    expect(await liveIdentityApps.setAddon('github-identity', false)).toEqual({ addon: 'github-identity', enabled: false, changed: true });
+    expect((await liveIdentityApps.remove('a')).removed).toEqual({
+      storeItem: { store: 'keychain', name: 'agent-bot.app.a/github-app/a', existed: true }, configRecord: true,
+    });
     expect(vi.mocked(invoke).mock.calls).toEqual([
       ['identity_apps_list', {}],
       ['identity_app_create', {}],
@@ -328,6 +462,8 @@ describe('agent-bot identity calls', () => {
       ['identity_app_rotate_key', { slug: 'a', prompt: 'pick' }],
       ['identity_app_assign', { slug: 'a', soul: 'agent_1' }],
       ['identity_app_assign', { slug: 'a', harness: 'codex' }],
+      ['identity_addon_set', { name: 'github-identity', enabled: false }],
+      ['identity_app_remove', { slug: 'a' }],
     ]);
     vi.mocked(invoke).mockRejectedValueOnce({ code: 'identity-app-disabled', message: 'off' });
     await expect(liveIdentityApps.connect('1', 'p')).rejects.toMatchObject({ code: 'identity-app-disabled' });
