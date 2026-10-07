@@ -38,6 +38,7 @@ export function DefaultHarness({ harnesses }: { harnesses: readonly string[] }) 
       </label>
       {other && (
         <input type="text" aria-label={t('harness.otherLabel')} placeholder={t('harness.otherPlaceholder')} value={text} maxLength={MAX_HARNESS}
+          autoCapitalize="off" autoCorrect="off" spellCheck={false} autoComplete="off"
           className="h-7 w-full rounded-md border-input bg-transparent px-3 font-mono text-xs shadow-sm"
           onChange={(e) => setText(e.target.value)} onBlur={commit}
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }} />

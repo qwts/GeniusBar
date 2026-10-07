@@ -94,7 +94,7 @@ export function ModelSelect({ value, choices, label, disabled = false, commit, o
       {other && (
         <span className="flex items-center gap-2">
           <input type="text" aria-label={t('model.otherLabel')} placeholder={t('model.otherPlaceholder')} value={draft}
-            maxLength={MAX_MODEL} autoComplete="off" disabled={disabled} className={`${className} min-w-0 flex-1 font-mono text-xs`}
+            maxLength={MAX_MODEL} autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false} disabled={disabled} className={`${className} min-w-0 flex-1 font-mono text-xs`}
             onChange={(e) => {
               setDraft(e.target.value);
               if (commit === 'live') onChange(e.target.value.trim() || null);

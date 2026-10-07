@@ -62,6 +62,20 @@ export function displayHarness(soul: Pick<CensusRow, 'harness'>): string {
 }
 
 /**
+ * Drops the rows of souls agent-bot has archived (#196): `soul remove`
+ * retires a soul and its hub row stays as `left`, and a left row is kept
+ * for reference, but an archived soul is gone from this Mac and its row
+ * only looks like a companion that remains. `population` is agent-bot's
+ * `population_list`; null (an older bundle, or not read yet) hides nothing.
+ */
+export function withoutArchived(souls: readonly CensusRow[],
+  population: readonly { agentId: string; status?: string | null }[] | null): readonly CensusRow[] {
+  if (!population) return souls;
+  const archived = new Set(population.flatMap((e) => (e.status === 'retired' ? [e.agentId] : [])));
+  return archived.size === 0 ? souls : souls.filter((s) => !archived.has(s.agentId));
+}
+
+/**
  * Text state for unavailable souls. 'left' souls stay listed with this
  * explanation instead of being dropped from the roster.
  */

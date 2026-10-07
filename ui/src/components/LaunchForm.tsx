@@ -301,7 +301,8 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
         </select>
         {otherHarness && (
           <input type="text" aria-label={t('harness.otherLabel')} placeholder={t('harness.otherPlaceholder')} value={harness}
-            maxLength={MAX_HARNESS} className={`${field} font-mono text-xs`}
+            maxLength={MAX_HARNESS} autoCapitalize="off" autoCorrect="off" spellCheck={false} autoComplete="off"
+            className={`${field} font-mono text-xs`}
             onChange={(e) => { setTouched((was) => ({ ...was, harness: true })); setHarness(e.target.value); }} />
         )}
         <p className="text-xs text-muted-foreground">{t('launch.harnessHint')}</p>
