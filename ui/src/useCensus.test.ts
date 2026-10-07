@@ -1,14 +1,16 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BridgeError } from './bridge';
-import { brokerInstalled, fetchCensus, useCensus } from './useCensus';
+import { disconnected } from './model/status';
+import { brokerInstalled, CENSUS_STALE_MS, CENSUS_STORAGE_KEY, fetchCensus, fromStored, toStored, useCensus, type StoredCensus } from './useCensus';
 
 const bridge = vi.hoisted(() => ({
   souls: [] as { account: string; agentId: string; presence: string }[],
+  calls: 0,
 }));
 vi.mock('./bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./bridge')>()),
-  call: async () => ({ souls: bridge.souls }),
+  call: async () => { bridge.calls += 1; return { souls: bridge.souls }; },
   servicesInstalled: async () => ({ broker: true }),
   inApp: () => true,
 }));
@@ -88,5 +90,74 @@ describe('useCensus', () => {
     await act(async () => { release(); });
     await waitFor(() => expect(result.current.settled).toBe(true));
     expect(renderHook(() => useCensus(false)).result.current.settled).toBe(true);
+  });
+});
+
+describe('useCensus shared between windows (#223)', () => {
+  const noPopulation = async () => null;
+  const memory = () => {
+    const items = new Map<string, string>();
+    return { getItem: (k: string) => items.get(k) ?? null, setItem: (k: string, v: string) => { items.set(k, v); }, items };
+  };
+  const stored = (at: number, agentId = 'agent_shared'): StoredCensus => toStored({
+    rows: [{ account: 'a', agentId, name: null, harness: null, parent: null, presence: 'joined', unacked: 0, lastWake: null }],
+    archivedBy: [], populationRead: true,
+    connection: { ...disconnected, bridgeConnected: true, lastRefresh: new Date(at) },
+  }, at);
+  afterEach(() => { cleanup(); bridge.calls = 0; });
+
+  it('round-trips the connection dates through storage and rejects what does not parse', () => {
+    const back = fromStored(JSON.stringify(stored(1_000)));
+    expect(back?.connection.lastRefresh).toBe(new Date(1_000).toISOString());
+    expect(back?.rows[0]?.agentId).toBe('agent_shared');
+    expect(fromStored(null)).toBeNull();
+    expect(fromStored('{')).toBeNull();
+    expect(fromStored('{"at":"soon"}')).toBeNull();
+    expect(fromStored('[]')).toBeNull();
+  });
+
+  it('a publisher stores each census for the other windows', async () => {
+    bridge.souls = [{ account: 'a', agentId: 'agent_here', presence: 'joined' }];
+    const storage = memory();
+    const { result } = renderHook(() => useCensus(true, noPopulation, { share: 'publish', storage, now: () => 42_000 }));
+    await waitFor(() => expect(result.current.census).toHaveLength(1));
+    await waitFor(() => expect(storage.items.has(CENSUS_STORAGE_KEY)).toBe(true));
+    const saved = fromStored(storage.getItem(CENSUS_STORAGE_KEY));
+    expect(saved?.at).toBe(42_000);
+    expect(saved?.rows.map((r) => r.agentId)).toEqual(['agent_here']);
+    expect(saved?.populationRead).toBe(true);
+    expect(saved?.connection.bridgeConnected).toBe(true);
+    expect(typeof saved?.connection.lastRefresh).toBe('string');
+  });
+
+  it('a follower shows a fresh stored census without asking the bridge, and takes the next from the storage event', async () => {
+    bridge.souls = [{ account: 'a', agentId: 'agent_polled', presence: 'joined' }];
+    const storage = memory();
+    storage.setItem(CENSUS_STORAGE_KEY, JSON.stringify(stored(10_000)));
+    const { result } = renderHook(() => useCensus(true, noPopulation, { share: 'follow', storage, now: () => 12_000 }));
+    await waitFor(() => expect(result.current.census.map((r) => r.agentId)).toEqual(['agent_shared']));
+    expect(result.current.connection.lastRefresh).toEqual(new Date(10_000));
+    expect(result.current.settled).toBe(true);
+    expect(bridge.calls).toBe(0);
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: CENSUS_STORAGE_KEY, newValue: JSON.stringify(stored(11_000, 'agent_next')) }));
+    });
+    await waitFor(() => expect(result.current.census.map((r) => r.agentId)).toEqual(['agent_next']));
+    expect(bridge.calls).toBe(0);
+  });
+
+  it('a follower polls itself while the stored census is stale or missing', async () => {
+    bridge.souls = [{ account: 'a', agentId: 'agent_polled', presence: 'joined' }];
+    const storage = memory();
+    storage.setItem(CENSUS_STORAGE_KEY, JSON.stringify(stored(10_000)));
+    const { result } = renderHook(() => useCensus(true, noPopulation, { share: 'follow', storage, now: () => 10_000 + CENSUS_STALE_MS + 1 }));
+    await waitFor(() => expect(result.current.census.map((r) => r.agentId)).toEqual(['agent_polled']));
+    expect(bridge.calls).toBe(1);
+    // Polling stores nothing: only the popup publishes.
+    expect(fromStored(storage.getItem(CENSUS_STORAGE_KEY))?.at).toBe(10_000);
+    const empty = memory();
+    const alone = renderHook(() => useCensus(true, noPopulation, { share: 'follow', storage: empty }));
+    await waitFor(() => expect(alone.result.current.census).toHaveLength(1));
+    expect(bridge.calls).toBe(2);
   });
 });

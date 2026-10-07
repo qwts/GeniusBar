@@ -5,7 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { App, type AppMode } from './App';
 import type { CliToolsApi } from './components/CliTools';
 import type { DevTools, HarnessAuth, Starter } from './components/FirstLaunch';
-import { currentWindow, inApp, openDesktop, openSurface, shellLog } from './bridge';
+import { currentWindow, inApp, openDesktop, openSurface, populationList, shellLog } from './bridge';
 import { DropCue } from './components/DropCue';
 import { menuApprovals } from './model/approvals';
 import { parseSurface } from './model/surface';
@@ -29,7 +29,8 @@ import './styles.css';
 // renders the same popup statically and changes nothing: no inbox polling
 // or acks, and no Finder-opened packages taken from the queue.
 function Live({ snapshot }: { snapshot: SnapshotOptions | null }) {
-  const { census, connection, refresh, settled } = useCensus();
+  // The popup polls for every window (#223): the surfaces follow what it stores.
+  const { census, connection, refresh, settled } = useCensus(inApp(), populationList, { share: 'publish' });
   const select = useSnapshot(snapshot, census, connection, refresh);
   const { setup, existing, runSetup } = useSetup(() => { void refresh?.(); });
   const chat = useChat({ enabled: inApp() && !snapshot, roster: census });
