@@ -9,6 +9,8 @@
 //
 // usage: node bridge.mjs AGENT_COMMS_DIR
 
+import { mkdir, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { createInterface } from 'node:readline';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -27,7 +29,37 @@ export const METHODS = {
     client.launch({ account, soul, package: packagePath, harness, name, comms, ...(model === undefined ? {} : { model }),
       ...(typeof brief === 'string' ? { brief } : {}), ...(typeof role === 'string' ? { role } : {}) }),
   launchStatus: (client, { requestId }) => client.launchStatus(requestId),
+  // Local glue, no agent-comms: saves the audit log the view already holds.
+  auditExport: (_client, { contents }) => auditExport(contents),
 };
+
+// Operations that never touch agent-comms, so they work before pairing.
+const LOCAL = new Set(['auditExport']);
+
+export const AUDIT_EXPORT_MAX = 50 * 1024 * 1024;
+
+const fail = (code, message) => Object.assign(new Error(message), { code });
+
+/**
+ * Writes the audit JSON to ~/Downloads/geniusbar-audit-<timestamp>.json,
+ * owner-only, never over an existing file. Returns where it went.
+ */
+export async function auditExport(contents) {
+  if (typeof contents !== 'string') throw fail('bad-request', 'contents must be a string');
+  if (Buffer.byteLength(contents, 'utf8') > AUDIT_EXPORT_MAX) throw fail('too-large', 'the audit export is over 50 MB');
+  const dir = path.join(homedir(), 'Downloads');
+  await mkdir(dir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  for (let n = 0; ; n += 1) {
+    const file = path.join(dir, `geniusbar-audit-${stamp}${n ? `-${n}` : ''}.json`);
+    try {
+      await writeFile(file, contents, { flag: 'wx', mode: 0o600 });
+      return { path: file };
+    } catch (error) {
+      if (error?.code !== 'EEXIST' || n >= 99) throw fail('export-failed', String(error?.message ?? error));
+    }
+  }
+}
 
 // A client is rebuilt after these, so pairing or rotating the credential
 // takes effect without restarting the app.
@@ -51,8 +83,8 @@ export function createBridge({ loadClient, write }) {
     const params = request.params && typeof request.params === 'object' && !Array.isArray(request.params)
       ? request.params : {};
     try {
-      client ??= loadClient();
-      return reply({ id, ok: true, result: await method(client, params) });
+      if (!LOCAL.has(request.method)) client ??= loadClient();
+      return reply({ id, ok: true, result: await method(LOCAL.has(request.method) ? null : client, params) });
     } catch (error) {
       const code = typeof error?.code === 'string' ? error.code : 'bridge-error';
       if (RELOAD.has(code)) client = null;

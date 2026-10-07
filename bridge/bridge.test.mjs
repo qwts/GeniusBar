@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { createBridge, METHODS } from './bridge.mjs';
+import { AUDIT_EXPORT_MAX, createBridge, METHODS } from './bridge.mjs';
 
 function harness(client) {
   const out = [];
@@ -18,7 +18,7 @@ function harness(client) {
 }
 
 test('exposes only the principal operations', () => {
-  assert.deepEqual(Object.keys(METHODS).sort(), ['ack', 'census', 'inbox', 'launch', 'launchStatus', 'send']);
+  assert.deepEqual(Object.keys(METHODS).sort(), ['ack', 'auditExport', 'census', 'inbox', 'launch', 'launchStatus', 'send']);
 });
 
 test('answers a request with its id and result', async () => {
@@ -111,4 +111,38 @@ test('the script serves requests over stdio with a given agent-comms', async () 
   child.stdin.end();
   assert.deepEqual(JSON.parse(line), { id: 1, ok: true, result: { ok: true, souls: [{ agentId: 'agent_1' }] } });
   assert.equal(await new Promise((resolve) => child.on('exit', resolve)), 0);
+});
+
+test('auditExport saves the JSON to ~/Downloads, owner-only, without the client', async (t) => {
+  const home = mkdtempSync(path.join(tmpdir(), 'bridge-home-'));
+  const saved = process.env.HOME;
+  process.env.HOME = home;
+  t.after(() => { process.env.HOME = saved; });
+  // Unpaired: the client never loads, yet the export still works.
+  const h = harness(Object.assign(new Error('not paired'), { code: 'credential-invalid' }));
+  await h.handle(JSON.stringify({ id: 1, method: 'auditExport', params: { contents: '[{"a":1}]' } }));
+  await h.handle(JSON.stringify({ id: 2, method: 'auditExport', params: { contents: '[]' } }));
+  assert.equal(h.loads(), 0);
+  assert.deepEqual(h.out.map((r) => r.ok), [true, true]);
+  const first = h.out[0].result.path;
+  assert.equal(path.dirname(first), path.join(home, 'Downloads'));
+  assert.match(path.basename(first), /^geniusbar-audit-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z(-\d+)?\.json$/);
+  assert.equal(readFileSync(first, 'utf8'), '[{"a":1}]');
+  assert.equal(statSync(first).mode & 0o777, 0o600);
+  // Two saves in the same millisecond never overwrite each other.
+  assert.notEqual(h.out[1].result.path, first);
+  assert.equal(readdirSync(path.join(home, 'Downloads')).length, 2);
+});
+
+test('auditExport refuses anything but a string of at most 50 MB', async (t) => {
+  const home = mkdtempSync(path.join(tmpdir(), 'bridge-home-'));
+  const saved = process.env.HOME;
+  process.env.HOME = home;
+  t.after(() => { process.env.HOME = saved; });
+  const h = harness({});
+  await h.handle(JSON.stringify({ id: 1, method: 'auditExport', params: { contents: { op: 'admin' } } }));
+  await h.handle(JSON.stringify({ id: 2, method: 'auditExport', params: {} }));
+  await h.handle(JSON.stringify({ id: 3, method: 'auditExport', params: { contents: 'x'.repeat(AUDIT_EXPORT_MAX + 1) } }));
+  assert.deepEqual(h.out.map((r) => [r.id, r.error.code]), [[1, 'bad-request'], [2, 'bad-request'], [3, 'too-large']]);
+  assert.throws(() => readdirSync(path.join(home, 'Downloads')), { code: 'ENOENT' });
 });

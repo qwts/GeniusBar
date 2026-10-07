@@ -42,7 +42,7 @@ describe('soulStatus', () => {
   it('says idle and offline in the census presence words the menu uses', () => {
     expect(statusText('idle', luna, t)).toBe('Ready');
     expect(statusText('idle', child, t)).toBe('Starting');
-    expect(statusText('offline', left, t)).toBe('Unavailable');
+    expect(statusText('offline', left, t)).toBe('Offline');
     expect(statusText('awaiting', luna, t)).toBe('Waiting on you');
     expect(statusText('working', luna, t)).toBe('Working…');
     expect(statusText('paused', luna, t)).toBe('Paused');

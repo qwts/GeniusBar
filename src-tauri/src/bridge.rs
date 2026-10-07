@@ -21,9 +21,18 @@ use tauri_plugin_shell::{
 };
 use tokio::sync::oneshot;
 
-/// The principal operations the web view may call; bridge.mjs holds the
-/// same list and checks it again.
-pub const METHODS: &[&str] = &["census", "send", "inbox", "ack", "launch", "launchStatus"];
+/// The principal operations the web view may call, plus `auditExport` (local
+/// glue that saves the audit JSON to ~/Downloads); bridge.mjs holds the same
+/// list and checks it again.
+pub const METHODS: &[&str] = &[
+    "census",
+    "send",
+    "inbox",
+    "ack",
+    "launch",
+    "launchStatus",
+    "auditExport",
+];
 
 /// GeniusBar's own agent-comms and agent-bot names (ADR-0004 decision 8,
 /// agent-comms ADR-0059, agent-bot #302): the bridge, setup and the
@@ -3741,11 +3750,20 @@ impl RevisionCopy {
 
     fn under(parent: &std::path::Path) -> Result<Self, BridgeError> {
         use std::os::unix::fs::DirBuilderExt;
+        // The clock alone is not unique: two edits in one process within the
+        // clock's resolution (the test suite on CI) named the same directory
+        // and the second failed with EEXIST. A per-process counter makes
+        // every name distinct.
+        static SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or_default();
-        let dir = parent.join(format!("geniusbar-revision-{}-{nanos}", std::process::id()));
+        let serial = SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = parent.join(format!(
+            "geniusbar-revision-{}-{nanos}-{serial}",
+            std::process::id()
+        ));
         std::fs::DirBuilder::new()
             .mode(0o700)
             .create(&dir)

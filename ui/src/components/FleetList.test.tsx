@@ -78,9 +78,22 @@ describe('FleetList', () => {
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: 'Hide from desktop: agent_c' }));
     expect(onToggle).toHaveBeenCalledWith('user/agent_c', true);
-    // The lead keeps its own eye for hiding just itself.
-    fireEvent.click(screen.getByRole('button', { name: 'Hide from desktop: luna' }));
-    expect(onToggle).toHaveBeenLastCalledWith('user/agent_p', true);
+    // As the design: one eye per row, so the lead's eye is the team's and no
+    // separate team toggle or lead-only eye remains.
+    expect(screen.queryByRole('button', { name: 'Hide from desktop: luna' })).toBeNull();
+    expect(screen.getAllByRole('button', { name: /: luna$/ }).map((b) => b.getAttribute('aria-label')))
+      .toEqual(['Hide team from desktop: luna']);
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a hidden lead's eye as Show team, and showing brings the whole team back", () => {
+    const onToggleTeam = vi.fn();
+    render(<FleetList forest={forest} paused onOpen={() => {}}
+      hiding={{ hidden: ['user/agent_p'], onToggle: () => {}, onToggleTeam, onShowAll: () => {} }} />);
+    const eye = screen.getByRole('button', { name: 'Show team on desktop: luna' });
+    expect(eye.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(eye);
+    expect(onToggleTeam).toHaveBeenCalledWith(['user/agent_p', 'user/agent_c'], false);
   });
 
   it('says "Waiting for you" in warning for a pending approval, animates faces, and fades hidden rows', () => {

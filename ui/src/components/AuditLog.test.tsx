@@ -1,15 +1,16 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { listAudit, runtimeMetrics, soulComms } from '../bridge';
+import { exportAudit, listAudit, runtimeMetrics, soulComms } from '../bridge';
 import { buildSoulForest } from '../model/census';
 import { emptyComposer } from '../model/chat';
 import { sampleAudit, sampleCensus } from '../model/fixtures';
 import { AUDIT_REFRESH_MS, AuditLog, AuditSourceContext, type AuditSource } from './AuditLog';
 import { CompanionSession } from './CompanionSession';
 
-vi.mock('../bridge', () => ({ listAudit: vi.fn(), runtimeMetrics: vi.fn(), soulComms: vi.fn(), setSoulComms: vi.fn() }));
+vi.mock('../bridge', () => ({ exportAudit: vi.fn(), listAudit: vi.fn(), runtimeMetrics: vi.fn(), soulComms: vi.fn(), setSoulComms: vi.fn() }));
 beforeEach(() => {
   vi.mocked(listAudit).mockReset().mockResolvedValue(null);
+  vi.mocked(exportAudit).mockReset().mockResolvedValue({ path: '/Users/me/Downloads/geniusbar-audit-x.json' });
   vi.mocked(runtimeMetrics).mockReset().mockResolvedValue({ unavailable: true });
   vi.mocked(soulComms).mockReset().mockResolvedValue(null);
 });
@@ -38,6 +39,7 @@ describe('AuditLog', () => {
     withSource(async () => []);
     expect(await screen.findByText('Nothing recorded yet.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Export JSON' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Copy JSON' }).hasAttribute('disabled')).toBe(true);
   });
 
   it('waits calmly for an agent-bot that cannot list the log yet', async () => {
@@ -47,15 +49,35 @@ describe('AuditLog', () => {
     expect(screen.getByRole('button', { name: 'Export JSON' }).hasAttribute('disabled')).toBe(true);
   });
 
-  it('copies the shown records as JSON and says so', async () => {
+  it('saves the shown records as a JSON file through the bridge, as the design, and says so', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     withSource(async () => sampleAudit.slice(0, 2));
     fireEvent.click(await screen.findByRole('button', { name: 'Export JSON' }));
+    expect((await screen.findByRole('status')).textContent).toBe('Saved to Downloads');
+    expect(exportAudit).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(vi.mocked(exportAudit).mock.calls[0][0])).toEqual([sampleAudit[1], sampleAudit[0]]);
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('says when the file could not be saved', async () => {
+    vi.mocked(exportAudit).mockRejectedValueOnce(new Error('disk full'));
+    withSource(async () => sampleAudit.slice(0, 2));
+    fireEvent.click(await screen.findByRole('button', { name: 'Export JSON' }));
+    const status = await screen.findByText('Couldn’t save the audit log.');
+    expect(status.className).toContain('error');
+  });
+
+  it('still copies the shown records as JSON with Copy JSON, and says so', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    withSource(async () => sampleAudit.slice(0, 2));
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy JSON' }));
     expect(await screen.findByText('Copied')).toBeTruthy();
     expect(JSON.parse(writeText.mock.calls[0][0])).toEqual([sampleAudit[1], sampleAudit[0]]);
+    expect(exportAudit).not.toHaveBeenCalled();
     writeText.mockRejectedValueOnce(new Error('denied'));
-    fireEvent.click(screen.getByRole('button', { name: 'Export JSON' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy JSON' }));
     expect(await screen.findByText('Couldn’t copy the audit log.')).toBeTruthy();
   });
 

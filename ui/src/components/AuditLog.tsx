@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Download } from 'lucide-react';
-import { listAudit } from '../bridge';
+import { exportAudit, listAudit } from '../bridge';
 import { useI18n } from '../lib/i18n';
 import { auditJson, auditRows, auditTime, type AuditRecord } from '../model/audit';
 import type { CensusRow } from '../model/census';
@@ -9,12 +9,15 @@ import type { CensusRow } from '../model/census';
 export type AuditSource = (agentId: string | null) => Promise<AuditRecord[] | null>;
 export const AuditSourceContext = createContext<AuditSource>((agentId) => listAudit(agentId));
 
+/** What the last Export JSON or Copy JSON did; each is an `audit.*` string. */
+type Notice = 'saved' | 'saveFailed' | 'copied' | 'copyFailed';
+
 /** The design refreshes the log while it is shown; never otherwise. */
 export const AUDIT_REFRESH_MS = 10_000;
 
 /**
  * The design's Audit log (Lovable `AuditLog`): Time / Companion / Event /
- * Detail, newest first, with Export JSON at the top right. One companion's
+ * Detail, newest first, with Export JSON (a file) and Copy JSON at the top right. One companion's
  * records, or (agentId null) every companion's. It reads while mounted, so
  * only the shown tab polls; a hidden window skips its reads.
  */
@@ -23,7 +26,7 @@ export function AuditLog({ agentId, roster = [] }: { agentId: string | null; ros
   const load = useContext(AuditSourceContext);
   // undefined while the first read is out; null when agent-bot cannot say.
   const [records, setRecords] = useState<AuditRecord[] | null | undefined>(undefined);
-  const [copy, setCopy] = useState<'copied' | 'failed' | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
     let active = true;
@@ -41,16 +44,20 @@ export function AuditLog({ agentId, roster = [] }: { agentId: string | null; ros
   useEffect(() => () => clearTimeout(copyTimer.current), []);
   const rows = useMemo(() => auditRows(records ?? [], roster), [records, roster]);
 
+  const done = (result: Notice) => {
+    setNotice(result);
+    clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setNotice(null), 2000);
+  };
+  // As the design: Export JSON saves a file (the bridge writes it to ~/Downloads).
   const exportJson = () => {
-    const done = (result: 'copied' | 'failed') => {
-      setCopy(result);
-      clearTimeout(copyTimer.current);
-      copyTimer.current = setTimeout(() => setCopy(null), 2000);
-    };
-    // GeniusBar ships no save dialog, so the export goes to the clipboard.
+    exportAudit(auditJson(rows)).then(() => done('saved'), () => done('saveFailed'));
+  };
+  // The earlier export, kept: the same JSON onto the clipboard.
+  const copyJson = () => {
     const clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : undefined;
-    if (!clipboard?.writeText) { done('failed'); return; }
-    clipboard.writeText(auditJson(rows)).then(() => done('copied'), () => done('failed'));
+    if (!clipboard?.writeText) { done('copyFailed'); return; }
+    clipboard.writeText(auditJson(rows)).then(() => done('copied'), () => done('copyFailed'));
   };
 
   let body;
@@ -88,11 +95,15 @@ export function AuditLog({ agentId, roster = [] }: { agentId: string | null; ros
   return (
     <div className="p-4 md:p-6">
       <div className="mb-3 flex items-center justify-end gap-2">
-        {copy && (
-          <span role="status" className={`text-xs ${copy === 'failed' ? 'error' : 'text-muted-foreground'}`}>
-            {t(copy === 'copied' ? 'audit.copied' : 'audit.copyFailed')}
+        {notice && (
+          <span role="status" className={`text-xs ${notice.endsWith('Failed') ? 'error' : 'text-muted-foreground'}`}>
+            {t(`audit.${notice}`)}
           </span>
         )}
+        <button type="button" onClick={copyJson} disabled={rows.length === 0}
+          className="h-8 rounded-md px-2 text-xs text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-50">
+          {t('audit.copy')}
+        </button>
         <button type="button" onClick={exportJson} disabled={rows.length === 0}
           className="inline-flex h-8 items-center gap-2 rounded-md bg-secondary px-3 text-xs font-medium text-secondary-foreground shadow-sm hover:bg-secondary/80 disabled:pointer-events-none disabled:opacity-50">
           <Download className="size-4" aria-hidden /> {t('exportJson')}

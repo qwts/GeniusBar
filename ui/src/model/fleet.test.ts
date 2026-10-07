@@ -47,7 +47,7 @@ describe('fleet', () => {
     expect(companionLabel(child, t)).toBe('agent_c, unknown harness, Starting');
     expect(companionLabel(child, t, 1)).toBe('agent_c, unknown harness, Starting, 1 unread message');
     expect(companionLabel(child, t, 2)).toBe('agent_c, unknown harness, Starting, 2 unread messages');
-    expect(companionLabel(left, t)).toMatch(/Unavailable.*Left — no longer available/);
+    expect(companionLabel(left, t)).toMatch(/Offline.*Left — no longer available/);
   });
 });
 

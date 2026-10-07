@@ -35,7 +35,7 @@ export function ApprovalsList({ items, paused, onDecide, onOpen }: {
 }) {
   const { t } = useI18n();
   const later = onDecide ? undefined : t('approval.unavailable');
-  const heading = <h2 className="m-0 px-3 pt-2 pb-1 font-mono text-[11px] font-normal tracking-wider text-muted-foreground uppercase">{t('approvals.title')}</h2>;
+  const heading = <h2 className="m-0 px-3 pt-2 pb-1 font-mono text-[10px] font-normal tracking-wider text-muted-foreground uppercase">{t('approvals.title')}</h2>;
   if (items.length === 0) {
     return (
       <section aria-label={t('approvals.title')} className="shrink-0 border-b border-border">

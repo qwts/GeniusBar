@@ -79,7 +79,7 @@ describe('Conversation', () => {
     expect(live.textContent).toContain('luna: <b>bold</b>');
   });
 
-  it('sends on submit and Cmd+Enter, never when blank', () => {
+  it('sends on submit, Enter and Cmd+Enter, never when blank', () => {
     const onSend = vi.fn();
     const onDraft = vi.fn();
     const { rerender } = render(<Conversation name="luna" entries={[]} composer={emptyComposer} onDraft={onDraft} onSend={onSend} />);
@@ -92,8 +92,24 @@ describe('Conversation', () => {
     rerender(<Conversation name="luna" entries={[]} composer={{ ...emptyComposer, draft: 'hi' }} onDraft={onDraft} onSend={onSend} />);
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', metaKey: true });
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', ctrlKey: true });
+    expect(onSend).toHaveBeenCalledTimes(3);
+    // Enter alone sends, as the design; Shift+Enter is left to insert a newline.
+    const enter = fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+    expect(enter).toBe(false);
+    expect(onSend).toHaveBeenCalledTimes(4);
+    const shiftEnter = fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', shiftKey: true });
+    expect(shiftEnter).toBe(true);
+    expect(onSend).toHaveBeenCalledTimes(4);
+    expect(screen.getByRole('textbox').getAttribute('title')).toBe('↩ to send · ⇧↩ new line');
+  });
+
+  it('never sends on Enter when blank', () => {
+    const onSend = vi.fn();
+    render(<Conversation name="luna" entries={[]} composer={emptyComposer} onDraft={() => {}} onSend={onSend} />);
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
-    expect(onSend).toHaveBeenCalledTimes(2);
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', metaKey: true });
+    expect(onSend).not.toHaveBeenCalled();
   });
 
   it('says Sending… on the button while a message is on its way', () => {
