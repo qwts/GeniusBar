@@ -1,10 +1,10 @@
 // A native surface's web view (#223), with the live hooks it needs. Each
-// window reads the census and badges itself; only a session window polls
-// the inbox, and the others show what the popup stored (useChat shares it
-// through storage), so N team cards are not N inbox pollers.
+// window badges itself; the census and the inbox come from what the popup
+// stored (useCensus and useChat share them through storage), with only a
+// session window polling the inbox, so N team cards are not N pollers.
 import { useCallback, useMemo } from 'react';
 import { AppProviders } from '../App';
-import { currentWindow, inApp, listSoulTemplates, openSurface } from '../bridge';
+import { currentWindow, inApp, listSoulTemplates, openSurface, populationList } from '../bridge';
 import { liveArchiver } from '../components/ArchiveDialog';
 import { DropCue } from '../components/DropCue';
 import type { SurfaceQuery } from '../model/surface';
@@ -32,7 +32,7 @@ export function LiveSurface({ query, snapshot = false, listenDrops }: {
 }) {
   const live = inApp() && !snapshot;
   const { surface, soul, tab, action } = query;
-  const { census, connection } = useCensus(live);
+  const { census, connection } = useCensus(live, populationList, { share: 'follow' });
   const chat = useChat({ enabled: live && surface === 'session', roster: census });
   // Hues, roles and status faces for the surfaces that draw Dudles.
   const ids = useMemo(() => [...new Set(census.filter((s) => s.presence !== 'left').map((s) => s.agentId))], [census]);
