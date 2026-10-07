@@ -147,6 +147,7 @@ fn open_desktop_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::R
     }
     // A window needs the regular policy for a Dock icon and keyboard focus;
     // the tray app goes back to an accessory when the window closes.
+    // Windows has no activation policy: the taskbar entry follows the window.
     #[cfg(target_os = "macos")]
     app.set_activation_policy(tauri::ActivationPolicy::Regular)?;
     let window = WebviewWindowBuilder::new(app, DESKTOP_LABEL, WebviewUrl::default())
@@ -273,7 +274,8 @@ fn on_second_instance<R: tauri::Runtime>(
 
 fn show_window_mode(app: &mut App, window: &WebviewWindow) -> tauri::Result<()> {
     // The bundle sets LSUIElement, so a window needs a regular activation
-    // policy to get a Dock icon and keyboard focus.
+    // policy to get a Dock icon and keyboard focus (nothing to set on
+    // Windows: a shown window is in the taskbar).
     #[cfg(target_os = "macos")]
     app.set_activation_policy(tauri::ActivationPolicy::Regular);
     let _ = app;
@@ -288,6 +290,8 @@ fn show_window_mode(app: &mut App, window: &WebviewWindow) -> tauri::Result<()> 
 }
 
 fn install_tray(app: &mut App, window: &WebviewWindow) -> tauri::Result<()> {
+    // No Dock icon on macOS; on Windows the hidden popup has no taskbar
+    // entry anyway, so there is no policy to set.
     #[cfg(target_os = "macos")]
     app.set_activation_policy(tauri::ActivationPolicy::Accessory);
     let desktop = MenuItem::with_id(
@@ -347,6 +351,7 @@ fn install_tray(app: &mut App, window: &WebviewWindow) -> tauri::Result<()> {
 /// shown. It also starts no service refresh or update check, so it only
 /// reads.
 fn start_snapshot(app: &mut App, window: &WebviewWindow) {
+    // Windows has no activation policy; the window simply stays hidden.
     #[cfg(target_os = "macos")]
     app.set_activation_policy(tauri::ActivationPolicy::Accessory);
     let _ = app;
@@ -476,8 +481,14 @@ pub fn run() {
             if let (false, RunEvent::Opened { urls }) = (snapshot_mode, &event) {
                 open_soul_packages(app, urls);
             }
+            // Windows opens a `.soul` through the installer's file
+            // association, which is a second launch (`on_second_instance`),
+            // not an event.
+            #[cfg(not(target_os = "macos"))]
+            let _ = snapshot_mode;
             // The Dock icon (shown while the desktop is open) or a relaunch
-            // from Finder opens or focuses the desktop (#69).
+            // from Finder opens or focuses the desktop (#69); a relaunch on
+            // Windows reaches `on_second_instance` instead.
             #[cfg(target_os = "macos")]
             if let (true, RunEvent::Reopen { .. }) = (tray_mode, &event) {
                 let _ = open_desktop_window(app);

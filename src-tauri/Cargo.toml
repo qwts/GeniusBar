@@ -22,8 +22,18 @@ tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["sync", "time"] }
+
 # setsid and kill for the detached App create (#67).
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# The detached App create on Windows (ADR-0046 decision 7): a process group
+# of its own, and OpenProcess/TerminateProcess in place of kill, at the
+# windows-sys tauri itself builds; `open` is the shell plugin's own opener,
+# for the allow-listed GitHub URL (no `cmd /C start`).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
+open = "5"
 
 # `--snapshot` (#6) captures the popup's WKWebView; the versions are the
 # ones wry already builds.

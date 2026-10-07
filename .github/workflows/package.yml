@@ -529,21 +529,21 @@ jobs:
           DIR: ${{ steps.install.outputs.dir }}
         run: |
           set "PATH=%DIR%\bin;%SystemRoot%\System32;%SystemRoot%"
-          if not exist "%DIR%\node.exe" exit /b 1
-          if not exist "%DIR%\git\cmd\git.exe" exit /b 1
-          if not exist "%DIR%\components\agent-bot\agent-bot.mjs" exit /b 1
-          if not exist "%DIR%\components\agent-comms\bin\agent-comms.mjs" exit /b 1
-          if not exist "%DIR%\components\npm\bin\npm-cli.js" exit /b 1
-          if exist "%DIR%\bin\node" exit /b 1
-          if exist "%DIR%\git-templates" exit /b 1
-          node -p process.version | findstr /x "v%NODE_VERSION%" || exit /b 1
-          node -e "process.exit(0)" || exit /b 1
-          git --version | findstr /c:"git version %GIT_VERSION%" || exit /b 1
-          git init -q "%RUNNER_TEMP%\repo" || exit /b 1
-          if not exist "%RUNNER_TEMP%\repo\.git\info\exclude" exit /b 1
-          git -C "%RUNNER_TEMP%\repo" -c user.name=ci -c user.email=ci@example.invalid commit -q --allow-empty -m init || exit /b 1
-          git -C "%RUNNER_TEMP%\repo" worktree add -q "%RUNNER_TEMP%\wt" || exit /b 1
-          git clone -q --depth 1 https://github.com/qwts/agent-sop "%RUNNER_TEMP%\sop" || exit /b 1
+          dir /b "%DIR%\bin" "%DIR%\git\cmd" "%DIR%\components\agent-bot" "%DIR%\components\agent-comms" "%DIR%\components\npm"
+          for %%F in ("%DIR%\node.exe" "%DIR%\git\cmd\git.exe" "%DIR%\components\agent-bot\agent-bot.mjs" "%DIR%\components\agent-comms\bin\agent-comms.mjs" "%DIR%\components\npm\bin\npm-cli.js") do if not exist "%%~F" (echo missing: %%~F & exit /b 1)
+          for %%F in ("%DIR%\bin\node" "%DIR%\git-templates") do if exist "%%~F" (echo unexpected in the Windows bundle: %%~F & exit /b 1)
+          where node git
+          "%DIR%\node.exe" -p process.version
+          node -p process.version
+          node -p process.execPath
+          node -p process.version | findstr /c:"v%NODE_VERSION%" || (echo wrong node & exit /b 1)
+          node -e "process.exit(0)" || (echo node.cmd failed & exit /b 1)
+          git --version | findstr /c:"git version %GIT_VERSION%" || (echo wrong git & exit /b 1)
+          git init -q "%RUNNER_TEMP%\repo" || (echo git init failed & exit /b 1)
+          if not exist "%RUNNER_TEMP%\repo\.git\info\exclude" (echo git templates missing & exit /b 1)
+          git -C "%RUNNER_TEMP%\repo" -c user.name=ci -c user.email=ci@example.invalid commit -q --allow-empty -m init || (echo git commit failed & exit /b 1)
+          git -C "%RUNNER_TEMP%\repo" worktree add -q "%RUNNER_TEMP%\wt" || (echo git worktree failed & exit /b 1)
+          git clone -q --depth 1 https://github.com/qwts/agent-sop "%RUNNER_TEMP%\sop" || (echo git https clone failed & exit /b 1)
 
       - name: Verify Trusted Signing signatures
         if: steps.signing.outputs.signed == 'true'
