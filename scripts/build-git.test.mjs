@@ -3,7 +3,9 @@ import { test } from 'node:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { archOf, buildGit, fetchTarball, gitSidecarName, makeArguments, SIDECARS, sliceFile } from './build-git.mjs';
+import {
+  archOf, buildGit, fetchMinGit, fetchTarball, gitSidecarName, isWindowsTarget, makeArguments, mingitRelease, SIDECARS, sliceFile, unpackMinGit,
+} from './build-git.mjs';
 
 const PINS = JSON.parse(readFileSync(new URL('../components.json', import.meta.url), 'utf8'));
 
@@ -118,4 +120,77 @@ test('a single-slice build copies without lipo', (t) => {
   assert.deepEqual(copies, ['git-aarch64-apple-darwin', 'git-remote-https-aarch64-apple-darwin']);
   assert.equal(lipoed, false);
   assert.throws(() => buildGit('x86_64-pc-windows-msvc', {}), /only for macOS/);
+});
+
+test('MinGit is pinned by version and SHA-256, to a Git for Windows release of the pinned git', () => {
+  assert.match(PINS.mingit.version, /^2\.\d+\.\d+(?:\.\d+)?$/);
+  assert.match(PINS.mingit.sha256, /^[0-9a-f]{64}$/);
+  assert.ok(PINS.mingit.version.startsWith(`${PINS.git.version}.`) || PINS.mingit.version === PINS.git.version, 'MinGit follows the git pin');
+  assert.equal(isWindowsTarget('x86_64-pc-windows-msvc'), true);
+  assert.equal(isWindowsTarget('aarch64-pc-windows-msvc'), true);
+  assert.equal(isWindowsTarget('universal-apple-darwin'), false);
+});
+
+test('a MinGit pin names the Git for Windows tag, the 64-bit asset and the version git reports', () => {
+  assert.deepEqual(mingitRelease({ version: '2.56.0.2' }), {
+    tag: 'v2.56.0.windows.2',
+    asset: 'MinGit-2.56.0.2-64-bit.zip',
+    url: 'https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip',
+    gitVersion: '2.56.0.windows.2',
+  });
+  assert.equal(mingitRelease({ version: '2.57.0' }).tag, 'v2.57.0.windows.1');
+  assert.equal(mingitRelease({ version: '2.57.0' }).asset, 'MinGit-2.57.0-64-bit.zip');
+  assert.equal(mingitRelease({ version: '2.57.0' }).gitVersion, '2.57.0.windows.1');
+  assert.throws(() => mingitRelease({ version: 'v2.57.0' }), /not a Git for Windows version/);
+});
+
+test('the MinGit zip is fetched once, verified every time, and a bad one is dropped', async (t) => {
+  const cache = mkdtempSync(path.join(tmpdir(), 'mingit-cache-'));
+  t.after(() => rmSync(cache, { recursive: true, force: true }));
+  const body = Buffer.from('not really MinGit');
+  const calls = [];
+  const fetchFn = async (url) => { calls.push(url); return { ok: true, arrayBuffer: async () => body }; };
+  await assert.rejects(fetchMinGit({ version: '2.56.0.2', sha256: 'e'.repeat(64) }, { cache, fetchFn }), /SHA-256/);
+  assert.deepEqual(calls, ['https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip']);
+  assert.equal(existsSync(path.join(cache, 'MinGit-2.56.0.2-64-bit.zip')), false);
+  const { createHash } = await import('node:crypto');
+  const good = { version: '2.56.0.2', sha256: createHash('sha256').update(body).digest('hex') };
+  const file = await fetchMinGit(good, { cache, fetchFn });
+  assert.equal(path.basename(file), 'MinGit-2.56.0.2-64-bit.zip');
+  await fetchMinGit(good, { cache, fetchFn });
+  assert.equal(calls.length, 2);
+});
+
+test('a Windows target unpacks MinGit whole into resources/git, stamped, and is reused', (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mingit-unpack-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const resources = path.join(dir, 'git');
+  const pins = { version: '2.56.0.2', sha256: 'a'.repeat(64) };
+  const unzips = [];
+  const unzip = (zip, dest) => {
+    unzips.push([path.basename(zip), path.relative(dir, dest)]);
+    mkdirSync(path.join(dest, 'cmd'), { recursive: true });
+    writeFileSync(path.join(dest, 'cmd', 'git.exe'), 'MZ');
+    writeFileSync(path.join(dest, 'LICENSE.txt'), 'GPL-2.0');
+  };
+  const out = unpackMinGit('x86_64-pc-windows-msvc', { zip: '/cache/MinGit-2.56.0.2-64-bit.zip', resources, pins, unzip });
+  assert.equal(out, resources);
+  assert.deepEqual(unzips, [['MinGit-2.56.0.2-64-bit.zip', 'git']]);
+  assert.ok(existsSync(path.join(resources, 'cmd', 'git.exe')));
+  assert.equal(readFileSync(path.join(dir, 'git.version'), 'utf8'), `2.56.0.2 ${'a'.repeat(64)}`);
+  // The stamp matches the pin: nothing is unpacked again.
+  unpackMinGit('x86_64-pc-windows-msvc', { zip: '/cache/MinGit-2.56.0.2-64-bit.zip', resources, pins, unzip });
+  assert.equal(unzips.length, 1);
+  // A new pin replaces the tree.
+  writeFileSync(path.join(resources, 'stale.txt'), '');
+  unpackMinGit('x86_64-pc-windows-msvc', { zip: '/cache/MinGit-2.57.0-64-bit.zip', resources, pins: { version: '2.57.0', sha256: 'b'.repeat(64) }, unzip });
+  assert.equal(unzips.length, 2);
+  assert.equal(existsSync(path.join(resources, 'stale.txt')), false);
+  assert.equal(readFileSync(path.join(dir, 'git.version'), 'utf8'), `2.57.0 ${'b'.repeat(64)}`);
+  // A zip without git's launcher is not MinGit.
+  assert.throws(
+    () => unpackMinGit('x86_64-pc-windows-msvc', { zip: '/cache/x.zip', resources, pins: { version: '2.58.0', sha256: 'c'.repeat(64) }, unzip: () => {} }),
+    /no cmd\/git.exe/,
+  );
+  assert.throws(() => unpackMinGit('universal-apple-darwin', { zip: '/cache/x.zip', resources, pins, unzip }), /only for Windows/);
 });

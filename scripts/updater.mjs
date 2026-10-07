@@ -13,7 +13,11 @@
 //
 // usage:
 //   SIGNED=true|false node scripts/updater.mjs config OUT.json >> "$GITHUB_OUTPUT"
-//   node scripts/updater.mjs manifest VERSION URL SIGNATURE_FILE > latest.json
+//   node scripts/updater.mjs manifest VERSION URL SIGNATURE_FILE \
+//     [--windows URL SIGNATURE_FILE] > latest.json
+// The Windows entry (ADR-0046 decision 8) is the signed NSIS installer and
+// its signature, in the same manifest, so a Windows install updates from
+// the same feed; it is present only when a signed Windows build exists.
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -26,6 +30,9 @@ export const MANIFEST_PLATFORMS = Object.freeze([
   'darwin-aarch64-app',
   'darwin-x86_64-app',
 ]);
+
+// The Windows installer serves the one Windows build there is (x64).
+export const WINDOWS_MANIFEST_PLATFORMS = Object.freeze(['windows-x86_64']);
 
 function checkPubkey(pubkey) {
   // `tauri signer generate` prints the public key as base64 of a minisign
@@ -88,17 +95,26 @@ export function updaterConfig(env = process.env, { signed = false } = {}) {
   };
 }
 
-export function updaterManifest({ version, url, signature, notes = '', pubDate = new Date() },
+function manifestEntry(what, url, signature, insecure) {
+  checkEndpoint(`the ${what} URL`, url, insecure);
+  if (!signature.trim()) throw new Error(`the ${what} signature is empty`);
+  return { signature: signature.trim(), url };
+}
+
+export function updaterManifest({ version, url, signature, windows = null, notes = '', pubDate = new Date() },
   { insecure = false } = {}) {
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error(`${version} is not a semver version`);
-  checkEndpoint('the update URL', url, insecure);
-  if (!signature.trim()) throw new Error('the update signature is empty');
-  const entry = { signature: signature.trim(), url };
+  const entry = manifestEntry('update', url, signature, insecure);
+  const platforms = Object.fromEntries(MANIFEST_PLATFORMS.map((key) => [key, entry]));
+  if (windows) {
+    const installer = manifestEntry('Windows update', windows.url, windows.signature, insecure);
+    for (const key of WINDOWS_MANIFEST_PLATFORMS) platforms[key] = installer;
+  }
   return {
     version,
     notes,
     pub_date: pubDate.toISOString(),
-    platforms: Object.fromEntries(MANIFEST_PLATFORMS.map((key) => [key, entry])),
+    platforms,
   };
 }
 
@@ -110,9 +126,16 @@ function main([command, ...args]) {
     writeFileSync(out, `${JSON.stringify(result.config, null, 2)}\n`);
     process.stdout.write(`enabled=${result.enabled}\nartifacts=${result.artifacts}\n`);
   } else if (command === 'manifest') {
-    const [version, url, signatureFile] = args;
-    if (!signatureFile) throw new Error('usage: updater.mjs manifest VERSION URL SIGNATURE_FILE');
-    const manifest = updaterManifest({ version, url, signature: readFileSync(signatureFile, 'utf8') },
+    const [version, url, signatureFile, ...rest] = args;
+    const usage = 'usage: updater.mjs manifest VERSION URL SIGNATURE_FILE [--windows URL SIGNATURE_FILE]';
+    if (!signatureFile) throw new Error(usage);
+    let windows = null;
+    if (rest.length) {
+      const [flag, windowsUrl, windowsSignatureFile, ...extra] = rest;
+      if (flag !== '--windows' || !windowsSignatureFile || extra.length) throw new Error(usage);
+      windows = { url: windowsUrl, signature: readFileSync(windowsSignatureFile, 'utf8') };
+    }
+    const manifest = updaterManifest({ version, url, signature: readFileSync(signatureFile, 'utf8'), windows },
       { insecure: process.env.GENIUSBAR_UPDATER_INSECURE === '1' });
     process.stdout.write(`${JSON.stringify(manifest, null, 2)}\n`);
   } else {
