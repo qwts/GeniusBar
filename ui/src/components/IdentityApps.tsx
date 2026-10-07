@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { Github } from 'lucide-react';
 import { BridgeError, inApp } from '../bridge';
 import { useI18n, type Translate } from '../lib/i18n';
 import type { MessageKey } from '../locales/en';
@@ -19,12 +20,24 @@ export interface IdentityInstallation {
   repositorySelection: 'all' | 'selected';
 }
 
+/**
+ * The stored key's public fingerprint and when agent-bot stored it
+ * (agent-bot-identity #547); `updatedAt` is null for a key an older
+ * agent-bot stored.
+ */
+export interface IdentityKey {
+  fingerprint: string;
+  updatedAt: string | null;
+}
+
 /** One row of `agent-bot identity apps list --json`. */
 export interface IdentityApp {
   slug: string;
   botLogin: string;
   issuerPresent: boolean;
   keyPresent: boolean;
+  /** Null without a key, and from a bundle older than agent-bot 0.10.33. */
+  key: IdentityKey | null;
   installations: IdentityInstallation[];
   harnesses: string[];
   souls: string[];
@@ -64,6 +77,11 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []);
 
+function normalizeKey(raw: unknown): IdentityKey | null {
+  if (!isRecord(raw) || typeof raw.fingerprint !== 'string' || raw.fingerprint === '') return null;
+  return { fingerprint: raw.fingerprint, updatedAt: typeof raw.updatedAt === 'string' && raw.updatedAt !== '' ? raw.updatedAt : null };
+}
+
 export function normalizeIdentityApp(raw: unknown): IdentityApp | null {
   if (!isRecord(raw) || typeof raw.slug !== 'string' || raw.slug === '') return null;
   const mint = isRecord(raw.liveMint) ? raw.liveMint : {};
@@ -73,6 +91,7 @@ export function normalizeIdentityApp(raw: unknown): IdentityApp | null {
     botLogin: typeof raw.botLogin === 'string' ? raw.botLogin : `${raw.slug}[bot]`,
     issuerPresent: raw.issuerPresent === true,
     keyPresent: raw.keyPresent === true,
+    key: normalizeKey(raw.key),
     installations: Array.isArray(raw.installations)
       ? raw.installations.flatMap((i): IdentityInstallation[] => (isRecord(i) && typeof i.id === 'number' && typeof i.account === 'string'
         ? [{ id: i.id, account: i.account, repositorySelection: i.repositorySelection === 'all' ? 'all' : 'selected' }] : []))
@@ -237,7 +256,10 @@ export function useIdentityAction() {
   return { busy, error, run, setError };
 }
 
+type IdentityRun = ReturnType<typeof useIdentityAction>['run'];
+
 const smallButton = 'min-h-6 rounded border border-border px-2 font-sans text-[11px] hover:bg-accent disabled:opacity-50';
+const smallPrimaryButton = 'min-h-6 rounded bg-primary px-2 font-sans text-[11px] text-primary-foreground hover:bg-primary/90 disabled:opacity-50';
 
 /** An App ID field and the key-file button that connects it. */
 export function ConnectForm({ onConnected, label }: { onConnected?: (result: IdentityAppResult) => void; label?: string }) {
@@ -275,48 +297,128 @@ export function RotatedNotice({ result }: { result: IdentityAppResult }) {
   );
 }
 
+/** The Apps with a key a companion could act as instead of `current`. */
+export function assignChoices(apps: readonly IdentityApp[], current: IdentityApp | null): IdentityApp[] {
+  return apps.filter((app) => app.keyPresent && app.slug !== current?.slug);
+}
+
+/** "Change…": assigns one of `choices` to the companion through agent-bot. */
+export function AssignSelect({ agentId, name, choices, disabled, run }:
+  { agentId: string; name: string; choices: readonly IdentityApp[]; disabled: boolean; run: IdentityRun }) {
+  const { t } = useI18n();
+  return (
+    <select aria-label={t('identity.changeFor', { name })} value="" disabled={disabled}
+      onChange={(e) => { const slug = e.target.value; if (slug) run('assign', (s) => s.assign(slug, { soul: agentId })); }}
+      className="h-6 rounded border border-input bg-transparent px-1 font-sans text-[11px] text-foreground">
+      <option value="">{t('identity.change')}</option>
+      {choices.map((app) => <option key={app.slug} value={app.slug}>{app.botLogin}</option>)}
+    </select>
+  );
+}
+
+/** The waiting and refusal lines under an identity control. */
+export function ActionLines({ busy, error }: { busy: string | null; error: string | null }) {
+  const { t } = useI18n();
+  return (
+    <>
+      {busy && <span className="block font-sans text-[11px] text-muted-foreground" role="status">{t('identity.waiting')}</span>}
+      {error && <span className="error block font-sans text-[11px]" role="alert">{t('identity.failed', { message: error })}</span>}
+    </>
+  );
+}
+
+/** Replaces `slug`'s key: the shell asks for the new key file; agent-bot keeps it. */
+export function rotateKey(run: IdentityRun, slug: string, t: Translate, done: (result: IdentityAppResult) => void) {
+  run('rotate', (s) => s.rotateKey(slug, t('identity.pickNewKey', { app: slug })), done);
+}
+
 /**
- * The Details tab's Acts as row value (#67, #122 "GitHub App row"): the
- * App this companion acts as on GitHub, or "your account"; "Change…" lists
- * the Apps with a key to assign it to, "Rotate key…" replaces the current
- * App's key, and "Connect…" shows while agent-bot manages none.
+ * The Details tab's Acts as row value (#67, #122): the App this companion
+ * acts as on GitHub, or "your account"; "Change…" lists the Apps with a key
+ * to assign it to. Rotate and Connect live on the ⓘ sheet's GitHub App row.
  */
 export function ActsAs({ agentId, name }: { agentId: string; name: string }) {
   const { t } = useI18n();
   const { apps } = useIdentityApps();
   const { busy, error, run } = useIdentityAction();
-  const [rotated, setRotated] = useState<IdentityAppResult | null>(null);
-  const [connecting, setConnecting] = useState(false);
-  useEffect(() => { setRotated(null); setConnecting(false); }, [agentId]);
   if (!apps) return null;
   const current = appFor(apps, agentId);
-  const choices = apps.filter((app) => app.keyPresent && app.slug !== current?.slug);
+  const choices = assignChoices(apps, current);
   return (
     <>
       <span>{current ? current.botLogin : t('identity.yourAccount')}</span>
-      <span className="mt-1 flex flex-wrap items-center gap-1">
-        {choices.length > 0 && (
-          <select aria-label={t('identity.changeFor', { name })} value="" disabled={busy !== null}
-            onChange={(e) => { const slug = e.target.value; if (slug) run('assign', (s) => s.assign(slug, { soul: agentId })); }}
-            className="h-6 rounded border border-input bg-transparent px-1 font-sans text-[11px] text-foreground">
-            <option value="">{t('identity.change')}</option>
-            {choices.map((app) => <option key={app.slug} value={app.slug}>{app.botLogin}</option>)}
-          </select>
-        )}
-        {current && (
+      {choices.length > 0 && (
+        <span className="mt-1 flex flex-wrap items-center gap-1">
+          <AssignSelect agentId={agentId} name={name} choices={choices} disabled={busy !== null} run={run} />
+        </span>
+      )}
+      <ActionLines busy={busy} error={error} />
+    </>
+  );
+}
+
+/** "Key issued {when}" in the owner's language, or null when the time is unknown or unreadable. */
+function issuedText(updatedAt: string | null, t: Translate, lang: string): string | null {
+  if (!updatedAt) return null;
+  const when = new Date(updatedAt);
+  return Number.isNaN(when.getTime()) ? null : t('keyd.issued', { when: when.toLocaleDateString(lang) });
+}
+
+/**
+ * The ⓘ sheet's GitHub App row (Lovable `DetailsButton`): the App's key
+ * fingerprint and when it was issued (agent-bot 0.10.33+), else the census's
+ * App name; "Rotate key" for a managed App, "Connect GitHub App" otherwise,
+ * which opens "Change…" (Apps with a key) or the App ID form under the row.
+ * The buttons need agent-bot's managed Apps; without them the row is text.
+ */
+export function GitHubAppRow({ agentId, name, appSlug }: { agentId: string; name: string; appSlug: string | null }) {
+  const { t, lang } = useI18n();
+  const { apps, reload } = useIdentityApps();
+  const { busy, error, run } = useIdentityAction();
+  const [rotated, setRotated] = useState<IdentityAppResult | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  // Read the list as the sheet opens, as the Details tab does per soul.
+  useEffect(() => { reload(); setRotated(null); setConnecting(false); }, [reload, agentId]);
+  const app = appFor(apps, agentId) ?? apps?.find((a) => a.slug === appSlug) ?? null;
+  const connected = app !== null || appSlug !== null;
+  let subtitle = t('keyd.none');
+  if (app?.key) {
+    const issued = issuedText(app.key.updatedAt, t, lang);
+    subtitle = `${t('keyd.connectedKey', { fp: app.key.fingerprint })}${issued ? ` · ${issued}` : ''}`;
+  } else if (connected) {
+    subtitle = t('keyd.connected', { app: app?.slug ?? appSlug ?? '' });
+  }
+  const choices = apps ? assignChoices(apps, app) : [];
+  return (
+    <div className="p-3">
+      <div className="flex items-center gap-3">
+        <Github className="size-4 text-muted-foreground" aria-hidden />
+        <div className="min-w-0 flex-1">
+          <h3 className="m-0 text-sm">{t('keyd.title')}</h3>
+          <p className="m-0 truncate font-mono text-[11px] text-muted-foreground" title={subtitle}>{subtitle}</p>
+        </div>
+        {app && (
           <button type="button" className={smallButton} disabled={busy !== null}
-            onClick={() => { setRotated(null); run('rotate', (s) => s.rotateKey(current.slug, t('identity.pickNewKey', { app: current.slug })), setRotated); }}>
-            {t('identity.rotate')}
+            onClick={() => { setRotated(null); rotateKey(run, app.slug, t, setRotated); }}>
+            {t('keyd.rotate')}
           </button>
         )}
-        {apps.length === 0 && !connecting && (
-          <button type="button" className={smallButton} onClick={() => setConnecting(true)}>{t('identity.connect')}</button>
+        {apps && !connected && (
+          <button type="button" className={smallPrimaryButton} aria-expanded={connecting}
+            onClick={() => setConnecting((open) => !open)}>
+            {t('keyd.connect')}
+          </button>
         )}
-      </span>
-      {connecting && apps.length === 0 && <ConnectForm />}
-      {busy && <span className="block font-sans text-[11px] text-muted-foreground" role="status">{t('identity.waiting')}</span>}
-      {error && <span className="error block font-sans text-[11px]" role="alert">{t('identity.failed', { message: error })}</span>}
-      {rotated && <RotatedNotice result={rotated} />}
-    </>
+      </div>
+      {(connecting && apps && !connected) || busy || error || rotated ? (
+        <div className="mt-2 grid gap-1 pl-7">
+          {connecting && apps && !connected && (choices.length > 0
+            ? <span><AssignSelect agentId={agentId} name={name} choices={choices} disabled={busy !== null} run={run} /></span>
+            : <ConnectForm />)}
+          <ActionLines busy={busy} error={error} />
+          {rotated && <RotatedNotice result={rotated} />}
+        </div>
+      ) : null}
+    </div>
   );
 }

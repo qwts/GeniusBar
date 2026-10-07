@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback } from 'react';
 import { ShieldCheck, Zap } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import type { CensusRow } from '../model/census';
@@ -14,8 +14,9 @@ import { useFleetMode } from './SoulNotices';
 export function FleetMode({ roster }: { roster: readonly CensusRow[] }) {
   const { t } = useI18n();
   const { mode, saving, error, change } = useFleetMode(roster);
-  const input = useRef<HTMLInputElement>(null);
-  useEffect(() => { if (input.current) input.current.indeterminate = mode === 'mixed'; }, [mode]);
+  // A callback ref sets the DOM-only indeterminate flag at commit, with the
+  // render it belongs to; an effect ran after paint and CI saw the gap.
+  const input = useCallback((el: HTMLInputElement | null) => { if (el) el.indeterminate = mode === 'mixed'; }, [mode]);
   if (!mode) return null;
   const auto = mode === 'autopilot';
   const mixed = mode === 'mixed';

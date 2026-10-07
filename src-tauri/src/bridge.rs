@@ -4978,6 +4978,28 @@ fn str_list(value: &Value, name: &str) -> Vec<Value> {
         .unwrap_or_default()
 }
 
+/// The stored key's public fingerprint and when agent-bot stored it
+/// (agent-bot-identity #547): `{fingerprint, updatedAt}`, or null when the
+/// row has none (no key, or an agent-bot older than 0.10.33). Only an
+/// `SHA256:` fingerprint passes, so nothing secret-shaped can.
+fn identity_app_key(row: &Value) -> Value {
+    let key = row.get("key").unwrap_or(&Value::Null);
+    match str_field(key, "fingerprint") {
+        Some(fingerprint)
+            if fingerprint.len() <= 128
+                && fingerprint.strip_prefix("SHA256:").is_some_and(|rest| {
+                    !rest.is_empty()
+                        && rest.chars().all(|c| {
+                            c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '=' | ':')
+                        })
+                }) =>
+        {
+            json!({ "fingerprint": fingerprint, "updatedAt": str_field(key, "updatedAt") })
+        }
+        _ => Value::Null,
+    }
+}
+
 /// One list row with only its documented, secret-free fields.
 fn identity_app_row(row: &Value) -> Option<Value> {
     let slug = str_field(row, "slug").filter(|s| valid_identity_slug(s))?;
@@ -5014,6 +5036,7 @@ fn identity_app_row(row: &Value) -> Option<Value> {
         "botLogin": str_field(row, "botLogin").unwrap_or_else(|| format!("{slug}[bot]")),
         "issuerPresent": row.get("issuerPresent").and_then(Value::as_bool).unwrap_or(false),
         "keyPresent": row.get("keyPresent").and_then(Value::as_bool).unwrap_or(false),
+        "key": identity_app_key(row),
         "installations": installations,
         "harnesses": str_list(row, "harnesses"),
         "souls": str_list(row, "souls"),
@@ -5240,7 +5263,7 @@ mod identity_app_tests {
     #[test]
     fn keeps_only_the_documented_list_fields() {
         let list = parse_identity_apps_list(
-            br#"{"schemaVersion":1,"apps":[{"slug":"luna-bot","botLogin":"luna-bot[bot]","issuerPresent":true,"keyPresent":true,"privateKeyPem":"-----BEGIN RSA PRIVATE KEY-----","installations":[{"id":7,"account":"qwts","repositorySelection":"all","token":"ghs_x"}],"harnesses":["codex"],"souls":["agent_1"],"liveMint":{"status":"ready","code":null,"checkedAt":"2026-10-06T10:00:00Z","jwt":"x"}},{"slug":"Bad Slug"},{"slug":"old-app","keyPresent":false,"liveMint":{"status":"weird"}}]}
+            br#"{"schemaVersion":1,"apps":[{"slug":"luna-bot","botLogin":"luna-bot[bot]","issuerPresent":true,"keyPresent":true,"key":{"fingerprint":"SHA256:abc+/=","updatedAt":"2026-10-01T12:00:00Z","pem":"-----BEGIN"},"privateKeyPem":"-----BEGIN RSA PRIVATE KEY-----","installations":[{"id":7,"account":"qwts","repositorySelection":"all","token":"ghs_x"}],"harnesses":["codex"],"souls":["agent_1"],"liveMint":{"status":"ready","code":null,"checkedAt":"2026-10-06T10:00:00Z","jwt":"x"}},{"slug":"Bad Slug"},{"slug":"old-app","keyPresent":false,"liveMint":{"status":"weird"}},{"slug":"odd-key","keyPresent":true,"key":{"fingerprint":"-----BEGIN RSA PRIVATE KEY-----"}}]}
 "#,
             b"",
         )
@@ -5250,12 +5273,17 @@ mod identity_app_tests {
             json!({ "apps": [
                 {
                     "slug": "luna-bot", "botLogin": "luna-bot[bot]", "issuerPresent": true, "keyPresent": true,
+                    "key": { "fingerprint": "SHA256:abc+/=", "updatedAt": "2026-10-01T12:00:00Z" },
                     "installations": [{ "id": 7, "account": "qwts", "repositorySelection": "all" }],
                     "harnesses": ["codex"], "souls": ["agent_1"],
                     "liveMint": { "status": "ready", "code": null, "checkedAt": "2026-10-06T10:00:00Z" },
                 },
                 {
-                    "slug": "old-app", "botLogin": "old-app[bot]", "issuerPresent": false, "keyPresent": false,
+                    "slug": "old-app", "botLogin": "old-app[bot]", "issuerPresent": false, "keyPresent": false, "key": null,
+                    "installations": [], "harnesses": [], "souls": [], "liveMint": { "status": "unknown" },
+                },
+                {
+                    "slug": "odd-key", "botLogin": "odd-key[bot]", "issuerPresent": false, "keyPresent": true, "key": null,
                     "installations": [], "harnesses": [], "souls": [], "liveMint": { "status": "unknown" },
                 },
             ] })

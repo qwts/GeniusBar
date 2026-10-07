@@ -10,7 +10,7 @@ import { layoutActions } from '../state/layout';
 import { preferenceActions } from '../state/preferences';
 import { CompanionDetails } from './CompanionSession';
 import {
-  identityStatus, IdentityAppsProvider, liveIdentityApps, normalizeIdentityApps,
+  GitHubAppRow, identityStatus, IdentityAppsProvider, liveIdentityApps, normalizeIdentityApps,
   type IdentityApp, type IdentityAppsSource, type IdentityCreateStatus,
 } from './IdentityApps';
 import { IdentityAppsCard } from './IdentityAppsCard';
@@ -23,7 +23,7 @@ const [luna, child] = sampleCensus;
 
 function app(slug: string, over: Partial<IdentityApp> = {}): IdentityApp {
   return {
-    slug, botLogin: `${slug}[bot]`, issuerPresent: true, keyPresent: true,
+    slug, botLogin: `${slug}[bot]`, issuerPresent: true, keyPresent: true, key: null,
     installations: [{ id: 7, account: 'qwts', repositorySelection: 'all' }],
     harnesses: [], souls: [], liveMint: { status: 'ready', code: null, checkedAt: '2026-10-06T10:00:00Z' }, ...over,
   };
@@ -96,37 +96,105 @@ describe('Acts as row', () => {
     await waitFor(async () => expect((await actsAs()).textContent).toContain('other-bot[bot]'));
   });
 
-  it('rotates the current key and says to delete the old one on github.com', async () => {
-    const source = fakeSource([app('luna-bot', { souls: [luna.agentId] })]);
-    withIdentities(source, <CompanionDetails soul={luna} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Rotate key…' }));
+  it('keeps only Change…: Rotate key and Connect moved to the ⓘ sheet\'s GitHub App row', async () => {
+    withIdentities(fakeSource([app('luna-bot', { souls: [luna.agentId] }), app('other-bot')]), <CompanionDetails soul={luna} />);
+    const value = await actsAs();
+    await waitFor(() => expect(within(value).getByRole('combobox', { name: 'Change the GitHub App for luna' })).toBeTruthy());
+    expect(within(value).queryByRole('button')).toBeNull();
+  });
+
+  it('offers no Connect… when agent-bot manages no App', async () => {
+    withIdentities(fakeSource([]), <CompanionDetails soul={luna} />);
+    const value = await actsAs();
+    await waitFor(() => expect(value.textContent).toContain('your account'));
+    expect(within(value).queryByRole('button')).toBeNull();
+  });
+});
+
+describe('GitHub App row in the ⓘ sheet (Lovable fidelity pass 5)', () => {
+  const issuedAt = '2026-10-01T12:00:00Z';
+  const keyed = (over: Partial<IdentityApp> = {}) =>
+    app('luna-bot', { souls: [luna.agentId], key: { fingerprint: 'SHA256:abc=', updatedAt: issuedAt }, ...over });
+  const row = (source: IdentityAppsSource | null, appSlug: string | null = 'luna-bot') =>
+    withIdentities(source, <GitHubAppRow agentId={luna.agentId} name="luna" appSlug={appSlug} />);
+
+  it('shows the key fingerprint and when it was issued', async () => {
+    row(fakeSource([keyed()]));
+    const when = new Date(issuedAt).toLocaleDateString('en');
+    expect(await screen.findByText(`Connected · key SHA256:abc= · Key issued ${when}`)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'GitHub App' })).toBeTruthy();
+  });
+
+  it('leaves out the issued date when agent-bot does not know it', async () => {
+    row(fakeSource([keyed({ key: { fingerprint: 'SHA256:abc=', updatedAt: null } })]));
+    expect(await screen.findByText('Connected · key SHA256:abc=')).toBeTruthy();
+  });
+
+  it('shows Connected · {app} when an older agent-bot gives no key', async () => {
+    row(fakeSource([app('luna-bot', { souls: [luna.agentId] })]));
+    expect(await screen.findByRole('button', { name: 'Rotate key' })).toBeTruthy();
+    expect(screen.getByText('Connected · luna-bot')).toBeTruthy();
+  });
+
+  it('is text only while the managed Apps are hidden', () => {
+    row(null);
+    expect(screen.getByText('Connected · luna-bot')).toBeTruthy();
+    expect(screen.queryByRole('button')).toBeNull();
+    cleanup();
+    row(null, null);
+    expect(screen.getByText('Not connected · joins without an App')).toBeTruthy();
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('rotates the key and says to delete the old one on github.com', async () => {
+    const source = fakeSource([keyed()]);
+    row(source);
+    fireEvent.click(await screen.findByRole('button', { name: 'Rotate key' }));
     expect(source.rotateKey).toHaveBeenCalledWith('luna-bot', 'Choose the new private key for luna-bot (.pem)');
     const notice = await screen.findByText(/New key in use for luna-bot\./);
     expect(notice.textContent).toContain('Old key: SHA256:old=.');
     expect(notice.textContent).toContain('Delete the old key in the App’s settings on github.com');
   });
 
-  it('offers Connect… when agent-bot manages no App, with the App ID', async () => {
+  it('shows a rotation refusal, but not a closed file dialog', async () => {
+    const source = fakeSource([keyed()], {
+      rotateKey: vi.fn(async () => { throw new BridgeError('identity-app-cancelled', 'no key file was chosen'); }),
+    });
+    row(source);
+    fireEvent.click(await screen.findByRole('button', { name: 'Rotate key' }));
+    await waitFor(() => expect(source.list).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('alert')).toBeNull();
+    vi.mocked(source.rotateKey).mockRejectedValueOnce(new BridgeError('identity-app-failed', 'the owner did not approve'));
+    fireEvent.click(screen.getByRole('button', { name: 'Rotate key' }));
+    expect((await screen.findByRole('alert')).textContent).toBe('GitHub identity unchanged: the owner did not approve');
+  });
+
+  it('Connect GitHub App opens Change…, and choosing an App assigns it', async () => {
+    const source = fakeSource([app('other-bot', { key: { fingerprint: 'SHA256:other=', updatedAt: null } }), app('no-key', { keyPresent: false })]);
+    row(source, null);
+    const connect = await screen.findByRole('button', { name: 'Connect GitHub App' });
+    expect(screen.getByText('Not connected · joins without an App')).toBeTruthy();
+    expect(screen.queryByRole('combobox')).toBeNull();
+    fireEvent.click(connect);
+    const change = screen.getByRole('combobox', { name: 'Change the GitHub App for luna' }) as HTMLSelectElement;
+    expect([...change.options].map((o) => o.textContent)).toEqual(['Change…', 'other-bot[bot]']);
+    fireEvent.change(change, { target: { value: 'other-bot' } });
+    expect(source.assign).toHaveBeenCalledWith('other-bot', { soul: luna.agentId });
+    expect(await screen.findByText('Connected · key SHA256:other=')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Rotate key' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Connect GitHub App' })).toBeNull();
+  });
+
+  it('Connect GitHub App opens the App ID form when agent-bot manages no App', async () => {
     const source = fakeSource([]);
-    withIdentities(source, <CompanionDetails soul={luna} />);
-    expect((await actsAs()).textContent).toContain('your account');
-    fireEvent.click(screen.getByRole('button', { name: 'Connect…' }));
+    row(source, null);
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect GitHub App' }));
     const choose = screen.getByRole('button', { name: 'Choose key file…' }) as HTMLButtonElement;
     expect(choose.disabled).toBe(true);
     fireEvent.change(screen.getByRole('textbox', { name: 'App ID' }), { target: { value: ' 123 ' } });
     fireEvent.click(choose);
     expect(source.connect).toHaveBeenCalledWith('123', 'Choose the GitHub App’s private key (.pem)');
     expect(await screen.findByRole('combobox', { name: 'Change the GitHub App for luna' })).toBeTruthy();
-  });
-
-  it('shows a refusal, but not a closed file dialog', async () => {
-    const source = fakeSource([app('luna-bot', { souls: [luna.agentId] })], {
-      rotateKey: vi.fn(async () => { throw new BridgeError('identity-app-cancelled', 'no key file was chosen'); }),
-    });
-    withIdentities(source, <CompanionDetails soul={luna} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Rotate key…' }));
-    await waitFor(() => expect(source.list).toHaveBeenCalledTimes(2));
-    expect(screen.queryByRole('alert')).toBeNull();
   });
 });
 
@@ -223,6 +291,21 @@ describe('agent-bot identity calls', () => {
     expect(apps?.[0].botLogin).toBe('a[bot]');
     expect(identityStatus(apps![0])).toBe('unknown');
     expect(normalizeIdentityApps({})).toBeNull();
+  });
+
+  it('reads the key fingerprint, and null from an older bundle or a malformed key', () => {
+    const apps = normalizeIdentityApps({ apps: [
+      { slug: 'new', keyPresent: true, key: { fingerprint: 'SHA256:abc=', updatedAt: '2026-10-01T12:00:00Z' } },
+      { slug: 'legacy', keyPresent: true, key: { fingerprint: 'SHA256:def=', updatedAt: null } },
+      { slug: 'old', keyPresent: true },
+      { slug: 'keyless', keyPresent: false, key: null },
+      { slug: 'odd', keyPresent: true, key: { fingerprint: 7 } },
+    ] });
+    expect(apps?.map((a) => a.key)).toEqual([
+      { fingerprint: 'SHA256:abc=', updatedAt: '2026-10-01T12:00:00Z' },
+      { fingerprint: 'SHA256:def=', updatedAt: null },
+      null, null, null,
+    ]);
   });
 
   it('invokes the shell commands with their arguments', async () => {

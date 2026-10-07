@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, Cpu, Github, Info, LogIn, MousePointer2, Palette, Radio, ShieldCheck, X, Zap } from 'lucide-react';
+import { ArrowLeft, Cpu, Info, LogIn, MousePointer2, Palette, Radio, ShieldCheck, X, Zap } from 'lucide-react';
 import { computerUseSupported, runtimeMetrics, setSoulComms, soulComms, type ComputerUseSwitch, type RuntimeMetrics, type RuntimeObservation, type SoulColdWake, type SoulComms, type SoulMode, type SoulModel, type SoulPopulation } from '../bridge';
 import {
   availabilityNote,
@@ -23,7 +23,7 @@ import { CustomizeDialog } from './CustomizeDialog';
 import { SoulDudle } from './FleetList';
 import { LaunchForm } from './LaunchForm';
 import { ModelSelect } from './ModelField';
-import { ActsAs, useIdentityApps } from './IdentityApps';
+import { ActsAs, GitHubAppRow, useIdentityApps } from './IdentityApps';
 import { useSandbox } from './Sandbox';
 import { runsAsText, SandboxChip } from './SandboxChip';
 import { SoulNotices, SoulSourceContext, useSoulMode, useSoulModel, useSoulPopulation } from './SoulNotices';
@@ -673,8 +673,9 @@ export function ModelRow({ soul, refresh = 0 }: { soul: CensusRow; refresh?: num
 }
 
 /**
- * The design's harness sign-in and GitHub App rows. The App row is
- * read-only: agent-bot has no per-soul connect or rotate yet.
+ * The design's harness sign-in and GitHub App rows. The App row shows the
+ * key and carries Rotate key / Connect GitHub App once agent-bot's managed
+ * Apps are readable (`GitHubAppRow`).
  */
 export function SoulFactRows({ soul, refresh = 0 }: { soul: CensusRow; refresh?: number }) {
   const { t } = useI18n();
@@ -689,17 +690,7 @@ export function SoulFactRows({ soul, refresh = 0 }: { soul: CensusRow; refresh?:
           <span className={`text-xs ${signIn === 'ok' ? 'text-success' : 'text-destructive'}`}>{t(SIGN_IN_TEXT[signIn])}</span>
         </div>
       )}
-      {record && (
-        <div className="flex items-center gap-3 p-3">
-          <Github className="size-4 text-muted-foreground" aria-hidden />
-          <div className="min-w-0 flex-1">
-            <h3 className="m-0 text-sm">{t('keyd.title')}</h3>
-            <p className="m-0 truncate font-mono text-[11px] text-muted-foreground">
-              {record.appSlug ? t('keyd.connected', { app: record.appSlug }) : t('keyd.none')}
-            </p>
-          </div>
-        </div>
-      )}
+      {record && <GitHubAppRow agentId={soul.agentId} name={displayName(soul)} appSlug={record.appSlug} />}
     </>
   );
 }
@@ -707,7 +698,7 @@ export function SoulFactRows({ soul, refresh = 0 }: { soul: CensusRow; refresh?:
 /**
  * ⓘ and the Details sheet (Lovable 19.29.22): the soul's actionable rows.
  * Wake on new messages, Agent comms, execution mode, computer use, model
- * (#128), harness sign-in and the GitHub App (read-only), each once
+ * (#128), harness sign-in and the GitHub App (key, Rotate / Connect), each once
  * agent-bot reports it; then Customize… (#64), once agent-bot answers
  * `soul profile` for the soul (asked each time the sheet opens).
  */
