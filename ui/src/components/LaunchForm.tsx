@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check } from 'lucide-react';
 import { displayName, type CensusRow } from '../model/census';
+import { savedBrief } from '../bridge';
 import { canLaunch, harnessOptions, MAX_BRIEF, MAX_HARNESS, normalPackagePath, preferredHarness, prefillHarness, suggestedName, type LaunchState } from '../model/launch';
 import { useI18n } from '../lib/i18n';
 import { radioGroupKeys } from '../lib/radioGroup';
@@ -58,6 +59,11 @@ interface LaunchFormProps {
    * package path field alone.
    */
   listTemplates?: TemplateLister;
+  /**
+   * Reads the brief an existing soul's last launch saved (#120), prefilled
+   * on relaunch; null when it has none. Defaults to agent-bot's census.
+   */
+  loadBrief?: (agentId: string) => Promise<string | null>;
 }
 
 export function LaunchStatus({ state }: { state: LaunchState }) {
@@ -108,7 +114,7 @@ const field = 'h-9 w-full rounded-md border border-input bg-transparent px-3 tex
  */
 export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness = null, initialPackagePath = '', packageName, preferredHarnesses,
   packageDescription, copyOf: openedCopyOf, checkingPackage: checkingOpened = false, packageError: initialPackageError = null, initialComms, onCancel, onLaunched,
-  roster = [], listTemplates }: LaunchFormProps) {
+  roster = [], listTemplates, loadBrief }: LaunchFormProps) {
   const { t } = useI18n();
   // The design's soul choices (#65): agent-bot's templates, then "Custom
   // soul", which is the package path field. Asked once; never waited on.
@@ -137,10 +143,28 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
   const [name, setName] = useState(soul || copyOf ? '' : suggestedName(packageName));
   // The package's manifest arrives after the form opened (agent-bot's locate
   // runs behind the Finder open): it prefills what the owner has not typed yet.
-  // The brief (#120): what this companion is here to do. The census does not
-  // carry a soul's saved brief, so a relaunch starts blank, and blank sends
-  // none, which keeps the brief agent-bot already has.
+  // The brief (#120): what this companion is here to do. A relaunch reads
+  // the brief agent-bot saved and prefills it; while that loads the field
+  // waits, and when it fails the field stays blank. Blank or unchanged sends
+  // none, which keeps the brief agent-bot already has. The launch never
+  // waits on it, and what the owner typed wins over a late answer.
   const [brief, setBrief] = useState('');
+  const [saved, setSaved] = useState<string | null>(null);
+  const [briefLoading, setBriefLoading] = useState(Boolean(soul));
+  const briefTyped = useRef(false);
+  const relaunched = soul?.agentId;
+  useEffect(() => {
+    if (!relaunched) return;
+    let live = true;
+    setBriefLoading(true);
+    // Asked inside the promise, so a reader that throws leaves the field blank too.
+    Promise.resolve().then(() => (loadBrief ?? savedBrief)(relaunched)).then((text) => {
+      if (!live || !text) return;
+      setSaved(text);
+      if (!briefTyped.current) setBrief(text);
+    }, () => {}).finally(() => { if (live) setBriefLoading(false); });
+    return () => { live = false; };
+  }, [relaunched]);
   const briefLength = brief.trim().length;
   const briefTooLong = briefLength > MAX_BRIEF;
   const [touched, setTouched] = useState<{ name?: boolean; harness?: boolean }>({});
@@ -197,7 +221,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
           name: soul ? '' : name,
           ...(comms === undefined ? {} : { comms }),
           ...(model?.trim() ? { model: model.trim() } : {}),
-          ...(brief.trim() ? { brief } : {}),
+          ...(brief.trim() && brief !== saved ? { brief } : {}),
         });
       }}
     >
@@ -248,13 +272,15 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
         {!soul && custom && packageDescription && <p className="text-xs text-muted-foreground">{packageDescription}</p>}
         <label className="grid gap-1">
           <span className="text-sm font-medium">{t('launch.brief')}</span>
-          <textarea value={brief} rows={3} placeholder={t('launch.briefPlaceholder')} autoComplete="off"
+          <textarea value={brief} rows={3} placeholder={t('launch.briefPlaceholder')} autoComplete="off" disabled={briefLoading}
             aria-describedby="launch-brief-hint launch-brief-count" aria-invalid={briefTooLong || undefined}
-            className="min-h-16 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm text-foreground"
-            onChange={(e) => setBrief(e.target.value)} />
+            className="min-h-16 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm text-foreground disabled:opacity-50"
+            onChange={(e) => { briefTyped.current = true; setBrief(e.target.value); }} />
         </label>
         <p className="flex justify-between gap-2 text-xs text-muted-foreground">
-          <span id="launch-brief-hint">{soul ? t('launch.briefKeep') : t('launch.briefHint')}</span>
+          <span id="launch-brief-hint" role={briefLoading ? 'status' : undefined}>
+            {briefLoading ? t('launch.briefLoading') : soul ? t('launch.briefKeep') : t('launch.briefHint')}
+          </span>
           <span id="launch-brief-count" className={`shrink-0 font-mono ${briefTooLong ? 'text-destructive' : ''}`}>{briefLength} / {MAX_BRIEF}</span>
         </p>
         {briefTooLong && <p className="error small" role="alert">{t('launch.briefTooLong', { max: MAX_BRIEF })}</p>}

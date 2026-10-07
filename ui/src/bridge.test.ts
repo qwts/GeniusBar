@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BridgeError, call, openDesktop, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported, normalizeSoulComputerUse, soulComputerUse, soulComputerUseSupported, liveComputerUse, listSoulTemplates, normalizeSoulTemplates, normalizeSoulProfile, soulProfile, soulProfileFile, popupVisible } from './bridge';
+import { BridgeError, call, openDesktop, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, savedBrief, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported, normalizeSoulComputerUse, soulComputerUse, soulComputerUseSupported, liveComputerUse, listSoulTemplates, normalizeSoulTemplates, normalizeSoulProfile, soulProfile, soulProfileFile, popupVisible } from './bridge';
 
 describe('bridge', () => {
   it('invokes the shell command with the method and params', async () => {
@@ -224,6 +224,19 @@ describe('soul population record (#122)', () => {
     // The computer-use switch (agent-bot-identity #482) only when agent-bot says.
     expect(normalizeSoulPopulation({ agentId: 'a', computerUse: false })?.computerUse).toBe(false);
     expect(normalizeSoulPopulation({ agentId: 'a', computerUse: 'off' })).not.toHaveProperty('computerUse');
+  });
+
+  it('carries the saved launch brief (#120) only when there is one', async () => {
+    expect(normalizeSoulPopulation({ agentId: 'a', brief: 'Review open PRs' })?.brief).toBe('Review open PRs');
+    expect(normalizeSoulPopulation({ agentId: 'a', brief: '  ' })).not.toHaveProperty('brief');
+    expect(normalizeSoulPopulation({ agentId: 'a', brief: null })).not.toHaveProperty('brief');
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); return { agentId: 'agent_1', brief: 'Triage the inbox' }; }) as never;
+    await expect(savedBrief('agent_1', fake)).resolves.toBe('Triage the inbox');
+    expect(calls).toEqual([['soul_population', { agent: 'agent_1' }]]);
+    await expect(savedBrief('agent_1', (async () => ({ agentId: 'agent_1', brief: null })) as never)).resolves.toBeNull();
+    await expect(savedBrief('agent_1', (async () => { throw new Error('no'); }) as never)).rejects.toThrow('no');
+    await expect(savedBrief('agent_1')).resolves.toBeNull();
   });
 });
 

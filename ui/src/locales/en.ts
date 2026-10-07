@@ -159,6 +159,7 @@ export const en = {
   'launch.briefPlaceholder': 'e.g. Keep the release notes current and flag anything unclear',
   'launch.briefHint': 'What this companion is here to do. It reads this on its first turn.',
   'launch.briefKeep': 'What this companion is here to do. Leave blank to keep its current brief.',
+  'launch.briefLoading': 'Loading its current brief…',
   'launch.briefTooLong': 'The brief is longer than {max} characters.',
   'launch.go': 'Launch',
   'launch.comms': 'Agent comms',

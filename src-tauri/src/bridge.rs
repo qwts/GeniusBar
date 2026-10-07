@@ -1536,9 +1536,11 @@ fn parse_cold_wake(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
 
 /// The facts agent-bot's population census keeps about one soul that the
 /// broker's census does not (#122): its GitHub App slug, the harness sign-in
-/// a daemon turn found missing or expired (#84), and its role line. From
-/// `population show <agentId>` (pretty JSON); only those fields come back,
-/// so paths and transcript locators never reach the web view.
+/// a daemon turn found missing or expired (#84), its role line, and the
+/// brief its last launch saved (#120, agent-bot-identity #502), which the
+/// launch dialog prefills on relaunch. From `population show <agentId>`
+/// (pretty JSON); only those fields come back, so paths and transcript
+/// locators never reach the web view.
 #[tauri::command]
 pub async fn soul_population<R: Runtime>(
     app: AppHandle<R>,
@@ -1567,6 +1569,7 @@ fn parse_soul_population(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeEr
                 "comms": field("comms"),
                 "roleLine": field("roleLine"),
                 "computerUse": field("computerUse"),
+                "brief": field("brief"),
             }));
         }
     }
@@ -1665,7 +1668,8 @@ mod details_rows_tests {
   "comms": true,
   "harnessAuth": {"status": "expired", "harness": "claude", "since": "2026-10-05T10:00:00.000Z"},
   "roleLine": "Lead, 2 subagents",
-  "computerUse": false
+  "computerUse": false,
+  "brief": "Review open PRs"
 }
 "#,
             b"",
@@ -1681,6 +1685,10 @@ mod details_rows_tests {
         // `computerUse` (agent-bot-identity #482); an older record has none.
         assert_eq!(record["computerUse"], false);
         assert_eq!(bare["computerUse"], Value::Null);
+        // The saved launch brief (agent-bot-identity #502); a soul launched
+        // without one has none.
+        assert_eq!(record["brief"], "Review open PRs");
+        assert_eq!(bare["brief"], Value::Null);
         assert_eq!(
             parse_soul_population(b"", b"agent-population: no population record for agent_3\n"),
             Err(BridgeError::new(
