@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Check, Circle, Loader2 } from 'lucide-react';
 import { displayName, type CensusRow } from '../model/census';
 import { savedBrief } from '../bridge';
@@ -73,28 +73,28 @@ export function LaunchStatus({ state }: { state: LaunchState }) {
     case 'idle':
       return null;
     case 'requesting':
-      return <p className="muted small" role="status">{t('launch.requesting')}</p>;
+      return <p className="m-0 text-xs text-muted-foreground" role="status">{t('launch.requesting')}</p>;
     case 'pending':
       return (
-        <p className="muted small" role="status">
+        <p className="m-0 text-xs text-muted-foreground" role="status">
           {t('launch.pending')} <span className="selectable">({state.requestId})</span>.
           {state.note && <span className="block">{state.note}</span>}
         </p>
       );
     case 'launched':
       return (
-        <p className="small" role="status">
+        <p className="m-0 text-xs text-foreground" role="status">
           {state.agentId ? <span className="selectable">{t('launch.launchedAs', { agentId: state.agentId })}</span> : t('launch.launched')}
         </p>
       );
     case 'failed':
       return (
-        <p className="error small" role="alert">
+        <p className="m-0 text-[11px] text-destructive" role="alert">
           {t('launch.failed', { detail: state.detail ?? t('launch.failedNoDetail') })}
         </p>
       );
     case 'error':
-      return <p className="error small" role="alert">{state.text}</p>;
+      return <p className="m-0 text-[11px] text-destructive" role="alert">{state.text}</p>;
   }
 }
 
@@ -147,6 +147,8 @@ const radioOn = 'border-primary bg-primary/10 text-foreground';
 const radioOff = 'border-border text-muted-foreground hover:bg-accent';
 const legend = 'mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground';
 const field = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm text-foreground shadow-sm';
+/** The design's Label (shadcn): `text-sm font-medium leading-none`. */
+const LABEL = 'text-sm font-medium leading-none';
 
 /**
  * Launch form for an existing soul or a soul package, drawn as Lovable's
@@ -169,6 +171,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
   const [otherAccount, setOtherAccount] = useState(!soul && accounts.length === 0);
   const [packagePath, setPackagePath] = useState(() => normalPackagePath(initialPackagePath));
   const [packageError, setPackageError] = useState(initialPackageError);
+  const ids = useId();
   const selected = picker ? choice ?? initialChoice(templates, packagePath, Boolean(initialPackagePath || openedCopyOf)) : CUSTOM_SOUL;
   const template = chosenTemplate(templates, selected);
   const custom = template === null;
@@ -308,18 +311,19 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
         {!soul && (
           /* As the design: Name and Role side by side. */
           <div className="grid grid-cols-2 gap-2">
-            <label className="grid gap-1">
-              <span className="text-sm font-medium">{t('launch.name')}</span>
+            <div className="space-y-1">
+              <label htmlFor={`${ids}-name`} className={LABEL}>{t('launch.name')}</label>
               {/* Not a person's name: keep the web view from offering contact AutoFill (#80). */}
-              <input value={name} placeholder={copyOf ? t('launch.nameRequired') : t('launch.nameOptional')} autoComplete="off" className={field}
+              <input id={`${ids}-name`} value={name} placeholder={copyOf ? t('launch.nameRequired') : t('launch.nameOptional')} autoComplete="off" className={field}
                 required={Boolean(copyOf)} aria-describedby={copyOf ? 'launch-copy-hint' : undefined}
                 onChange={(e) => { setTouched((was) => ({ ...was, name: true })); setName(e.target.value); }} />
-            </label>
-            <label className="grid gap-1">
-              <span className="text-sm font-medium">{t('launch.role')}</span>
-              <input value={role} placeholder={t('launch.roleOptional')} autoComplete="off" maxLength={MAX_ROLE} className={field}
+            </div>
+            <div className="space-y-1">
+              <label htmlFor={`${ids}-role`} className={LABEL}>{t('launch.role')}</label>
+              {/* As the design, the chosen soul names the role; a custom soul keeps the hint. */}
+              <input id={`${ids}-role`} value={role} placeholder={template ? template.name : t('launch.roleOptional')} autoComplete="off" maxLength={MAX_ROLE} className={field}
                 onChange={(e) => setRole(e.target.value)} />
-            </label>
+            </div>
           </div>
         )}
         {!soul && copyOf && (
@@ -339,7 +343,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
           </span>
           <span id="launch-brief-count" className={`shrink-0 font-mono ${briefTooLong ? 'text-destructive' : ''}`}>{briefLength} / {MAX_BRIEF}</span>
         </p>
-        {briefTooLong && <p className="error small" role="alert">{t('launch.briefTooLong', { max: MAX_BRIEF })}</p>}
+        {briefTooLong && <p className="m-0 text-[11px] text-destructive" role="alert">{t('launch.briefTooLong', { max: MAX_BRIEF })}</p>}
       </fieldset>
       <fieldset>
         <legend className={legend}>{t('launch.step.harness')}</legend>
@@ -403,10 +407,10 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
         </fieldset>
       )}
       </>}
-      {checkingPackage && <p className="muted small" role="status">{t('launch.checking')}</p>}
-      {pathError && <p className="error small" role="alert">{pathError}</p>}
+      {checkingPackage && <p className="m-0 text-xs text-muted-foreground" role="status">{t('launch.checking')}</p>}
+      {pathError && <p className="m-0 text-[11px] text-destructive" role="alert">{pathError}</p>}
       {started ? !busy && <LaunchStatus state={launcher.state} />
-        : !ready && <p className="muted small">{t('launch.busy')}</p>}
+        : !ready && <p className="m-0 text-xs text-muted-foreground">{t('launch.busy')}</p>}
       {!busy && <div className="flex items-center justify-end gap-2 pt-1">
         {onCancel && (
           <button type="button" onClick={onCancel} className="h-9 rounded-md px-4 text-sm font-medium hover:bg-accent">{t('cancel')}</button>

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useI18n } from '../lib/i18n';
+import { actions, destructiveButton, errorLine, mutedLine, secondaryButton, textLink } from './ui';
 
 type Phase = 'idle' | 'confirming' | 'removing' | 'removed';
 
@@ -21,21 +22,22 @@ export function RemoveServices({ onRemove, startConfirming = false, onClose }: {
   if (phase === 'idle' || phase === 'removed') {
     return (
       <>
-        {phase === 'removed' && <span className="muted small" role="status">{t('remove.done')}</span>}
-        <button type="button" className="link" onClick={() => { setError(null); setPhase('confirming'); }}>
+        {phase === 'removed' && <span className={mutedLine} role="status">{t('remove.done')}</span>}
+        <button type="button" className={textLink} onClick={() => { setError(null); setPhase('confirming'); }}>
           {t('remove.action')}
         </button>
       </>
     );
   }
   return (
-    <div className="confirm" role="group" aria-label={t('remove.label')}>
-      <p className="small">{t('remove.confirm')}</p>
-      {error && <p className="error small" role="alert">{error}</p>}
-      <div className="detail-actions">
-        <button type="button" disabled={phase === 'removing'} onClick={() => { setPhase('idle'); onClose?.(); }}>{t('cancel')}</button>
+    <div className="grid w-full gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs" role="group" aria-label={t('remove.label')}>
+      <p className="m-0 text-xs text-foreground">{t('remove.confirm')}</p>
+      {error && <p className={errorLine} role="alert">{error}</p>}
+      <div className={actions}>
+        <button type="button" className={secondaryButton} disabled={phase === 'removing'} onClick={() => { setPhase('idle'); onClose?.(); }}>{t('cancel')}</button>
         <button
           type="button"
+          className={destructiveButton}
           disabled={phase === 'removing'}
           onClick={async () => {
             setPhase('removing');

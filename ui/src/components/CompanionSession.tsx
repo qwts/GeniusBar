@@ -15,12 +15,13 @@ import type { ApprovalDecision, ChatEntry, Composer } from '../model/chat';
 import { soulHarnessLabel } from '../model/launch';
 import { dudleFor } from '../model/dudle';
 import { useI18n, type Translate } from '../lib/i18n';
+import { tabStep } from '../lib/keys';
 import type { LaunchApi } from '../useLaunch';
 import { useSoulProfile } from '../useSoulProfile';
 import { AuditLog } from './AuditLog';
 import { Conversation } from './Conversation';
 import { CustomizeDialog } from './CustomizeDialog';
-import { SoulDudle } from './FleetList';
+import { liveState, presenceText, SoulDudle } from './FleetList';
 import { LaunchForm } from './LaunchForm';
 import { ModelSelect } from './ModelField';
 import { ActsAs, GitHubAppRow, useIdentityApps } from './IdentityApps';
@@ -67,6 +68,10 @@ interface CompanionSessionProps {
   metricsRefresh?: number;
   /** The tab it opens on, when it has that tab (the floating Dudle's quick menu). */
   initialTab?: SessionTab;
+  /** Agent IDs with a proposal waiting on the owner: the bouncing face, "Waiting for you". */
+  awaiting?: ReadonlySet<string>;
+  /** Agent IDs mid-turn (daemon status `busy`): the working face, "Working…". */
+  busy?: ReadonlySet<string>;
 }
 
 /**
@@ -74,7 +79,7 @@ interface CompanionSessionProps {
  * tree, its audit log, and the read-only details with Launch, in the
  * design's order. Without chat it opens on the details.
  */
-export function CompanionSession({ soul, forest, roster, paused = false, chat, launch, onOpen, onClose, showBack = false, metricsRefresh = 0, initialTab }: CompanionSessionProps) {
+export function CompanionSession({ soul, forest, roster, paused = false, chat, launch, onOpen, onClose, showBack = false, metricsRefresh = 0, initialTab, awaiting, busy }: CompanionSessionProps) {
   const { t } = useI18n();
   const ids = useId();
   const back = useRef<HTMLButtonElement>(null);
@@ -83,6 +88,8 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
   const [tab, setTab] = useState<Tab>(initialTab && tabs.includes(initialTab) ? initialTab : first);
   const active = tabs.includes(tab) ? tab : first;
   const name = displayName(soul);
+  // As the design's `state={c.presence}`: waiting on you, working, else the census.
+  const state = liveState(soul, awaiting, busy);
   useEffect(() => { if (showBack) back.current?.focus(); }, [showBack]);
 
   return (
@@ -100,11 +107,11 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
             <ArrowLeft className="size-4" aria-hidden />
           </button>
         )}
-        <SoulDudle soul={soul} size={34} paused={paused} label={t('avatarFor', { name })} />
+        <SoulDudle soul={soul} size={34} paused={paused} label={t('avatarFor', { name })} state={state} />
         <div className="min-w-[9rem] flex-1">
           <h2 className="m-0 truncate text-base font-semibold">{name}</h2>
           <p className="m-0 truncate text-xs text-muted-foreground">
-            {roleAndHarness(soul)} · {t(`presence.${soul.presence}`)}
+            {roleAndHarness(soul)} · {presenceText(soul, state, t)}
           </p>
         </div>
       {/* The design's segmented tabs, at the header's right. */}
@@ -112,9 +119,10 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
       {showBack && <InfoButton soul={soul} />}
       <div role="tablist" aria-label={name} className="ml-auto flex h-9 items-center gap-0.5 rounded-lg bg-muted p-1"
         onKeyDown={(e) => {
-          const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
-          if (!step) return;
-          const next = tabs[(tabs.indexOf(active) + step + tabs.length) % tabs.length];
+          // As Radix Tabs: Left / Right wrap, Home / End jump to the ends.
+          const next = tabStep(e.key, tabs, active);
+          if (!next) return;
+          e.preventDefault();
           setTab(next);
           document.getElementById(`${ids}-tab-${next}`)?.focus();
         }}>
@@ -128,7 +136,7 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
             aria-controls={`${ids}-panel`}
             tabIndex={active === id ? 0 : -1}
             onClick={() => setTab(id)}
-            className={`rounded-md px-3 py-1 text-sm font-medium ${active === id
+            className={`rounded-md px-3 py-1 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring ${active === id
               ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
           >
             {t(`tab.${id}`)}
@@ -141,7 +149,7 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
         {active === 'chat' && chat && (
           <ChatTab key={soulKey(soul)} soul={soul} chat={chat} paused={paused} refresh={metricsRefresh} />
         )}
-        {active === 'tree' && <DelegationTree forest={forest} focus={soulKey(soul)} paused={paused} onOpen={onOpen} />}
+        {active === 'tree' && <DelegationTree forest={forest} focus={soulKey(soul)} paused={paused} onOpen={onOpen} awaiting={awaiting} busy={busy} />}
         {active === 'details' && <CompanionDetails soul={soul} roster={roster} launch={launch} metricsRefresh={metricsRefresh} />}
         {active === 'audit' && <AuditLog agentId={soul.agentId} roster={roster} />}
       </div>
@@ -449,7 +457,8 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
   // As the design's read-only tab, this row and the four below are text; the
   // ⓘ sheet beside the tabs (both modes) holds their controls.
   if (chosenModel.setting) rows.push([t('model.choice'), chosenModel.setting.model ?? t('model.default')]);
-  if (comms) rows.push([t('field.comms'), `${comms.managed ? t('comms.managed') : t('comms.unmanaged')} · ${onOff(comms.comms, t)}`]);
+  // As the design: Managed / Unmanaged only; whether it wakes is the Wake row.
+  if (comms) rows.push([t('field.comms'), comms.managed ? t('comms.managed') : t('comms.unmanaged')]);
   // Details rows from the Lovable design (#122), each shown once agent-bot can say.
   if (wake) rows.push([t('details.wake'), onOff(wake.on, t)]);
   if (execution.mode) rows.push([t('mode.label'), execution.mode === 'autopilot' ? t('mode.autopilot') : t('mode.safe')]);
@@ -513,7 +522,7 @@ export function CommsRow({ soul, refresh = 0 }: { soul: CensusRow; refresh?: num
         <span className="block text-xs text-muted-foreground">{comms.running ? t('comms.stopFirst') : t('comms.hint')}</span>
         <span className="block font-mono text-[11px] text-muted-foreground">{comms.managed ? t('comms.managed') : t('comms.unmanaged')}</span>
         {saving && <span className="block text-[11px] text-muted-foreground" role="status">{t('comms.saving')}</span>}
-        {error && <span className="error block text-[11px]" role="alert">{t('comms.failed', { message: error })}</span>}
+        {error && <span className="block text-[11px] text-destructive" role="alert">{t('comms.failed', { message: error })}</span>}
       </span>
       <input type="checkbox" role="switch" checked={comms.comms} disabled={comms.running || saving}
         aria-label={t('comms.toggle', { name: displayName(soul) })} onChange={(e) => toggle(e.target.checked)} />
@@ -538,7 +547,7 @@ export function WakeRow({ soul, refresh = 0 }: { soul: CensusRow; refresh?: numb
         <span className="block text-sm font-medium">{t('details.wake')}</span>
         <span className="block text-xs text-muted-foreground">{locked ? t('comms.stopFirst') : t('details.wakeHint', { name })}</span>
         {saving && <span className="block text-[11px] text-muted-foreground" role="status">{t('comms.saving')}</span>}
-        {error && <span className="error block text-[11px]" role="alert">{t('details.wakeFailed', { message: error })}</span>}
+        {error && <span className="block text-[11px] text-destructive" role="alert">{t('details.wakeFailed', { message: error })}</span>}
       </span>
       <input type="checkbox" role="switch" checked={wake.on} disabled={locked || saving}
         aria-label={t('details.wakeToggle', { name })} onChange={(e) => toggle(e.target.checked)} />
@@ -584,7 +593,7 @@ export function ModeRow({ soul, refresh = 0 }: { soul: CensusRow; refresh?: numb
         <span className="block text-sm font-medium">{t('mode.label')}</span>
         {mode === 'safe' && <span className="block text-xs text-muted-foreground">{t('mode.safeHint')}</span>}
         {saving && <span className="block text-[11px] text-muted-foreground" role="status">{t('comms.saving')}</span>}
-        {error && <span className="error block text-[11px]" role="alert">{t('mode.failed', { message: error })}</span>}
+        {error && <span className="block text-[11px] text-destructive" role="alert">{t('mode.failed', { message: error })}</span>}
       </span>
       <ModeSwitch soul={soul} mode={mode} saving={saving} onChange={change} />
     </div>
@@ -623,7 +632,7 @@ export function ComputerUseRow({ soul, refresh = 0 }: { soul: CensusRow; refresh
         {!on && <span className="block text-xs text-muted-foreground">{t('computerUse.hint')}</span>}
         {stopped && <span className="block text-[11px] text-muted-foreground" role="status">{t('computerUse.stopped')}</span>}
         {saving && <span className="block text-[11px] text-muted-foreground" role="status">{t('comms.saving')}</span>}
-        {error && <span className="error block text-[11px]" role="alert">{t('computerUse.failed', { message: error })}</span>}
+        {error && <span className="block text-[11px] text-destructive" role="alert">{t('computerUse.failed', { message: error })}</span>}
       </span>
       <ComputerUseToggle soul={soul} on={on} saving={saving} onChange={change} />
     </div>
@@ -648,7 +657,7 @@ function ModelControl({ soul, setting, saving, error, onChange }:
       <span className="block font-sans text-[11px] text-muted-foreground">{t('model.hint', { name })}</span>
       {setting.available === null && <span className="block font-sans text-[11px] text-muted-foreground">{t('model.unlisted')}</span>}
       {saving && <span className="block text-[11px] text-muted-foreground" role="status">{t('comms.saving')}</span>}
-      {error && <span className="error block text-[11px]" role="alert">{t('model.failed', { message: error })}</span>}
+      {error && <span className="block text-[11px] text-destructive" role="alert">{t('model.failed', { message: error })}</span>}
     </>
   );
 }
@@ -730,7 +739,7 @@ export function InfoButton({ soul }: { soul: CensusRow }) {
             onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } }}
             className="relative grid w-full max-w-md gap-4 rounded-lg border border-border bg-background p-6 shadow-lg">
             <button ref={close} type="button" onClick={() => setOpen(false)} aria-label={t('close')}
-              className="absolute top-4 right-4 rounded-sm text-foreground opacity-70 hover:opacity-100">
+              className="absolute top-4 right-4 rounded-sm text-foreground opacity-70 outline-none hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring">
               <X className="size-4" aria-hidden />
             </button>
             <div className="grid gap-1.5 pr-6">
@@ -763,12 +772,14 @@ export function InfoButton({ soul }: { soul: CensusRow }) {
 }
 
 /** The whole fleet as nested delegation (R6), the focused companion highlighted. */
-export function DelegationTree({ forest, focus, paused, onOpen }:
-  { forest: readonly SoulNode[]; focus: string; paused: boolean; onOpen: (soul: CensusRow) => void }) {
+export function DelegationTree({ forest, focus, paused, onOpen, awaiting, busy }:
+  { forest: readonly SoulNode[]; focus: string; paused: boolean; onOpen: (soul: CensusRow) => void;
+    awaiting?: ReadonlySet<string>; busy?: ReadonlySet<string> }) {
   const { t } = useI18n();
   if (forest.length === 0) return null;
   const node = (n: SoulNode): ReactNode => {
     const key = soulKey(n.soul);
+    const state = liveState(n.soul, awaiting, busy);
     return (
       <li key={key}>
         <button
@@ -778,9 +789,9 @@ export function DelegationTree({ forest, focus, paused, onOpen }:
           className={`inline-flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm ${key === focus
             ? 'border-primary bg-primary/10' : 'border-border bg-card hover:bg-accent'}`}
         >
-          <SoulDudle soul={n.soul} size={22} paused={paused} />
+          <SoulDudle soul={n.soul} size={22} paused={paused} state={state} />
           <span className="font-medium text-foreground">{displayName(n.soul)}</span>
-          <span className="text-xs text-muted-foreground">{t(`presence.${n.soul.presence}`)}</span>
+          <span className="text-xs text-muted-foreground">{presenceText(n.soul, state, t)}</span>
         </button>
         {n.children.length > 0 && (
           <ul className="mt-2 ml-5 grid list-none gap-2 border-l border-border pl-5">{n.children.map(node)}</ul>

@@ -8,7 +8,7 @@ import { CompanionSession, ComputerUseContext, InfoButton, type SessionTab } fro
 import { AuditWindow, CompanionWindow, Desktop } from './components/Desktop';
 import { FloatingDudle, type Stopper } from './components/FloatingDudle';
 import { FirstLaunch, type DevTools, type HarnessAuth, type Starter } from './components/FirstLaunch';
-import { FleetList, type Hiding } from './components/FleetList';
+import { FleetList, liveState, type Hiding } from './components/FleetList';
 import { HealthHeader, SetupHeader } from './components/HealthHeader';
 import { LaunchForm } from './components/LaunchForm';
 import { LaunchModal } from './components/LaunchModal';
@@ -21,6 +21,7 @@ import { useFleetMode } from './components/SoulNotices';
 import { RemoveServices } from './components/RemoveServices';
 import { SetupPanel } from './components/SetupPanel';
 import { UpdateNotice } from './components/UpdateNotice';
+import { actions, secondaryButton } from './components/ui';
 import { I18nProvider, LANGS, useI18n, type Lang } from './lib/i18n';
 import { menuApprovals, workingCount } from './model/approvals';
 import { canLaunch } from './model/launch';
@@ -122,9 +123,9 @@ interface AppProps {
  * During setup the update line shows only when it reports a failure or asks
  * for an action (install, restart), so a fix stays reachable while setup is stuck.
  */
-function setupUpdateShows(status: UpdateStatus): boolean {
+function setupUpdateShows(status: UpdateStatus, checked = false): boolean {
   const notice = updateNotice(status);
-  return Boolean(notice && (notice.isError || notice.action));
+  return Boolean(notice && (notice.isError || notice.action)) || (checked && status.state === 'up-to-date');
 }
 
 const liveStopper: Stopper = { supported: () => soulStopSupported(), stop: (agentId) => stopSoul(agentId) };
@@ -218,6 +219,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const working = useMemo(() => workingCount(roster), [roster]);
   // Who has a proposal waiting, for the desktop's status dots (#122).
   const awaitingIds = useMemo(() => new Set(waiting.map((w) => w.agentId)), [waiting]);
+  // Who is mid-turn (daemon status `busy`), for the working faces.
+  const busyIds = (badges ?? liveBadges).busy;
   const { sound, setSound } = useSound();
   const decide = chat?.decide;
   const empty = emptyRosterText(connection, t);
@@ -260,6 +263,15 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   // The footer offers a check when the update line has nothing to say, so
   // the panel carries the whole update flow when there is no tray (#34).
   const canCheckUpdates = Boolean(updates && !updateNotice(updates.status) && updates.status.state !== 'disabled');
+  // Check for Updates… by hand: an up-to-date answer says so for a moment.
+  const [checkedUpdates, setCheckedUpdates] = useState(false);
+  const checkUpdates = () => { setCheckedUpdates(true); updates?.act(); };
+  const updateState = updates?.status.state;
+  useEffect(() => {
+    if (!checkedUpdates || updateState === 'checking' || updateState === 'idle') return;
+    const timer = setTimeout(() => setCheckedUpdates(false), updateState === 'up-to-date' ? 4000 : 0);
+    return () => clearTimeout(timer);
+  }, [checkedUpdates, updateState]);
   const showStarter = canOfferStarter && (starterOpen || forest.length === 0);
   const canLaunchPackage = Boolean(launcher && !showSetup && !launchingPackage);
   // Only the tray popup opens the desktop; the desktop is already open.
@@ -343,6 +355,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
       onOpen={open}
       onClose={() => setSelectedKey(null)}
       showBack={mode === 'tray'}
+      awaiting={awaitingIds}
+      busy={busyIds}
     />
   );
 
@@ -355,7 +369,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     <footer className={inSetup ? undefined : 'border-t border-border'}>
       {inSetup ? (
         <div className="flex items-center justify-between gap-2 p-3 text-xs">
-          {canCheckUpdates && <button type="button" className={setupLink} onClick={() => updates?.act()}>{t('checkUpdates')}</button>}
+          {canCheckUpdates && <button type="button" className={setupLink} onClick={checkUpdates}>{t('checkUpdates')}</button>}
           {onRemoveServices && !setup?.running && <button type="button" className={setupLink} onClick={() => setPanel('remove')}>{t('remove.action')}</button>}
           {refresh && <button type="button" className={setupLink} onClick={refresh}>{t('refresh')}</button>}
           <span className="flex shrink-0 items-center gap-0.5">
@@ -390,7 +404,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
           {(openDesktop || canLaunchPackage || cliTools || canCheckUpdates || onRemoveServices || onRefresh) && (
             <FooterMenu items={[
               openDesktop && { label: t('openDesktop'), run: openDesktop },
-              canCheckUpdates && { label: t('checkUpdates'), run: () => updates?.act() },
+              canCheckUpdates && { label: t('checkUpdates'), run: checkUpdates },
               canLaunchPackage && { label: t('launchPackage'), run: launchPackage },
               cliTools && { label: t('cli.action'), run: () => setPanel('cli') },
               (refresh || (onRemoveServices && !setup?.running)) && 'separator',
@@ -427,7 +441,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     <>
       <SetupHeader connection={connection} running={setup.running} error={footer?.isError ? footer.text : null} />
       <SetupPanel setup={setup} onSetup={onSetup} existing={existingServices} />
-      {updates && setupUpdateShows(updates.status) && <UpdateNotice status={updates.status} onAction={updates.act} />}
+      {updates && setupUpdateShows(updates.status, checkedUpdates) && <UpdateNotice status={updates.status} onAction={updates.act} checked={checkedUpdates} />}
       {iconFooter(true)}
     </>
   );
@@ -435,13 +449,14 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const menu = (hiding?: Hiding) => showSetup && setupMenu ? setupMenu : (
     <>
       <HealthHeader connection={connection}><ApprovalCounts waiting={waiting.length} working={working} /></HealthHeader>
-      {updates && <UpdateNotice status={updates.status} onAction={updates.act} />}
+      {updates && <UpdateNotice status={updates.status} onAction={updates.act} checked={checkedUpdates} />}
       {showStarter && starter && launcher && (
-        <section className="panel" aria-label={t('firstCompanion')}>
+        // The menu's card look (as the sandbox and default-harness cards); no Lovable screen.
+        <section className="grid gap-2 border-b border-border p-3 text-xs" aria-label={t('firstCompanion')}>
           <FirstLaunch starter={starter} launcher={launcher} auth={harnessAuth} devTools={devTools} onStart={() => setStarterOpen(true)} />
           {starterOpen && launcher.state.phase !== 'requesting' && launcher.state.phase !== 'pending' && (
-            <div className="detail-actions">
-              <button type="button" onClick={() => setStarterOpen(false)}>{t('close')}</button>
+            <div className={actions}>
+              <button type="button" className={secondaryButton} onClick={() => setStarterOpen(false)}>{t('close')}</button>
             </div>
           )}
         </section>
@@ -531,7 +546,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
         autopilot={autopilot} onAutopilotOff={() => { void fleetMode.change('safe'); }}
         onAudit={openAudit}
         fleetPaused={fleet.paused} onResume={toggleFleet}
-        onLaunch={canLaunchPackage ? launchPackage : undefined} hiddenCount={layout.hidden.length} onShowAll={layoutActions.showAll}>
+        onLaunch={canLaunchPackage ? launchPackage : undefined} hiddenCount={layout.hidden.length} onShowAll={layoutActions.showAll}
+        onHome={() => { setSelectedKey(null); setAuditWindow(false); setMenuOpen(false); }}>
         {menu({ hidden: layout.hidden, onToggle: layoutActions.setHidden, onToggleTeam: layoutActions.setTeamHidden, onShowAll: layoutActions.showAll })}
       </MenuBar>
       <Desktop forest={forest} layout={layout} paused={paused} unreadOf={unread} selectedKey={openKey} onOpen={open}
@@ -541,7 +557,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
           // The sandbox chip is the design's title-bar pill; while agent-bot
           // resolves this soul it replaces the census's hardened pill.
           <CompanionWindow soul={sandbox.soul(selected.agentId) ? { ...selected, hardened: undefined } : selected}
-            paused={paused} onClose={() => setSelectedKey(null)}
+            paused={paused} onClose={() => setSelectedKey(null)} state={liveState(selected, awaitingIds, busyIds)}
             actions={<><SandboxChip soul={selected} /><InfoButton soul={selected} /></>}>{session}</CompanionWindow>
         )}
         {auditWindow && <AuditWindow roster={roster} onClose={() => setAuditWindow(false)} />}

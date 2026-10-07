@@ -31,7 +31,7 @@ export function FleetMode({ roster }: { roster: readonly CensusRow[] }) {
           aria-label={t('mode.fleetToggle')} aria-checked={mixed ? 'mixed' : auto}
           onChange={(e) => { void change(e.target.checked ? 'autopilot' : 'safe'); }} />
       </label>
-      {error && <span className="error small min-w-0 truncate" role="alert">{t('mode.failed', { message: error })}</span>}
+      {error && <span className="min-w-0 truncate text-[11px] text-destructive" role="alert">{t('mode.failed', { message: error })}</span>}
     </span>
   );
 }

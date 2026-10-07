@@ -101,7 +101,7 @@ function CreateApp({ pollMs }: { pollMs: number }) {
           </button>
         </p>
       )}
-      {creating?.phase === 'failed' && <p className="error m-0 text-[11px]" role="alert">{t('identity.failed', { message: creating.message })}</p>}
+      {creating?.phase === 'failed' && <p className="m-0 text-[11px] text-destructive" role="alert">{t('identity.failed', { message: creating.message })}</p>}
     </div>
   );
 }
@@ -145,7 +145,7 @@ function AppRow({ app, roster }: { app: IdentityApp; roster: readonly CensusRow[
         )}
       </span>
       {busy && <span className="text-[11px] text-muted-foreground" role="status">{t('identity.waiting')}</span>}
-      {error && <span className="error text-[11px]" role="alert">{t('identity.failed', { message: error })}</span>}
+      {error && <span className="text-[11px] text-destructive" role="alert">{t('identity.failed', { message: error })}</span>}
       {rotated && <RotatedNotice result={rotated} />}
     </li>
   );

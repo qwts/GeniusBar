@@ -36,7 +36,7 @@ export function ToolCard({ e }: { e: ToolCallEntry }) {
   return (
     <div className="max-w-xl rounded-md border border-border bg-card font-mono text-xs">
       {e.output ? (
-        <button type="button" className={`${headerClass} rounded-md bg-transparent font-mono text-xs`} aria-label={label}
+        <button type="button" className={`${headerClass} rounded-md bg-transparent font-mono text-xs ${FOCUS}`} aria-label={label}
           aria-expanded={open} aria-controls={contentId} onClick={() => setOpen((o) => !o)}>
           {header}
         </button>
@@ -59,7 +59,9 @@ export function ToolCard({ e }: { e: ToolCallEntry }) {
   );
 }
 
-const BUTTON = 'inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-3 text-xs font-medium';
+// The design's buttons ring on keyboard focus (shadcn `focus-visible:ring-2 ring-ring`).
+const FOCUS = 'outline-none focus-visible:ring-2 focus-visible:ring-ring';
+const BUTTON = `inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-3 text-xs font-medium ${FOCUS}`;
 
 export function ToolApprovalCard({ e, name, onResolve, allowSession = false }: {
   e: ApprovalEntry;
@@ -125,7 +127,7 @@ export function AgentAside({ e }: { e: AsideEntry }) {
   return (
     <div className="ml-8 max-w-lg rounded-r-md border-l-2 border-info/60 bg-info/5 py-1 pr-2 pl-3">
       <button type="button" aria-expanded={open} aria-controls={contentId} onClick={() => setOpen((o) => !o)}
-        className="flex min-h-7 w-full items-center gap-1.5 rounded bg-transparent p-0 text-left text-xs text-info">
+        className={`flex min-h-7 w-full items-center gap-1.5 rounded bg-transparent p-0 text-left text-xs text-info ${FOCUS}`}>
         <ChevronRight className={`size-3 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`} aria-hidden />
         <span className="font-mono font-semibold">{t('asideLabel', { from: e.from, to: e.to })}</span>
         <span className="text-muted-foreground">· {t('asideHint')}</span>

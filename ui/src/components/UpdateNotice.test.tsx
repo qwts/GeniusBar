@@ -1,9 +1,10 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { I18nProvider } from '../lib/i18n';
 import { UpdateNotice } from './UpdateNotice';
 import type { UpdateState } from '../model/updates';
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); localStorage.clear(); });
 
 describe('UpdateNotice', () => {
   it('stays hidden for quiet states', () => {
@@ -35,5 +36,23 @@ describe('UpdateNotice', () => {
     render(<UpdateNotice status={{ state: 'failed', version: null }} onAction={() => {}} />);
     expect(screen.getByRole('alert').textContent).toMatch(/Update failed/);
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+  });
+
+  it('says up to date only after the owner checked (T18), and names the line in the language shown (P15)', () => {
+    render(<UpdateNotice status={{ state: 'up-to-date', version: null }} onAction={() => {}} checked />);
+    const line = screen.getByRole('status', { name: 'Update' });
+    expect(line.textContent).toBe('GeniusBar is up to date.');
+    cleanup();
+    localStorage.setItem('gb.lang', 'es');
+    render(<I18nProvider><UpdateNotice status={{ state: 'available', version: '0.2.0' }} onAction={() => {}} /></I18nProvider>);
+    expect(screen.getByRole('status', { name: 'Actualización' })).toBeTruthy();
+  });
+
+  it('uses the token classes, not the old update / link / small ones', () => {
+    render(<UpdateNotice status={{ state: 'failed', version: null }} onAction={() => {}} />);
+    const line = screen.getByRole('alert');
+    expect(line.className.split(' ')).not.toContain('update');
+    expect(line.querySelector('.small, .link, .error')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Try again' }).className).toContain('text-info');
   });
 });

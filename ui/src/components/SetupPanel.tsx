@@ -25,6 +25,8 @@ export function SetupPanel({ setup, onSetup, existing }: {
             <li key={step} className={`flex items-center gap-2 ${state === 'done' ? 'text-foreground' : 'text-muted-foreground'}`}>
               <Mark className={`size-4 shrink-0 ${state === 'done' ? 'text-success' : state === 'running' ? 'text-primary' : ''} ${state === 'running' ? 'motion-safe:animate-spin' : ''}`} aria-hidden />
               {t(`setup.${step}`)}
+              {/* The design's state for screen readers, which hear no tick. */}
+              {state === 'done' && <span className="sr-only">{t('setup.connected')}</span>}
             </li>
           );
         })}

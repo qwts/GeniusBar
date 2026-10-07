@@ -48,11 +48,11 @@ describe('CompanionDetails', () => {
   describe('managed and agent comms (#71)', () => {
     const stopped = { agentId: child.agentId, managed: true, comms: true, running: false };
 
-    it('adds the Agent comms row as text, Managed · On, keeping every other row (N10)', async () => {
+    it('adds the Agent comms row as text, Managed only as the design (S7), keeping every other row (N10)', async () => {
       vi.mocked(soulComms).mockResolvedValue(stopped);
       render(<CompanionDetails soul={child} />);
       await screen.findByText('Agent comms', { selector: 'dt' });
-      expect(field('Agent comms')).toBe('Managed · On');
+      expect(field('Agent comms')).toBe('Managed');
       // Read-only, as the design's tab: the switch lives in the ⓘ sheet.
       expect(screen.queryByRole('switch')).toBeNull();
       expect(field('Agent id')).toBe(child.agentId);
@@ -62,11 +62,11 @@ describe('CompanionDetails', () => {
       expect(soulComms).toHaveBeenCalledWith(child.agentId);
     });
 
-    it('shows Unmanaged and Off', async () => {
+    it('shows Unmanaged, the on/off left to the ⓘ sheet\'s switch (S7)', async () => {
       vi.mocked(soulComms).mockResolvedValue({ ...stopped, managed: false, comms: false });
       render(<CompanionDetails soul={child} />);
-      await screen.findByText('Unmanaged · Off');
-      expect(field('Agent comms')).toBe('Unmanaged · Off');
+      await screen.findByText('Unmanaged', { selector: 'dd' });
+      expect(field('Agent comms')).toBe('Unmanaged');
     });
 
     it('locks the toggle while the companion runs', async () => {
@@ -245,7 +245,7 @@ describe('the read-only Details tab (N10)', () => {
       <CompanionDetails soul={luna} /><InfoButton soul={luna} />
     </ComputerUseContext.Provider></SoulSourceContext.Provider>);
     await screen.findByText('Computer use', { selector: 'dt' });
-    expect(field('Agent comms')).toBe('Unmanaged · On');
+    expect(field('Agent comms')).toBe('Unmanaged');
     expect(field('Wake on new messages')).toBe('Off');
     expect(field('Execution mode')).toBe('Auto-Pilot');
     expect(field('Computer use')).toBe('Off');
@@ -292,6 +292,13 @@ describe('CompanionSession', () => {
     expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Details' }));
     expect(field('Account')).toBe('user');
     expect(runtimeMetrics).toHaveBeenCalledOnce();
+    // Home and End, as Radix Tabs (S4), with the design's focus ring.
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Details' }), { key: 'Home' });
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Chat' }));
+    expect(screen.getByRole('tab', { name: 'Chat' }).getAttribute('aria-selected')).toBe('true');
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Chat' }), { key: 'End' });
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Details' }));
+    expect(screen.getByRole('tab', { name: 'Details' }).className).toContain('focus-visible:ring-2');
   });
 
   it('opens on the details without chat', () => {
@@ -326,6 +333,29 @@ describe('CompanionSession', () => {
     fireEvent.click(back);
     fireEvent.keyDown(back, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it('animates the header Dudle and says Waiting for you / Working… from the live state (S1, S2)', () => {
+    const awaiting = new Set([luna.agentId]);
+    const busy = new Set([child.agentId]);
+    render(<CompanionSession soul={luna} forest={forest} roster={sampleCensus} paused onOpen={() => {}} onClose={() => {}} awaiting={awaiting} busy={busy} />);
+    expect(screen.getByRole('img', { name: 'Avatar for luna' }).getAttribute('data-state')).toBe('awaiting');
+    expect(screen.getByText('codex · Waiting for you')).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Delegation' }));
+    const tree = screen.getByRole('list', { name: 'Delegation' });
+    const chip = (name: RegExp) => within(tree).getByRole('button', { name });
+    expect(chip(/agent_c/).textContent).toContain('Working…');
+    expect(chip(/agent_c/).querySelector('svg.dudle')?.getAttribute('data-state')).toBe('working');
+    expect(chip(/luna/).textContent).toContain('Waiting for you');
+    expect(chip(/luna/).querySelector('svg.dudle')?.getAttribute('data-state')).toBe('awaiting');
+    // A left soul stays faded, whatever the sets say.
+    expect(chip(/old/).querySelector('svg.dudle')?.getAttribute('data-state')).toBe('offline');
+  });
+
+  it('keeps the census presence and an idle face without live state', () => {
+    render(<CompanionSession soul={child} forest={forest} roster={sampleCensus} paused onOpen={() => {}} onClose={() => {}} />);
+    expect(screen.getByRole('img', { name: 'Avatar for agent_c' }).getAttribute('data-state')).toBe('idle');
+    expect(screen.getByText(/· Starting$/)).toBeTruthy();
   });
 });
 

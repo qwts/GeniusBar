@@ -40,8 +40,9 @@ describe('FleetList', () => {
     render(<FleetList forest={buildSoulForest([left, ...sampleCensus.filter((s) => s !== left)])} paused onOpen={() => {}} />);
     const lists = screen.getAllByRole('list').slice(1).map((l) => l.getAttribute('aria-label'));
     expect(lists.indexOf('old')).toBeGreaterThan(lists.indexOf('luna'));
-    expect(screen.getByText('luna', { selector: 'p' })).toBeTruthy();
-    expect(screen.getByText('No team')).toBeTruthy();
+    // Team headings are h3, as the design (P7).
+    expect(screen.getByRole('heading', { level: 3, name: 'luna' })).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 3, name: 'No team' })).toBeTruthy();
   });
 
   it('narrows the list as the owner searches', () => {

@@ -12,6 +12,12 @@ function renderModal(busy = false) {
 }
 
 describe('LaunchModal Escape (#116)', () => {
+  it('rings its close button on keyboard focus (LA9)', () => {
+    const { dialog } = renderModal();
+    const close = dialog.querySelector('button[aria-label="Close"]')!;
+    expect(close.className).toContain('focus-visible:ring-2 focus-visible:ring-ring');
+  });
+
   it('closes on Escape from a focused field, once', () => {
     const { onClose } = renderModal();
     fireEvent.keyDown(screen.getByLabelText('Package'), { key: 'Escape' });

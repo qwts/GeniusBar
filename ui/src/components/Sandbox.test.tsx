@@ -156,6 +156,18 @@ describe('SandboxChip', () => {
     expect(items.map((i) => i.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false']);
   });
 
+  it('centres the radio dot in a 3.5 box, as Radix, and words a refusal with the token class (S13)', async () => {
+    withSandbox(fakeSource(status({ enabled: true, souls: [soulRow(luna.agentId, { sandboxed: true, runsAs: 'geniusbar-agent' })] })),
+      <SandboxChip soul={luna} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Sandbox for luna: Sandboxed' }));
+    const [inherit, always] = within(screen.getByRole('menu', { name: 'Sandboxing' })).getAllByRole('menuitemradio');
+    const box = inherit.firstElementChild as HTMLElement;
+    expect(box.className.split(' ')).toEqual(expect.arrayContaining(['absolute', 'left-2', 'flex', 'size-3.5', 'items-center', 'justify-center']));
+    expect(box.firstElementChild?.className).toContain('size-2');
+    // Unchecked items keep the box, empty, so labels line up.
+    expect((always.firstElementChild as HTMLElement).childElementCount).toBe(0);
+  });
+
   it('sets an override through agent-bot and reads again', async () => {
     const source = fakeSource(status());
     withSandbox(source, <SandboxChip soul={luna} />);
@@ -175,6 +187,7 @@ describe('SandboxChip', () => {
     fireEvent.click(screen.getByRole('menuitemradio', { name: 'Never sandboxed' }));
     const menu = await screen.findByRole('menu', { name: 'Sandboxing' });
     expect(within(menu).getByRole('alert').textContent).toBe('Sandboxing unchanged: the owner did not approve');
+    expect(within(menu).getByRole('alert').className).toContain('text-destructive');
   });
 
   it('is absent for a soul agent-bot has no row for', async () => {

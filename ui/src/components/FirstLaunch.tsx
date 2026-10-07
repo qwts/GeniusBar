@@ -3,6 +3,7 @@ import { useI18n } from '../lib/i18n';
 import { canLaunch } from '../model/launch';
 import type { LaunchApi } from '../useLaunch';
 import { LaunchStatus } from './LaunchForm';
+import { actions, errorLine, mutedLine, primaryButton } from './ui';
 
 /** The starter soul the app ships, from the shell's `starter_soul`. */
 export interface Starter {
@@ -45,21 +46,24 @@ function HarnessSignIn({ auth, harness, soul }: { auth: HarnessAuth; harness: st
   useEffect(() => { run('status'); }, [harness, soul]); // eslint-disable-line react-hooks/exhaustive-deps
   switch (state.phase) {
     case 'checking':
-      return <p className="muted small" role="status">{t('starter.checkingSignIn', { harness })}</p>;
+      return <p className={mutedLine} role="status">{t('starter.checkingSignIn', { harness })}</p>;
     case 'signed-in':
-      return <p className="small" role="status">{t('starter.ready')}</p>;
+      return <p className="m-0 text-xs text-foreground" role="status">{t('starter.ready')}</p>;
     case 'signing-in':
-      return <p className="muted small" role="status">{t('starter.signingIn', { harness })}</p>;
+      return <p className={mutedLine} role="status">{t('starter.signingIn', { harness })}</p>;
     case 'signed-out':
     case 'error':
       return (
-        <div className="detail-actions">
-          {state.phase === 'error' && <p className="error small" role="alert">{state.text}</p>}
-          <button type="button" onClick={() => run('login')}>{t('starter.signIn', { harness: harness === 'claude' ? 'Claude' : harness })}</button>
+        <div className={actions}>
+          {state.phase === 'error' && <p className={`${errorLine} min-w-0 flex-1`} role="alert">{state.text}</p>}
+          <button type="button" className={primaryButton} onClick={() => run('login')}>{t('starter.signIn', { harness: harness === 'claude' ? 'Claude' : harness })}</button>
         </div>
       );
   }
 }
+
+/** A label beside its control, as the starter's two fields. */
+const row = 'grid grid-cols-[64px_1fr] items-center gap-2';
 
 /** How often the waiting step checks again while Apple's installer runs. */
 export const DEV_TOOLS_POLL_MS = 5000;
@@ -112,25 +116,25 @@ function DevToolsNeeded({ devTools, installing }: { devTools?: DevTools; install
     else if (seen.current) setStep('cancelled');
   }, [step, installing]);
   return (
-    <div role="status">
-      {(step === 'explain' || step === 'opening') && <p>{t('setup.clt.explain')}</p>}
-      {step === 'opening' && <p className="muted small">{t('setup.clt.opening')}</p>}
-      {step === 'waiting' && <p>{t('setup.clt.waiting')}</p>}
+    <div role="status" className="grid gap-2 text-sm">
+      {(step === 'explain' || step === 'opening') && <p className="m-0">{t('setup.clt.explain')}</p>}
+      {step === 'opening' && <p className={mutedLine}>{t('setup.clt.opening')}</p>}
+      {step === 'waiting' && <p className="m-0">{t('setup.clt.waiting')}</p>}
       {step === 'cancelled' && (
         <>
-          <p>{t('setup.clt.cancelled')}</p>
-          <p><code className="selectable">xcode-select --install</code></p>
+          <p className="m-0">{t('setup.clt.cancelled')}</p>
+          <p className="m-0"><code className="selectable rounded bg-muted px-1.5 py-0.5">xcode-select --install</code></p>
         </>
       )}
-      {error && <p className="error small" role="alert">{error}</p>}
+      {error && <p className={errorLine} role="alert">{error}</p>}
       {devTools && step === 'explain' && (
-        <div className="detail-actions">
-          <button type="button" onClick={install}>{t('setup.clt.continue')}</button>
+        <div className={actions}>
+          <button type="button" className={primaryButton} onClick={install}>{t('setup.clt.continue')}</button>
         </div>
       )}
       {devTools && step === 'cancelled' && (
-        <div className="detail-actions">
-          <button type="button" onClick={install}>{t('setup.clt.retry')}</button>
+        <div className={actions}>
+          <button type="button" className={primaryButton} onClick={install}>{t('setup.clt.retry')}</button>
         </div>
       )}
     </div>
@@ -153,7 +157,7 @@ export function FirstLaunch({ starter, launcher, auth, devTools, onStart }:
   const ready = canLaunch(launcher.state) && harness.trim() !== '';
   return (
     <form
-      className="first-launch"
+      className="grid gap-2 text-sm"
       aria-label={t('starter.start')}
       onSubmit={(e) => {
         e.preventDefault();
@@ -163,25 +167,26 @@ export function FirstLaunch({ starter, launcher, auth, devTools, onStart }:
         void launcher.launch({ account: starter.account, target: { package: starter.package }, harness, name: starter.name, comms });
       }}
     >
-      {!started && <p>{t('starter.intro', { name: starter.name })}</p>}
+      {!started && <p className="m-0">{t('starter.intro', { name: starter.name })}</p>}
       <datalist id={`${ids}-harnesses`}>{starter.harnesses.map((h) => <option key={h} value={h} />)}</datalist>
-      <label>
-        <span>{t('field.harness')}</span>
-        <input value={harness} readOnly={started} list={`${ids}-harnesses`} onChange={(e) => setHarness(e.target.value)} />
+      <label className={row}>
+        <span className="text-xs text-muted-foreground">{t('field.harness')}</span>
+        <input value={harness} readOnly={started} list={`${ids}-harnesses`} onChange={(e) => setHarness(e.target.value)}
+          className="h-8 w-full rounded-md border border-input bg-transparent px-2 font-mono text-xs shadow-sm read-only:border-transparent read-only:px-0 read-only:shadow-none" />
       </label>
-      <label>
-        <span>{t('launch.comms')}</span>
+      <label className={row}>
+        <span className="text-xs text-muted-foreground">{t('launch.comms')}</span>
         <input type="checkbox" role="switch" className="justify-self-start" checked={comms} disabled={started}
           onChange={(e) => setComms(e.target.checked)} />
       </label>
-      {!started && <p className="muted small">{t('launch.commsHint')}</p>}
+      {!started && <p className={mutedLine}>{t('launch.commsHint')}</p>}
       {started && <LaunchStatus state={launcher.state} />}
       {started && auth && launcher.state.phase === 'launched' && launcher.state.agentId && (
         <HarnessSignIn auth={auth} harness={harness} soul={launcher.state.agentId} />
       )}
       {!started && (
-        <div className="detail-actions">
-          <button type="submit" disabled={!ready}>{t('starter.start')}</button>
+        <div className={actions}>
+          <button type="submit" className={primaryButton} disabled={!ready}>{t('starter.start')}</button>
         </div>
       )}
     </form>

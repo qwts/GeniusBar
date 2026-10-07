@@ -22,6 +22,14 @@ describe('SetupPanel', () => {
     expect(screen.getByRole('alert').textContent).toBe('broker did not start');
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
   });
+
+  it('tells screen readers a done step is Connected, and nothing on the others (P3)', () => {
+    render(<SetupPanel setup={{ ...idleSetup, steps: { ...idleSetup.steps, broker: 'done', account: 'running' } }} onSetup={() => {}} />);
+    const [broker, account, principal] = screen.getAllByRole('listitem');
+    expect(broker.querySelector('.sr-only')?.textContent).toBe('Connected');
+    expect(account.querySelector('.sr-only')).toBeNull();
+    expect(principal.querySelector('.sr-only')).toBeNull();
+  });
 });
 
 describe('SetupPanel with another install running', () => {

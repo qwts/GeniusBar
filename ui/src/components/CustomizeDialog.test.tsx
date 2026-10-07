@@ -60,11 +60,20 @@ describe('CustomizeDialog (#64)', () => {
     expect(within(dialog).getByRole('tab', { name: 'Context' }).getAttribute('aria-selected')).toBe('true');
     const panel = within(dialog).getByRole('tabpanel');
     expect(within(panel).getByText("Files the harness loads into this agent's context.")).toBeTruthy();
+    // The design's two panes (C1): the list on the left, the SOP chosen first.
+    const list = within(panel).getByRole('list', { name: 'Context' });
+    expect(list.className.split(' ')).toEqual(expect.arrayContaining(['w-44', 'border-r', 'bg-muted/40', 'py-1']));
+    expect(list.parentElement?.className.split(' ')).toEqual(expect.arrayContaining(['flex', 'h-72', 'rounded-md', 'border']));
+    expect(within(list).getByRole('button', { name: 'SOP' }).getAttribute('aria-current')).toBe('true');
+    expect(within(list).getByRole('button', { name: 'SOP' }).className).toContain('bg-accent');
     // SOP: resolved with its pinned commit, and the soul's own override.
     expect(within(panel).getByText('qwts/agent-sop', { exact: false }).textContent).toContain('commit 3f9c2a1d7e');
     expect(within(panel).getByText('agent-sop.toml', { exact: false })).toBeTruthy();
     expect(within(panel).getByText('workflows/release.toml')).toBeTruthy();
     // Skills: the SOP's with their commit, the soul's own without one.
+    fireEvent.click(within(list).getByRole('button', { name: 'Skills' }));
+    expect(within(list).getByRole('button', { name: 'Skills' }).getAttribute('aria-current')).toBe('true');
+    expect(within(list).getByRole('button', { name: 'SOP' }).getAttribute('aria-current')).toBeNull();
     const skills = within(panel).getByRole('heading', { name: 'Skills' }).nextElementSibling as HTMLElement;
     const review = within(skills).getByText('review').closest('li') as HTMLElement;
     expect(review.textContent).toContain('SOP');
@@ -73,6 +82,7 @@ describe('CustomizeDialog (#64)', () => {
     expect(triage.textContent).toContain('own');
     expect(triage.textContent).toContain('no commit');
     // Credentials: name, provider and status, nothing else.
+    fireEvent.click(within(list).getByRole('button', { name: 'Credentials' }));
     const credentials = within(panel).getByRole('heading', { name: 'Credentials' }).nextElementSibling as HTMLElement;
     expect(credentials.textContent).toBe('luna-geniusbargithubdeclared');
     // Files: text files open; the rest say why not.
@@ -81,6 +91,8 @@ describe('CustomizeDialog (#64)', () => {
     expect(within(panel).getByRole('button', { name: /\.claude\/settings\.json/ })).toBeTruthy();
     expect(within(panel).queryByRole('button', { name: /diagram\.png/ })).toBeNull();
     expect(within(panel).getByText('skills/triage/diagram.png').closest('li')?.textContent).toContain('not text');
+    // Every file is in the left pane, in mono.
+    expect(within(list).getByRole('button', { name: /^CLAUDE\.md/ }).className).toContain('font-mono');
   });
 
   it('never shows a credential value, even if agent-bot sent one', async () => {
@@ -90,11 +102,12 @@ describe('CustomizeDialog (#64)', () => {
     const { dialog } = open(s);
     await within(dialog).findByDisplayValue('Luna');
     fireEvent.click(within(dialog).getByRole('tab', { name: 'Context' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Credentials' }));
     expect(within(dialog).getByText('luna-app')).toBeTruthy();
     expect(dialog.textContent).not.toMatch(/ghs_|ghp_|secret/);
   });
 
-  it('opens a file read-only through soul profile --file, and goes back', async () => {
+  it('opens a file read-only through soul profile --file in the right pane, and goes back to a section', async () => {
     const s = source();
     const { dialog } = open(s);
     await within(dialog).findByDisplayValue('Luna');
@@ -106,8 +119,12 @@ describe('CustomizeDialog (#64)', () => {
     expect(viewer.tagName).toBe('PRE');
     expect(viewer.textContent).toBe(sampleProfileFiles['CLAUDE.md']);
     expect(within(dialog).queryByRole('textbox', { name: 'CLAUDE.md' })).toBeNull();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Back to context' }));
-    expect(within(dialog).getByRole('heading', { name: 'Files' })).toBeTruthy();
+    // No back-arrow page: the list stays beside the file, which is marked current.
+    expect(within(dialog).queryByRole('button', { name: 'Back to context' })).toBeNull();
+    expect(within(dialog).getByRole('button', { name: /^CLAUDE\.md/ }).getAttribute('aria-current')).toBe('true');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'SOP' }));
+    expect(within(dialog).getByRole('heading', { name: 'SOP' })).toBeTruthy();
+    expect(within(dialog).queryByLabelText('CLAUDE.md')).toBeNull();
   });
 
   it('says why a file did not open', async () => {
@@ -176,12 +193,19 @@ describe('CustomizeDialog (#64)', () => {
     expect(outer).not.toHaveBeenCalled();
   });
 
-  it('moves between tabs with the arrow keys', async () => {
+  it('moves between tabs with the arrow keys, Home and End, with a focus ring (C3)', async () => {
     const { dialog } = open(source());
     await within(dialog).findByDisplayValue('Luna');
     fireEvent.keyDown(within(dialog).getByRole('tab', { name: 'Profile' }), { key: 'ArrowRight' });
     await waitFor(() => expect(within(dialog).getByRole('tab', { name: 'Context' }).getAttribute('aria-selected')).toBe('true'));
     expect(document.activeElement).toBe(within(dialog).getByRole('tab', { name: 'Context' }));
+    fireEvent.keyDown(within(dialog).getByRole('tab', { name: 'Context' }), { key: 'Home' });
+    expect(within(dialog).getByRole('tab', { name: 'Profile' }).getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(within(dialog).getByRole('tab', { name: 'Profile' }));
+    fireEvent.keyDown(within(dialog).getByRole('tab', { name: 'Profile' }), { key: 'End' });
+    expect(document.activeElement).toBe(within(dialog).getByRole('tab', { name: 'Context' }));
+    expect(within(dialog).getByRole('tab', { name: 'Context' }).className).toContain('focus-visible:ring-2');
+    expect(within(dialog).getByRole('button', { name: 'Close' }).className).toContain('focus-visible:ring-ring');
   });
 
   it('saves only what changed, as one revision with the reason', async () => {
@@ -201,8 +225,11 @@ describe('CustomizeDialog (#64)', () => {
     const editor = await within(dialog).findByRole('textbox', { name: 'soul.md' });
     expect((editor as HTMLTextAreaElement).value).toBe(sampleProfileFiles['soul.md']);
     fireEvent.change(editor, { target: { value: '# Nova\n' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Back to context' }));
     expect(within(dialog).getByRole('button', { name: /^soul\.md/ }).textContent).toContain('edited');
+    // Another section and back keeps the draft.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Skills' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: /^soul\.md/ }));
+    expect((within(dialog).getByRole('textbox', { name: 'soul.md' }) as HTMLTextAreaElement).value).toBe('# Nova\n');
     // Opened and left unchanged: not sent.
     fireEvent.click(within(dialog).getByRole('button', { name: /skills\/triage\/SKILL\.md/ }));
     await within(dialog).findByRole('textbox', { name: 'skills/triage/SKILL.md' });

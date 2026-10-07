@@ -83,7 +83,7 @@ describe('Conversation', () => {
     const onSend = vi.fn();
     const onDraft = vi.fn();
     const { rerender } = render(<Conversation name="luna" entries={[]} composer={emptyComposer} onDraft={onDraft} onSend={onSend} />);
-    expect(screen.getByText('Say hello to luna. Ask for anything — they’ll show their work here.')).toBeTruthy();
+    expect(screen.getByText("Say hello to luna. Ask for anything — they'll show their work here.")).toBeTruthy();
     const send = screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement;
     expect(send.disabled).toBe(true);
     fireEvent.change(screen.getByRole('textbox', { name: 'Message luna' }), { target: { value: 'hi' } });

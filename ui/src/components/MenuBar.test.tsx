@@ -409,3 +409,86 @@ describe('the declared role in the palette and on the desktop (#122, agent-bot-i
     expect(within(card).getByText(/^codex · /)).toBeTruthy();
   });
 });
+
+describe('MenuBar pass 6 (M1, M2, M3, P10, P19)', () => {
+  const plain = (extra: Partial<Parameters<typeof MenuBar>[0]> = {}) => (
+    <MenuBar open={false} onOpenChange={vi.fn()} tone="ok" title="t" onReset={vi.fn()} unread={0}
+      forest={buildSoulForest(sampleCensus)} paused onJump={vi.fn()} {...extra}>menu</MenuBar>
+  );
+
+  it('makes the G GeniusBar mark a home button, its name and the clock hidden on a narrow window', () => {
+    const onHome = vi.fn();
+    const { container } = render(plain({ onHome }));
+    const home = screen.getByRole('button', { name: 'GeniusBar' });
+    expect(home.getAttribute('title')).toBe('Show the desktop');
+    expect(home.className).toContain('focus-visible:ring-2');
+    expect(within(home).getByText('GeniusBar').className.split(' ')).toEqual(['hidden', 'sm:inline']);
+    fireEvent.click(home);
+    expect(onHome).toHaveBeenCalledOnce();
+    expect(container.querySelector('time')?.className.split(' ')).toEqual(expect.arrayContaining(['hidden', 'sm:inline']));
+  });
+
+  it('keeps a plain mark without a home action', () => {
+    render(plain());
+    expect(screen.queryByRole('button', { name: 'GeniusBar' })).toBeNull();
+    expect(screen.getByText('GeniusBar').className.split(' ')).toEqual(['hidden', 'sm:inline']);
+  });
+
+  it('moves through the View menu with the keys, and Escape gives focus back to View (M2)', () => {
+    render(plain({ onAudit: vi.fn() }));
+    const view = screen.getByRole('button', { name: 'View' });
+    fireEvent.click(view);
+    const menu = screen.getByRole('menu', { name: 'View' });
+    const items = within(menu).getAllByRole('menuitem');
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(menu, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(items[1]);
+    fireEvent.keyDown(menu, { key: 'End' });
+    expect(document.activeElement).toBe(items[2]);
+    fireEvent.keyDown(menu, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(menu, { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(items[2]);
+    fireEvent.keyDown(menu, { key: 'Home' });
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(menu, { key: 'Escape' });
+    expect(screen.queryByRole('menu', { name: 'View' })).toBeNull();
+    expect(document.activeElement).toBe(view);
+    // Down on the closed trigger opens it, as Radix Menubar.
+    fireEvent.keyDown(view, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(within(screen.getByRole('menu', { name: 'View' })).getAllByRole('menuitem')[0]);
+  });
+
+  it('gives the palette rows the cmdk height, py-1.5 (P19)', () => {
+    render(plain());
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    const option = within(screen.getByRole('listbox')).getAllByRole('option')[0];
+    expect(option.className.split(' ')).toContain('py-1.5');
+    expect(option.className.split(' ')).not.toContain('py-3');
+  });
+});
+
+describe('the ⋯ footer menu keys (P10)', () => {
+  it('moves through the items with the keys, and Escape gives focus back to ⋯', async () => {
+    const { FooterMenu } = await import('./FooterMenu');
+    render(<FooterMenu items={[{ label: 'One', run: vi.fn() }, 'separator', { label: 'Two', run: vi.fn() }, { label: 'Three', run: vi.fn(), destructive: true }]} />);
+    const more = screen.getByRole('button', { name: 'More' });
+    fireEvent.click(more);
+    const menu = screen.getByRole('menu', { name: 'More' });
+    const [one, two, three] = within(menu).getAllByRole('menuitem');
+    expect(document.activeElement).toBe(one);
+    fireEvent.keyDown(menu, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(two);
+    fireEvent.keyDown(menu, { key: 'End' });
+    expect(document.activeElement).toBe(three);
+    fireEvent.keyDown(menu, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(one);
+    fireEvent.keyDown(menu, { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(three);
+    fireEvent.keyDown(menu, { key: 'Home' });
+    expect(document.activeElement).toBe(one);
+    fireEvent.keyDown(menu, { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(more);
+  });
+});

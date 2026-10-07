@@ -4,7 +4,7 @@ import { availabilityNote, displayName, soulKey, type CensusRow, type SoulNode }
 import { soulHarnessLabel } from '../model/launch';
 import { dudleFor } from '../model/dudle';
 import { companionLabel, searchTeams, teamKeys, teamsOf } from '../model/fleet';
-import { useI18n } from '../lib/i18n';
+import { useI18n, type Translate } from '../lib/i18n';
 import { Dudle, type DudleState } from './Dudle';
 
 /**
@@ -21,6 +21,18 @@ export function dudleState(agentId: string, awaiting?: ReadonlySet<string>, busy
   if (awaiting?.has(agentId)) return 'awaiting';
   if (busy?.has(agentId)) return 'working';
   return 'idle';
+}
+
+/** The face for a soul as the session views draw it: faded once it has left. */
+export function liveState(soul: CensusRow, awaiting?: ReadonlySet<string>, busy?: ReadonlySet<string>): DudleState {
+  return soul.presence === 'left' ? 'offline' : dudleState(soul.agentId, awaiting, busy);
+}
+
+/** The design's presence text (`presence.awaiting` / `presence.working`), else the census presence. */
+export function presenceText(soul: CensusRow, state: DudleState, t: Translate): string {
+  if (state === 'awaiting') return t('presence.awaiting');
+  if (state === 'working') return t('presence.working');
+  return t(`presence.${soul.presence}`);
 }
 
 /** Window mode only: which companions the desktop hides. */
@@ -65,6 +77,10 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty, onA
   const teamOf = useMemo(() => new Map(teams.filter((team) => team.members.length > 0)
     .map((team) => [soulKey(team.lead), teamKeys(team)])), [teams]);
 
+  // The design hides the harness on a narrow window (`hidden sm:inline`).
+  // Window mode only (`hiding`): the tray popup is 384px wide, below sm,
+  // where that rule would drop the label from every row.
+  const harnessShown = hiding ? 'hidden sm:inline' : '';
   // One eye per row, as the design: a lead with subagents hides or shows its
   // whole team; anyone else only themselves.
   const row = (soul: CensusRow, depth: number, team: readonly string[] | null = null) => {
@@ -90,7 +106,7 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty, onA
             <span className="truncate">{name}</span>
             {note && <span className="truncate text-[11px] text-muted-foreground">{note}</span>}
           </span>
-          <span className="truncate font-mono text-[10px] text-muted-foreground">{soulHarnessLabel(soul)}</span>
+          <span className={`truncate font-mono text-[10px] text-muted-foreground ${harnessShown}`}>{soulHarnessLabel(soul)}</span>
           <span className="ml-auto flex shrink-0 items-center gap-1.5">
             {unread > 0 && (
               <span className="rounded-full bg-primary px-1.5 font-mono text-[11px] font-semibold text-primary-foreground">
@@ -149,9 +165,9 @@ export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty, onA
             {ordered.map((team, i) => (
               <li key={soulKey(team.lead)}>
                 {(team.members.length > 0 || i === firstSolo) && (
-                  <p className="m-0 px-3 pt-2 pb-0.5 font-mono text-[10px] tracking-wider text-muted-foreground uppercase" aria-hidden>
+                  <h3 className="m-0 px-3 pt-2 pb-0.5 font-mono text-[10px] font-normal tracking-wider text-muted-foreground uppercase">
                     {team.members.length > 0 ? displayName(team.lead) : t('team.none')}
-                  </p>
+                  </h3>
                 )}
                 <ul className="m-0 list-none p-0" aria-label={displayName(team.lead)}>
                   {team.leadMatches && row(team.lead, 0, teamOf.get(soulKey(team.lead)) ?? null)}

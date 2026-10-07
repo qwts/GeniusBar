@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Check, Circle, Download, Loader2, Terminal, TriangleAlert } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
+import { textLink } from './ui';
 
 export type ToolState = 'absent' | 'installed' | 'stale' | 'other';
 export interface ToolsStatus {
@@ -48,7 +49,7 @@ export function CliTools({ api, startOpen = false, onClose }: {
 
   if (!open) {
     return (
-      <button type="button" className="link inline-flex items-center gap-1" onClick={() => { setOpen(true); void run(api.status, t('cli.checkFailed')); }}>
+      <button type="button" className={textLink} onClick={() => { setOpen(true); void run(api.status, t('cli.checkFailed')); }}>
         <Terminal className="size-3.5" aria-hidden />{t('cli.action')}
       </button>
     );
@@ -81,6 +82,11 @@ export function CliTools({ api, startOpen = false, onClose }: {
             </li>
           ))}
         </ul>
+      )}
+      {complete && (
+        <p className="flex items-center gap-1.5 text-xs text-foreground" role="status">
+          <Check className="size-3.5 text-success" aria-hidden />{t('bar.cliInstalled')}
+        </p>
       )}
       {others.length > 0 && (
         <p className="break-words text-xs leading-relaxed text-muted-foreground">
