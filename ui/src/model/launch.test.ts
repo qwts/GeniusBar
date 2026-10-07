@@ -32,6 +32,13 @@ describe('launch requests', () => {
     expect(launchParams({ ...soul, comms: true })).toMatchObject({ comms: true });
   });
 
+  it('sends a trimmed role only for a package launch (agent-bot-identity#535)', () => {
+    expect(launchParams({ ...pkg, role: '  Researcher ' })).toMatchObject({ role: 'Researcher' });
+    expect(Object.hasOwn(launchParams({ ...pkg, role: '   ' }), 'role')).toBe(false);
+    expect(Object.hasOwn(launchParams(pkg), 'role')).toBe(false);
+    expect(Object.hasOwn(launchParams({ ...soul, role: 'Researcher' }), 'role')).toBe(false);
+  });
+
   it('never sends a name for an existing soul, so a relaunch cannot rename it (#79)', () => {
     expect(launchParams({ ...soul, name: 'Scott' })).toEqual({ account: 'user', soul: 'agent_1', harness: 'codex' });
     expect(launchParams({ ...pkg, name: 'Scott' }).name).toBe('Scott');

@@ -22,9 +22,10 @@ export const METHODS = {
   inbox: (client, { after, limit }) => client.inbox({ after, limit }),
   ack: (client, { ids }) => client.ack(ids),
   // `brief` (#120) goes through only as a string; older agent-comms ignore it.
-  launch: (client, { account, soul, package: packagePath, harness, name, comms, model, brief }) =>
+  // `role` (agent-bot-identity #535) likewise; older agent-comms refuse unknown fields, so only a string goes through.
+  launch: (client, { account, soul, package: packagePath, harness, name, comms, model, brief, role }) =>
     client.launch({ account, soul, package: packagePath, harness, name, comms, ...(model === undefined ? {} : { model }),
-      ...(typeof brief === 'string' ? { brief } : {}) }),
+      ...(typeof brief === 'string' ? { brief } : {}), ...(typeof role === 'string' ? { role } : {}) }),
   launchStatus: (client, { requestId }) => client.launchStatus(requestId),
 };
 
