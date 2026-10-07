@@ -4,8 +4,8 @@ import { useI18n, type Translate } from '../lib/i18n';
 import { displayName, type CensusRow } from '../model/census';
 import { harnessOptions } from '../model/launch';
 import {
-  ActionLines, ConnectForm, identityFailure, identityStatus, RotatedNotice, STATUS_TEXT, useIdentityAction, useIdentityApps,
-  type IdentityApp, type IdentityAppResult,
+  ActionLines, ConnectForm, identityFailure, identityStatus, RotatedNotice, RotateFromPass, rotateKey, STATUS_TEXT, useIdentityAction,
+  useIdentityApps, type IdentityApp, type IdentityAppResult,
 } from './IdentityApps';
 
 const link = 'min-h-6 rounded border border-border px-2 text-[11px] hover:bg-accent disabled:opacity-50';
@@ -56,6 +56,17 @@ function CreateApp({ pollMs }: { pollMs: number }) {
     }, pollMs);
     return () => { active = false; clearInterval(timer); };
   }, [source, handle, pollMs, reload, t]);
+  // A create still waiting on GitHub from before GeniusBar last quit is
+  // taken up where it was; its page is not opened again unasked.
+  useEffect(() => {
+    if (!source) return;
+    let active = true;
+    source.createPending().then((jobs) => {
+      const job = jobs[0];
+      if (active && job) setCreating((current) => current ?? { phase: 'waiting', handle: job.handle, localUrl: job.localUrl });
+    }, () => {});
+    return () => { active = false; };
+  }, [source]);
   if (!source) return null;
   const start = () => {
     const mine = ++latest.current;
@@ -217,10 +228,13 @@ function AppRow({ app, roster, harnesses, canRemove, onRemoved }: {
       )}
       <span className="mt-1 flex flex-wrap gap-1">
         {app.keyPresent && (
-          <button type="button" className={link} disabled={busy !== null}
-            onClick={() => { setRotated(null); run('rotate', (s) => s.rotateKey(app.slug, t('identity.pickNewKey', { app: app.slug })), setRotated); }}>
-            {t('identity.rotate')}
-          </button>
+          <>
+            <button type="button" className={link} disabled={busy !== null}
+              onClick={() => { setRotated(null); rotateKey(run, app.slug, t, setRotated); }}>
+              {t('identity.rotate')}
+            </button>
+            <RotateFromPass slug={app.slug} disabled={busy !== null} run={run} onRotated={setRotated} />
+          </>
         )}
         {source && (
           <button type="button" className={link} onClick={() => void source.open(installUrl).catch(() => {})}>

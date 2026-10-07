@@ -12,6 +12,7 @@ import { radioGroupKeys } from '../lib/radioGroup';
 import { tabStep } from '../lib/keys';
 import { SoulDudle } from './FleetList';
 import type { DudleState } from './Dudle';
+import { ActsAs, useIdentityApps } from './IdentityApps';
 
 type Tab = 'profile' | 'context';
 const TABS: readonly Tab[] = ['profile', 'context'];
@@ -236,7 +237,7 @@ function CustomizeBody({ soul, onClose, save, onReload, state, page = false }: {
         {loading && !profile && <p className="m-0 text-sm text-muted-foreground" role="status">{t('edit.loading')}</p>}
         {error && <p className="m-0 text-sm text-destructive" role="alert">{t('edit.failed', { message: error })}</p>}
         {tab === 'profile' && (
-          <ProfilePanel ids={ids} name={name} description={description} editable={editable}
+          <ProfilePanel ids={ids} soul={soul} name={name} description={description} editable={editable}
             onName={(value) => { setDraft((d) => ({ ...d, name: value })); edited(); }}
             onDescription={(value) => { setDraft((d) => ({ ...d, description: value })); edited(); }}
             role={role} onRole={(value) => { setDraft((d) => ({ ...d, role: value })); edited(); }}
@@ -308,9 +309,30 @@ function CustomizeBody({ soul, onClose, save, onReload, state, page = false }: {
   );
 }
 
-/** The design's Profile tab: Name and Role, then Description; then the profile's other facts. */
-function ProfilePanel({ ids, name, description, editable, onName, onDescription, role, onRole, hue, declared, onHue, facts }: {
-  ids: string; name: string; description: string; editable: boolean;
+/**
+ * The Acts as row (#67): the GitHub App this companion acts as, with
+ * Change…, as the Details tab shows it. Nothing at all while agent-bot's
+ * managed Apps are hidden (no source, or an older bundle).
+ */
+function ActsAsRow({ soul, name }: { soul: CensusRow; name: string }) {
+  const { t } = useI18n();
+  const { apps, reload } = useIdentityApps();
+  // Read the list as the dialog opens, as the Details tab does per soul.
+  useEffect(() => { reload(); }, [reload, soul.agentId]);
+  if (!apps) return null;
+  return (
+    <div className="grid gap-1">
+      <span className={label}>{t('identity.actsAs')}</span>
+      <div className="font-mono text-xs leading-5">
+        <ActsAs agentId={soul.agentId} name={name.trim() || displayName(soul)} />
+      </div>
+    </div>
+  );
+}
+
+/** The design's Profile tab: Name and Role, then Description and the colour; Acts as; then the profile's other facts. */
+function ProfilePanel({ ids, soul, name, description, editable, onName, onDescription, role, onRole, hue, declared, onHue, facts }: {
+  ids: string; soul: CensusRow; name: string; description: string; editable: boolean;
   onName: (value: string) => void; onDescription: (value: string) => void;
   /** The role shown (soul.json `role`, from the census row); empty when none. */
   role: string; onRole: (value: string) => void;
@@ -340,6 +362,7 @@ function ProfilePanel({ ids, name, description, editable, onName, onDescription,
           placeholder={t('edit.descriptionHint')} disabled={!editable} onChange={(e) => onDescription(e.target.value)} />
       </div>
       <ColourField ids={ids} hue={hue} declared={declared} editable={editable} onHue={onHue} />
+      <ActsAsRow soul={soul} name={name} />
       {facts.length > 0 && (
         <dl className="m-0 divide-y divide-border rounded-md border border-border text-sm">
           {facts.map(([term, value]) => (

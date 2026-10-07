@@ -550,8 +550,8 @@ describe('Details rows from the Lovable design (#122)', () => {
     const apps = {
       list: vi.fn(async () => ({ addons: null, apps: [{ slug: 'luna-bot', botLogin: 'luna-bot[bot]', issuerPresent: true, keyPresent: true,
         key: { fingerprint: 'SHA256:abc=', updatedAt: null }, installations: [], harnesses: [], souls: [luna.agentId], liveMint: { status: 'ready' as const } }] })),
-      create: vi.fn(), createStatus: vi.fn(), cancelCreate: vi.fn(), connect: vi.fn(), rotateKey, assign: vi.fn(), open: vi.fn(),
-      remove: vi.fn(), setAddon: vi.fn(),
+      create: vi.fn(), createStatus: vi.fn(), cancelCreate: vi.fn(), createPending: vi.fn(async () => []), connect: vi.fn(), rotateKey,
+      assign: vi.fn(), open: vi.fn(), remove: vi.fn(), setAddon: vi.fn(),
     };
     render(<IdentityAppsProvider source={apps}>{withSource(source(), <InfoButton soul={luna} />)}</IdentityAppsProvider>);
     fireEvent.click(screen.getByRole('button', { name: 'Details' }));

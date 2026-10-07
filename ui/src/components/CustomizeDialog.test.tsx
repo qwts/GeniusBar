@@ -7,6 +7,7 @@ import { sampleCensus, sampleProfile, sampleProfileFiles } from '../model/fixtur
 import type { CensusRow } from '../model/census';
 import { ProfileSourceContext, type ProfileSource } from '../useSoulProfile';
 import { CustomizeDialog, type SaveRevision } from './CustomizeDialog';
+import { IdentityAppsProvider, type IdentityApp, type IdentityAppsSource } from './IdentityApps';
 
 afterEach(cleanup);
 
@@ -459,5 +460,54 @@ describe('CustomizeDialog pass 7 (X3, X8, X13, X20)', () => {
       expect(tab.className.split(' ')).toEqual(expect.arrayContaining(['ring-offset-background', 'focus-visible:ring-offset-2']));
       expect(tab.className).not.toContain('hover:text-foreground');
     }
+  });
+});
+
+describe('CustomizeDialog Acts as (#67)', () => {
+  const app = (slug: string, souls: string[]): IdentityApp => ({
+    slug, botLogin: `${slug}[bot]`, issuerPresent: true, keyPresent: true, key: null, installations: [], harnesses: [], souls,
+    liveMint: { status: 'ready', code: null, checkedAt: null },
+  });
+  const identities = (apps: IdentityApp[]): IdentityAppsSource => ({
+    list: vi.fn(async () => ({ apps, addons: null })),
+    create: vi.fn(), createStatus: vi.fn(), cancelCreate: vi.fn(), createPending: vi.fn(async () => []),
+    connect: vi.fn(), rotateKey: vi.fn(), assign: vi.fn(), remove: vi.fn(), setAddon: vi.fn(), open: vi.fn(),
+  });
+
+  it('shows the App the companion acts as, with Change…, between the colour and the facts', async () => {
+    const src = identities([app('luna-bot', [luna.agentId]), app('other-bot', [])]);
+    const { dialog } = open(source(), vi.fn(), (node) => <IdentityAppsProvider source={src}>{node}</IdentityAppsProvider>);
+    await within(dialog).findByDisplayValue('Luna');
+    const row = await within(dialog).findByText('Acts as');
+    await waitFor(() => expect(dialog.textContent).toContain('luna-bot[bot]'));
+    const change = within(dialog).getByRole('combobox', { name: 'Change the GitHub App for Luna' }) as HTMLSelectElement;
+    expect([...change.options].map((o) => o.textContent)).toEqual(['Change…', 'other-bot[bot]']);
+    const colour = within(dialog).getByRole('slider', { name: 'Color' });
+    const facts = dialog.querySelector('dl') as HTMLElement;
+    expect(colour.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(row.compareDocumentPosition(facts) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.change(change, { target: { value: 'other-bot' } });
+    expect(src.assign).toHaveBeenCalledWith('other-bot', { soul: luna.agentId });
+  });
+
+  it('says "your account" for a companion no App names', async () => {
+    const src = identities([app('luna-bot', ['agent_someone-else'])]);
+    const { dialog } = open(source(), vi.fn(), (node) => <IdentityAppsProvider source={src}>{node}</IdentityAppsProvider>);
+    await within(dialog).findByText('Acts as');
+    await waitFor(() => expect(dialog.textContent).toContain('your account'));
+  });
+
+  it('has no Acts as row at all while the managed Apps are hidden', async () => {
+    const { dialog } = open(source());
+    await within(dialog).findByDisplayValue('Luna');
+    expect(within(dialog).queryByText('Acts as')).toBeNull();
+    cleanup();
+    const failing = identities([]);
+    vi.mocked(failing.list).mockRejectedValue(new BridgeError('identity-app-failed', 'usage'));
+    const second = open(source(), vi.fn(), (node) => <IdentityAppsProvider source={failing}>{node}</IdentityAppsProvider>);
+    await within(second.dialog).findByDisplayValue('Luna');
+    await waitFor(() => expect(failing.list).toHaveBeenCalled());
+    await Promise.resolve();
+    expect(within(second.dialog).queryByText('Acts as')).toBeNull();
   });
 });

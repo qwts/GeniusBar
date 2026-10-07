@@ -94,9 +94,14 @@ export interface IdentityAppsSource {
   create: () => Promise<{ handle: number; localUrl: string }>;
   createStatus: (handle: number) => Promise<IdentityCreateStatus>;
   cancelCreate: (handle: number) => Promise<void>;
-  /** The shell asks for the key file with `prompt`; owner-gated by agent-bot. */
-  connect: (id: string, prompt: string) => Promise<IdentityAppResult>;
-  rotateKey: (slug: string, prompt: string) => Promise<IdentityAppResult>;
+  /** The creates still waiting for GitHub, including those from before GeniusBar last quit. */
+  createPending: () => Promise<{ handle: number; localUrl: string }[]>;
+  /**
+   * The shell asks for the key file with `prompt`, or, with `passCli`, names
+   * that pass-cli item to agent-bot instead; owner-gated by agent-bot.
+   */
+  connect: (id: string, prompt: string, passCli?: string) => Promise<IdentityAppResult>;
+  rotateKey: (slug: string, prompt: string, passCli?: string) => Promise<IdentityAppResult>;
   assign: (slug: string, target: { soul: string } | { harness: string }) => Promise<unknown>;
   /** Forgets the App on this Mac; refused (`identity-app-assigned`) while a harness or soul uses it. Owner-gated. */
   remove: (slug: string) => Promise<IdentityAppRemoved>;
@@ -212,14 +217,25 @@ async function call<T>(command: string, args: Record<string, unknown>, normalize
 
 const anything = (raw: unknown) => raw ?? {};
 
+function normalizeCreateHandle(raw: unknown): { handle: number; localUrl: string } | null {
+  return isRecord(raw) && typeof raw.handle === 'number' && typeof raw.localUrl === 'string'
+    ? { handle: raw.handle, localUrl: raw.localUrl } : null;
+}
+
+const normalizeCreatePending = (raw: unknown) =>
+  (Array.isArray(raw) ? raw.map(normalizeCreateHandle).filter((job): job is { handle: number; localUrl: string } => job !== null) : null);
+
+/** Only a named item goes to the shell, so a connect by file is invoked as before. */
+const withPassCli = (args: Record<string, unknown>, passCli?: string) => (passCli ? { ...args, passCli } : args);
+
 export const liveIdentityApps: IdentityAppsSource = {
   list: () => call('identity_apps_list', {}, normalizeIdentityAppsList, 'agent-bot gave no App list'),
-  create: () => call('identity_app_create', {}, (raw) => (isRecord(raw) && typeof raw.handle === 'number' && typeof raw.localUrl === 'string'
-    ? { handle: raw.handle, localUrl: raw.localUrl } : null), 'agent-bot gave no App creation page'),
+  create: () => call('identity_app_create', {}, normalizeCreateHandle, 'agent-bot gave no App creation page'),
   createStatus: (handle) => call('identity_app_create_status', { handle }, normalizeCreateStatus, 'agent-bot gave no App creation status'),
   cancelCreate: (handle) => call('identity_app_create_cancel', { handle }, () => undefined, ''),
-  connect: (id, prompt) => call('identity_app_connect', { id, prompt }, normalizeResult, 'agent-bot gave no App'),
-  rotateKey: (slug, prompt) => call('identity_app_rotate_key', { slug, prompt }, normalizeResult, 'agent-bot gave no App'),
+  createPending: () => call('identity_app_create_pending', {}, normalizeCreatePending, 'agent-bot gave no App creations'),
+  connect: (id, prompt, passCli) => call('identity_app_connect', withPassCli({ id, prompt }, passCli), normalizeResult, 'agent-bot gave no App'),
+  rotateKey: (slug, prompt, passCli) => call('identity_app_rotate_key', withPassCli({ slug, prompt }, passCli), normalizeResult, 'agent-bot gave no App'),
   assign: (slug, target) => call('identity_app_assign', { slug, ...target }, anything, 'agent-bot gave no assignment'),
   remove: (slug) => call('identity_app_remove', { slug }, normalizeRemoved, 'agent-bot gave no removal'),
   setAddon: (name, enabled) => call('identity_addon_set', { name, enabled }, normalizeAddon, 'agent-bot gave no add-on state'),
@@ -326,27 +342,75 @@ type IdentityRun = ReturnType<typeof useIdentityAction>['run'];
 const smallButton = 'min-h-6 rounded border border-border px-2 font-sans text-[11px] hover:bg-accent disabled:opacity-50';
 const smallPrimaryButton = 'min-h-6 rounded bg-primary px-2 font-sans text-[11px] text-primary-foreground hover:bg-primary/90 disabled:opacity-50';
 
-/** An App ID field and the key-file button that connects it. */
+const smallInput = 'h-6 rounded border border-input bg-transparent px-1.5 font-mono text-[11px] text-foreground';
+
+/**
+ * An App ID field and the key-file button that connects it; or, below, the
+ * name of the key's pass-cli item, which agent-bot restores itself (the
+ * shell checks the name, agent-bot the item).
+ */
 export function ConnectForm({ onConnected, label }: { onConnected?: (result: IdentityAppResult) => void; label?: string }) {
   const { t } = useI18n();
   const [id, setId] = useState('');
+  const [item, setItem] = useState('');
   const { busy, error, run } = useIdentityAction();
   const valid = /^\d{1,20}$/.test(id.trim());
+  const connect = (passCli?: string) =>
+    run('connect', (s) => (passCli ? s.connect(id.trim(), '', passCli) : s.connect(id.trim(), t('identity.pickKey'))), (result) => onConnected?.(result));
   return (
     <div className="grid gap-1 font-sans">
       <div className="flex items-center gap-1">
         <input value={id} onChange={(e) => setId(e.target.value)} inputMode="numeric" placeholder={t('identity.appId')}
-          aria-label={label ?? t('identity.appId')}
-          className="h-6 w-28 rounded border border-input bg-transparent px-1.5 font-mono text-[11px] text-foreground" />
-        <button type="button" className={smallButton} disabled={!valid || busy !== null}
-          onClick={() => run('connect', (s) => s.connect(id.trim(), t('identity.pickKey')), (result) => onConnected?.(result))}>
+          aria-label={label ?? t('identity.appId')} className={`${smallInput} w-28`} />
+        <button type="button" className={smallButton} disabled={!valid || busy !== null} onClick={() => connect()}>
           {t('identity.chooseKey')}
         </button>
       </div>
       <span className="text-[11px] text-muted-foreground">{t('identity.connectHint')}</span>
+      <div className="flex items-center gap-1">
+        <input value={item} onChange={(e) => setItem(e.target.value)} placeholder={t('identity.passItem')}
+          aria-label={t('identity.passItem')} autoCapitalize="off" autoCorrect="off" spellCheck={false} className={`${smallInput} w-36`} />
+        <button type="button" className={smallButton} disabled={!valid || item.trim() === '' || busy !== null}
+          onClick={() => connect(item.trim())}>
+          {t('identity.connectPass')}
+        </button>
+      </div>
+      <span className="text-[11px] text-muted-foreground">{t('identity.passHint')}</span>
       {busy && <span className="text-[11px] text-muted-foreground" role="status">{t('identity.waiting')}</span>}
       {error && <span className="text-[11px] text-destructive" role="alert">{t('identity.failed', { message: error })}</span>}
     </div>
+  );
+}
+
+/**
+ * "Rotate from pass-cli…": asks for the key's item name in an inline field
+ * (not `window.prompt`, which the web view blocks) and rotates `slug`'s key
+ * from it; the file picker path stays beside it.
+ */
+export function RotateFromPass({ slug, disabled, run, onRotated }:
+  { slug: string; disabled: boolean; run: IdentityRun; onRotated: (result: IdentityAppResult) => void }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const [item, setItem] = useState('');
+  if (!open) {
+    return (
+      <button type="button" className={smallButton} disabled={disabled} onClick={() => setOpen(true)}>{t('identity.rotatePass')}</button>
+    );
+  }
+  const rotate = () => {
+    setOpen(false);
+    rotateKey(run, slug, t, onRotated, item.trim());
+  };
+  return (
+    <span className="flex flex-wrap items-center gap-1">
+      <input value={item} onChange={(e) => setItem(e.target.value)} placeholder={t('identity.passItem')} aria-label={t('identity.passItem')}
+        autoFocus autoCapitalize="off" autoCorrect="off" spellCheck={false} className={`${smallInput} w-36`}
+        onKeyDown={(e) => { if (e.key === 'Enter' && item.trim() !== '') { e.preventDefault(); rotate(); } }} />
+      <button type="button" className={smallPrimaryButton} disabled={item.trim() === '' || disabled} onClick={rotate}>
+        {t('identity.rotatePassGo')}
+      </button>
+      <button type="button" className={smallButton} onClick={() => setOpen(false)}>{t('cancel')}</button>
+    </span>
   );
 }
 
@@ -392,9 +456,12 @@ export function ActionLines({ busy, error }: { busy: string | null; error: strin
   );
 }
 
-/** Replaces `slug`'s key: the shell asks for the new key file; agent-bot keeps it. */
-export function rotateKey(run: IdentityRun, slug: string, t: Translate, done: (result: IdentityAppResult) => void) {
-  run('rotate', (s) => s.rotateKey(slug, t('identity.pickNewKey', { app: slug })), done);
+/**
+ * Replaces `slug`'s key: the shell asks for the new key file, or names the
+ * pass-cli `item` to agent-bot instead; agent-bot keeps the key.
+ */
+export function rotateKey(run: IdentityRun, slug: string, t: Translate, done: (result: IdentityAppResult) => void, item?: string) {
+  run('rotate', (s) => (item ? s.rotateKey(slug, '', item) : s.rotateKey(slug, t('identity.pickNewKey', { app: slug }))), done);
 }
 
 /**
@@ -463,10 +530,13 @@ export function GitHubAppRow({ agentId, name, appSlug }: { agentId: string; name
           <p className="m-0 truncate font-mono text-[11px] text-muted-foreground" title={subtitle}>{subtitle}</p>
         </div>
         {app && (
-          <button type="button" className={smallButton} disabled={busy !== null}
-            onClick={() => { setRotated(null); rotateKey(run, app.slug, t, setRotated); }}>
-            {t('keyd.rotate')}
-          </button>
+          <>
+            <button type="button" className={smallButton} disabled={busy !== null}
+              onClick={() => { setRotated(null); rotateKey(run, app.slug, t, setRotated); }}>
+              {t('keyd.rotate')}
+            </button>
+            <RotateFromPass slug={app.slug} disabled={busy !== null} run={run} onRotated={setRotated} />
+          </>
         )}
         {apps && !connected && (
           <button type="button" className={smallPrimaryButton} aria-expanded={connecting}
