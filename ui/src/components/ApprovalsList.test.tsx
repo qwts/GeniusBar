@@ -13,7 +13,7 @@ describe('ApprovalsList', () => {
     render(<ApprovalsList items={[]} paused onOpen={vi.fn()} onDecide={vi.fn()} />);
     expect(screen.queryByRole('alert')).toBeNull();
     const section = screen.getByRole('region', { name: 'Waiting for your approval' });
-    expect(within(section).getByRole('heading', { name: 'Waiting for your approval' })).toBeTruthy();
+    expect(within(section).getByRole('heading', { level: 3, name: 'Waiting for your approval' })).toBeTruthy();
     expect(within(section).getByText('Nothing waiting for you')).toBeTruthy();
     expect(within(section).queryByRole('listitem')).toBeNull();
   });

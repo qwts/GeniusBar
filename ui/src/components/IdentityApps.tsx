@@ -280,7 +280,7 @@ export function ConnectForm({ onConnected, label }: { onConnected?: (result: Ide
       </div>
       <span className="text-[11px] text-muted-foreground">{t('identity.connectHint')}</span>
       {busy && <span className="text-[11px] text-muted-foreground" role="status">{t('identity.waiting')}</span>}
-      {error && <span className="error text-[11px]" role="alert">{t('identity.failed', { message: error })}</span>}
+      {error && <span className="text-[11px] text-destructive" role="alert">{t('identity.failed', { message: error })}</span>}
     </div>
   );
 }
@@ -322,7 +322,7 @@ export function ActionLines({ busy, error }: { busy: string | null; error: strin
   return (
     <>
       {busy && <span className="block font-sans text-[11px] text-muted-foreground" role="status">{t('identity.waiting')}</span>}
-      {error && <span className="error block font-sans text-[11px]" role="alert">{t('identity.failed', { message: error })}</span>}
+      {error && <span className="block font-sans text-[11px] text-destructive" role="alert">{t('identity.failed', { message: error })}</span>}
     </>
   );
 }

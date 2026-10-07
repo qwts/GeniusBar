@@ -5,6 +5,7 @@ import { AuditSourceContext } from './components/AuditLog';
 import { emptyComposer, mergeIncoming, emptyChat } from './model/chat';
 import type { CensusRow } from './model/census';
 import { inboxMessage, sampleCensus, sampleConnection, sampleTemplates } from './model/fixtures';
+import { noBadges } from './model/refresh';
 import { idleSetup } from './model/setup';
 import { disconnected, formatTime } from './model/status';
 import { LAYOUT_KEY, layoutActions } from './state/layout';
@@ -787,9 +788,13 @@ describe('App window mode', () => {
 
   it('replaces a hidden team lead with a neutral placeholder, keeping its subagents reachable', () => {
     render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
-    // The lead alone hides from its right-click menu; the menu's lead eye hides the team.
+    // As the design, Hide on the lead hides its whole team (D5); a subagent
+    // shown again from the menu leaves the lead hidden behind a placeholder.
     fireEvent.contextMenu(within(desktop()).getByRole('button', { name: /^luna,/ }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Hide from desktop' }));
+    expect(within(desktop()).queryByRole('region', { name: 'Team' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'GeniusBar menu' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'GeniusBar menu' })).getByRole('button', { name: 'Show on desktop: agent_c' }));
     // The hidden lead leaves nothing behind: no avatar, no name, no harness,
     // and no longer the card's accessible name either.
     const card = within(desktop()).getByRole('region', { name: 'Team' });
@@ -809,10 +814,11 @@ describe('App window mode', () => {
     render(<App mode="window" census={nestedCensus} connection={sampleConnection} isStatic />);
     fireEvent.click(screen.getByRole('button', { name: 'GeniusBar menu' }));
     const menu = screen.getByRole('dialog', { name: 'GeniusBar menu' });
-    // The lead alone hides from its right-click menu; the menu's lead eye hides the team.
+    // Hide on the lead hides the team (D5); kiro shown again leaves the lead's placeholder.
     fireEvent.contextMenu(within(desktop()).getByRole('button', { name: /^luna,/ }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Hide from desktop' }));
-    fireEvent.click(within(menu).getByRole('button', { name: 'Hide from desktop: agent_c' }));
+    expect(within(desktop()).queryByRole('region', { name: 'Team' })).toBeNull();
+    fireEvent.click(within(menu).getByRole('button', { name: 'Show on desktop: kiro' }));
     const card = within(desktop()).getByRole('region', { name: 'Team' });
     expect(card.textContent).toContain('2 subagents · 1 hidden');
     expect(within(card).queryByRole('button', { name: /^agent_c,/ })).toBeNull();
@@ -822,6 +828,28 @@ describe('App window mode', () => {
     expect(screen.queryByRole('region', { name: 'luna' })).toBeNull();
     fireEvent.click(within(menu).getByRole('button', { name: 'Show all hidden (3)' }));
     expect(within(desktop()).getByRole('region', { name: 'luna' })).toBeTruthy();
+  });
+
+  it('goes home from the G GeniusBar mark: the open window and the audit window close (M1)', () => {
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic />);
+    fireEvent.click(within(desktop()).getByRole('button', { name: /^luna,/ }));
+    expect(screen.getByRole('dialog', { name: 'luna' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'GeniusBar' }));
+    expect(screen.queryByRole('dialog', { name: 'luna' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'View' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Audit log' }));
+    expect(screen.getByRole('dialog', { name: 'Audit log' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'GeniusBar' }));
+    expect(screen.queryByRole('dialog', { name: 'Audit log' })).toBeNull();
+  });
+
+  it("passes the live state to the open window: a working companion's title bar and header Dudles look busy (S1, S3)", () => {
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic
+      badges={{ ...noBadges, busy: new Set(['agent_p']) }} />);
+    fireEvent.click(within(desktop()).getByRole('button', { name: /^luna,/ }));
+    const win = screen.getByRole('dialog', { name: 'luna' });
+    for (const dudle of win.querySelectorAll('svg.dudle')) expect(dudle.getAttribute('data-state')).toBe('working');
+    expect(within(win).getByText(/· Working…$/)).toBeTruthy();
   });
 
   it("hides and shows a whole team from the lead's eye in the menu", () => {
@@ -864,6 +892,7 @@ describe('App language', () => {
     fireEvent.change(screen.getByRole('combobox', { name: 'Language' }), { target: { value: 'es' } });
     fireEvent.contextMenu(within(screen.getByRole('main', { name: 'Flota' })).getByRole('button', { name: /^luna,/ }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Ocultar del escritorio' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Menú de GeniusBar' })).getByRole('button', { name: 'Mostrar en el escritorio: agent_c' }));
     const card = within(screen.getByRole('main', { name: 'Flota' })).getByRole('region', { name: 'Equipo' });
     expect(card.textContent).toContain('1 subagente');
     expect(card.textContent).not.toMatch(/luna|codex/i);

@@ -64,13 +64,16 @@ export function SandboxChip({ soul }: { soul: CensusRow }) {
         <div role="menu" aria-label={t('sandbox.title')}
           className="absolute top-full right-0 z-50 mt-1 w-64 rounded-md border border-border bg-popover p-1 shadow-md">
           <p className="m-0 px-2 py-1.5 text-xs text-muted-foreground">{runsAsText(row, t)}</p>
-          {failure && <p role="alert" className="error m-0 px-2 pb-1.5 text-[11px]">{t('sandbox.failed', { message: failure })}</p>}
+          {failure && <p role="alert" className="m-0 px-2 pb-1.5 text-[11px] text-destructive">{t('sandbox.failed', { message: failure })}</p>}
           <div role="separator" className="-mx-1 my-1 h-px bg-muted" />
           {choices.map(([value, label]) => (
             <button key={value} type="button" role="menuitemradio" aria-checked={row.override === value}
               onClick={() => choose(value)}
               className="relative flex w-full items-center rounded-sm py-1.5 pr-2 pl-8 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none">
-              {row.override === value && <span className="absolute left-2 size-2 rounded-full bg-current" aria-hidden />}
+              {/* As Radix DropdownMenuRadioItem: the dot centred in a 3.5 box. */}
+              <span className="absolute left-2 flex size-3.5 items-center justify-center" aria-hidden>
+                {row.override === value && <span className="size-2 rounded-full bg-current" />}
+              </span>
               {label}
             </button>
           ))}

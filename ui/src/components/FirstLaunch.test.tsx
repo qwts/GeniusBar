@@ -87,3 +87,16 @@ describe('FirstLaunch command line tools step (#101)', () => {
     expect(screen.getByRole('button', { name: 'Install again' })).toBeTruthy();
   });
 });
+
+describe('FirstLaunch look (P14)', () => {
+  afterEach(cleanup);
+
+  it('draws the starter with the token classes, its Start as the primary button', () => {
+    const ready: Starter = { ...missing, devTools: true };
+    render(<FirstLaunch starter={ready} launcher={launcher} />);
+    const form = screen.getByRole('form', { name: 'Start with Starter' });
+    expect(form.className.split(' ')).not.toContain('first-launch');
+    expect(form.querySelector('.small, .muted, .error, .detail-actions')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Start with Starter' }).className).toContain('bg-primary');
+  });
+});

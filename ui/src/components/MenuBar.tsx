@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { Eye, History, Pause, Plus, Search, X, Zap } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
+import { menuKeys } from '../lib/keys';
 import { badgeText } from '../model/approvals';
 import { displayHarness, displayName, displayRole, soulKey, type CensusRow, type SoulNode } from '../model/census';
 import { teamsOf } from '../model/fleet';
@@ -26,7 +27,7 @@ function useClickAway(ref: RefObject<HTMLElement | null>, open: boolean, close: 
  * Auto-Pilot the G turns amber and a warning bar under the menu bar says so,
  * with Turn off.
  */
-export function MenuBar({ open, onOpenChange, tone, title, attention = null, onReset, unread, approvals = 0, working = 0, autopilot = false, onAutopilotOff, onAudit, forest, paused, onJump, fleetPaused = false, onResume, onLaunch, hiddenCount = 0, onShowAll, children }: {
+export function MenuBar({ open, onOpenChange, tone, title, attention = null, onReset, unread, approvals = 0, working = 0, autopilot = false, onAutopilotOff, onAudit, forest, paused, onJump, fleetPaused = false, onResume, onLaunch, hiddenCount = 0, onShowAll, onHome, children }: {
   open: boolean; onOpenChange: (open: boolean) => void; tone: string; title: string;
   attention?: { text: string; isError: boolean } | null; onReset: () => void;
   /** Unread messages across the fleet, badged on the GeniusBar item. */
@@ -51,12 +52,18 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
   /** Companions hidden from the desktop; the palette offers "Show all hidden" while above zero. */
   hiddenCount?: number;
   onShowAll?: () => void;
+  /** The "G GeniusBar" mark as the design's home link: closes the open window, back to the desktop. */
+  onHome?: () => void;
   children: ReactNode;
 }) {
   const { t, lang } = useI18n();
   const item = useRef<HTMLDivElement>(null);
   const view = useRef<HTMLDivElement>(null);
+  const viewButton = useRef<HTMLButtonElement>(null);
+  const viewMenu = useRef<HTMLDivElement>(null);
   const [viewOpen, setViewOpen] = useState(false);
+  // As Radix Menubar: the open View menu takes focus on its first item.
+  useEffect(() => { if (viewOpen) viewMenu.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus(); }, [viewOpen]);
   const [palette, setPalette] = useState(false);
   const closeMenu = () => onOpenChange(false);
   const closeView = () => setViewOpen(false);
@@ -95,17 +102,29 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
           )}
         </div>
       )}
-      <span className="flex items-center gap-1.5 px-1.5 py-0.5 font-semibold tracking-tight">
-        <span className="grid size-5 place-items-center rounded bg-primary text-[11px] text-primary-foreground" aria-hidden>G</span>
-        <span>GeniusBar</span>
-      </span>
-      <div ref={view} className="relative" onKeyDown={(e) => { if (e.key === 'Escape') setViewOpen(false); }}>
-        <button type="button" aria-haspopup="menu" aria-expanded={viewOpen} onClick={() => setViewOpen(!viewOpen)}
+      {onHome ? (
+        // The design's home link: the name hides on a narrow window, the G stays.
+        <button type="button" onClick={onHome} aria-label="GeniusBar" title={t('menu.home')}
+          className="flex items-center gap-1.5 rounded px-1.5 py-0.5 font-semibold tracking-tight text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring">
+          <span className="grid size-5 place-items-center rounded bg-primary text-[11px] text-primary-foreground" aria-hidden>G</span>
+          <span className="hidden sm:inline">GeniusBar</span>
+        </button>
+      ) : (
+        <span className="flex items-center gap-1.5 px-1.5 py-0.5 font-semibold tracking-tight">
+          <span className="grid size-5 place-items-center rounded bg-primary text-[11px] text-primary-foreground" aria-hidden>G</span>
+          <span className="hidden sm:inline">GeniusBar</span>
+        </span>
+      )}
+      <div ref={view} className="relative" onKeyDown={(e) => {
+        if (e.key === 'Escape' && viewOpen) { setViewOpen(false); viewButton.current?.focus(); }
+      }}>
+        <button ref={viewButton} type="button" aria-haspopup="menu" aria-expanded={viewOpen} onClick={() => setViewOpen(!viewOpen)}
+          onKeyDown={(e) => { if (e.key === 'ArrowDown' && !viewOpen) { e.preventDefault(); setViewOpen(true); } }}
           className={`h-7 rounded px-2 text-xs hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${viewOpen ? 'bg-accent' : ''}`}>
           {t('menu.view')}
         </button>
         {viewOpen && (
-          <div role="menu" aria-label={t('menu.view')}
+          <div ref={viewMenu} role="menu" aria-label={t('menu.view')} onKeyDown={menuKeys}
             className="absolute top-full left-0 mt-1 min-w-[12rem] rounded-md border border-border bg-popover p-1 shadow-md">
             <button type="button" role="menuitem" className={viewItem} onClick={openPalette}>
               <Search className="size-3.5" aria-hidden /> {t('bar.palette')}
@@ -174,7 +193,7 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
           className="rounded p-0.5 text-foreground/90 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
           <Search className="size-4" aria-hidden />
         </button>
-        <time className="pl-1 text-foreground/90" dateTime={now.toISOString()}>{clock}</time>
+        <time className="hidden pl-1 text-foreground/90 sm:inline" dateTime={now.toISOString()}>{clock}</time>
       </div>
       {palette && <Palette forest={forest} paused={paused} onClose={() => setPalette(false)}
         onJump={(soul) => { setPalette(false); onJump(soul); }}
@@ -269,7 +288,7 @@ function Palette({ forest, paused, onClose, onJump, onLaunch, onShowAll, hiddenC
         // Keep focus in the search box; the click still picks.
         onMouseDown={(e) => e.preventDefault()}
         onClick={run}
-        className={`flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-3 text-left text-sm ${selected ? 'bg-accent' : ''}`}>
+        className={`flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm ${selected ? 'bg-accent' : ''}`}>
         {children}
       </div>
     );

@@ -95,14 +95,13 @@
 }
 
 /*
- * Shared pieces the setup, launch and update views use. They keep their
- * class names from before the redesign and take the tokens here.
+ * Shared pieces the setup and launch views use. They keep their class
+ * names from before the redesign and take the tokens here; the old text
+ * and panel classes (muted, small, error, link, panel…) became token
+ * utilities in the Lovable pass 6 sweep.
  */
 @layer components {
-  .muted { color: var(--muted-foreground); }
-  .small { font-size: 11px; }
   .block { display: block; }
-  .error { color: var(--destructive); }
   .selectable { user-select: text; }
   .note { color: var(--muted-foreground); margin: 2px 0 0; }
   .empty { padding: 12px 14px; margin: 0; }
@@ -111,23 +110,6 @@
   .dot-bad { background: var(--destructive); }
   .dot-unknown { background: var(--muted-foreground); }
   .health-title { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12px; color: var(--muted-foreground); }
-  .health-title.small { font-size: 11px; }
-  .link {
-    border: 0; background: none; padding: 0; font: inherit; font-size: 12px;
-    color: var(--info);
-  }
-  .link:hover { text-decoration: underline; }
-  .panel { padding: 12px 14px; border-bottom: 1px solid var(--border); }
-  .panel h2 { font-size: 13px; font-weight: 600; margin: 0 0 6px; }
-  .panel p { margin: 0 0 6px; }
-  .detail-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
-  .confirm { flex-basis: 100%; display: grid; gap: 6px; }
-  .confirm p, .confirm ul { margin: 0; }
-  .update {
-    display: flex; justify-content: space-between; align-items: center; gap: 8px;
-    padding: 6px 14px; border-bottom: 1px solid var(--border);
-    background: color-mix(in oklab, var(--primary) 12%, transparent);
-  }
   .setup { padding: 14px; border-bottom: 1px solid var(--border); }
   .setup p { margin: 0 0 10px; font-weight: 500; }
   .setup ol { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 6px; }
@@ -135,12 +117,9 @@
   .setup li.done, .setup li.running { color: var(--foreground); }
   .setup li.done svg { color: var(--success); }
   .setup li.running svg { color: var(--primary); }
-  .first-launch { display: grid; gap: 8px; }
-  .first-launch p, .launch p { margin: 0; }
-  .first-launch label { display: grid; grid-template-columns: 64px 1fr; gap: 8px; align-items: center; }
-  .first-launch label > span { color: var(--muted-foreground); font-size: 12px; }
   /* The launch dialog's numbered steps (Lovable 20.03.51). */
   .launch { display: grid; gap: 20px; }
+  .launch p { margin: 0; }
   .launch fieldset { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }
   .launch legend { padding: 0; }
   .launch input[readonly] { border-color: transparent; background: transparent; padding-left: 0; }

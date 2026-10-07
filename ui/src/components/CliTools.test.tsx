@@ -26,6 +26,16 @@ describe('CliTools', () => {
     await waitFor(() => expect(api.install).toHaveBeenCalledWith(['agent-bot']));
     await screen.findByRole('button', { name: 'Uninstall' });
     expect(screen.queryByRole('button', { name: /^(Install|Replace and install)$/ })).toBeNull();
+    // Everything in place: the design's line (T18).
+    expect(screen.getByRole('status').textContent).toBe('Command-line tools are installed.');
+  });
+
+  it('opens from a text link, not the old link class (P17)', () => {
+    const api = { status: vi.fn(async () => installed), install: vi.fn(), uninstall: vi.fn() };
+    render(<CliTools api={api} />);
+    const trigger = screen.getByRole('button', { name: 'Command-line tools…' });
+    expect(trigger.className.split(' ')).not.toContain('link');
+    expect(trigger.className).toContain('text-info');
   });
 
   it('reports a failure', async () => {

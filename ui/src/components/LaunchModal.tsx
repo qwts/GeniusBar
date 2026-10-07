@@ -33,7 +33,7 @@ export function LaunchModal({ onClose, busy = false, children }: { onClose: () =
         onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); escape.current(); } }}
         className="relative grid max-h-full w-full max-w-lg gap-5 overflow-y-auto rounded-lg border border-border bg-background p-6 shadow-lg">
         <button type="button" onClick={onClose} aria-label={t('close')}
-          className="absolute top-4 right-4 rounded-sm text-foreground opacity-70 hover:opacity-100">
+          className="absolute top-4 right-4 rounded-sm text-foreground opacity-70 outline-none hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring">
           <X className="size-4" aria-hidden />
         </button>
         <h2 id={titleId} className="m-0 pr-8 text-lg leading-none font-semibold tracking-tight">{t('launchDialogTitle')}</h2>

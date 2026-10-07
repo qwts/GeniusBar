@@ -79,7 +79,7 @@ export function ArchiveDialog({ soul, archiver, onCancel, onArchived }: {
         {running === true && <p className="m-0 text-[11px] text-muted-foreground">{t('bar.archiveRunning')}</p>}
         {running === 'checking' && <p className="m-0 text-[11px] text-muted-foreground">{t('bar.archiveChecking')}</p>}
         {archiving && <p className="m-0 text-[11px] text-muted-foreground" role="status">{t('bar.archiving')}</p>}
-        {error && <p className="error small m-0" role="alert">{error}</p>}
+        {error && <p className="m-0 text-[11px] text-destructive" role="alert">{error}</p>}
         <div className="flex justify-end gap-2">
           <button ref={cancel} type="button" onClick={close} disabled={archiving}
             className="h-9 rounded-md px-4 text-sm font-medium hover:bg-accent disabled:opacity-50">{t('cancel')}</button>

@@ -312,7 +312,7 @@ function SignInNotice({ soul, population }: { soul: CensusRow; population: SoulP
             {t(failure.status === 'expired' ? 'login.expiredTitle' : 'login.signedOutTitle', { harness })}
           </p>
           <p className="m-0 text-xs text-muted-foreground">{t('login.expiredBody', { name, harness })}</p>
-          {error && <p className="error m-0 text-[11px]">{t('login.failed', { message: error })}</p>}
+          {error && <p className="m-0 text-[11px] text-destructive">{t('login.failed', { message: error })}</p>}
         </div>
         <button type="button" disabled={signing} onClick={signIn}
           className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50">

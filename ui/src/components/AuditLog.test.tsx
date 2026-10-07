@@ -65,7 +65,8 @@ describe('AuditLog', () => {
     withSource(async () => sampleAudit.slice(0, 2));
     fireEvent.click(await screen.findByRole('button', { name: 'Export JSON' }));
     const status = await screen.findByText('Couldn’t save the audit log.');
-    expect(status.className).toContain('error');
+    expect(status.getAttribute('role')).toBe('status');
+    expect(status.className).toContain('text-destructive');
   });
 
   it('still copies the shown records as JSON with Copy JSON, and says so', async () => {

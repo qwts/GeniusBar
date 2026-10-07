@@ -96,7 +96,7 @@ export function AuditLog({ agentId, roster = [] }: { agentId: string | null; ros
     <div className="p-4 md:p-6">
       <div className="mb-3 flex items-center justify-end gap-2">
         {notice && (
-          <span role="status" className={`text-xs ${notice.endsWith('Failed') ? 'error' : 'text-muted-foreground'}`}>
+          <span role="status" className={`text-xs ${notice.endsWith('Failed') ? 'text-destructive' : 'text-muted-foreground'}`}>
             {t(`audit.${notice}`)}
           </span>
         )}

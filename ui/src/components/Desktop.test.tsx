@@ -141,12 +141,35 @@ describe('Desktop hide and restore', () => {
     expect(screen.getByRole('button', { name: 'More for Team' }).className).not.toMatch(/opacity-0/);
   });
 
-  it("hides a lead from its team's ⋯ and restores it from the placeholder", () => {
+  it("hides a lead's whole team from its team's ⋯, as the design's Hide on a lead (D5), keeping a lead-only Hide", () => {
     render(<Live />);
     fireEvent.click(screen.getByRole('button', { name: 'More for luna' }));
     const menu = screen.getByRole('menu', { name: 'luna' });
     expect(document.activeElement).toBe(within(menu).getByRole('menuitem', { name: 'Open' }));
+    expect(within(menu).getByRole('menuitem', { name: 'Hide only this companion' })).toBeTruthy();
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Hide from desktop' }));
+    expect(screen.queryByRole('region', { name: 'luna' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Team' })).toBeNull();
+    expect(useLayoutSnapshot().hidden).toEqual(['user/agent_p', 'user/agent_c']);
+  });
+
+  it('still hides a lead on its own from its menu (Hide only this companion)', () => {
+    render(<Live />);
+    fireEvent.click(screen.getByRole('button', { name: 'More for luna' }));
+    fireEvent.click(within(screen.getByRole('menu', { name: 'luna' })).getByRole('menuitem', { name: 'Hide only this companion' }));
+    expect(useLayoutSnapshot().hidden).toEqual(['user/agent_p']);
+  });
+
+  it('hides a lead from its right-click menu with its team too (D5)', () => {
+    render(<Live />);
+    fireEvent.contextMenu(avatar(/^luna,/));
+    fireEvent.click(within(screen.getByRole('menu', { name: 'luna' })).getByRole('menuitem', { name: 'Hide from desktop' }));
+    expect(useLayoutSnapshot().hidden).toEqual(['user/agent_p', 'user/agent_c']);
+  });
+
+  it('restores a lead hidden on its own (from the menu bar list) from the placeholder', () => {
+    render(<Live />);
+    act(() => layoutActions.setHidden('user/agent_p', true));
     expect(screen.queryByRole('region', { name: 'luna' })).toBeNull();
     expect(screen.getByRole('region', { name: 'Team' })).toBeTruthy();
     expect(useLayoutSnapshot().hidden).toEqual(['user/agent_p']);
@@ -180,6 +203,33 @@ describe('Desktop hide and restore', () => {
     expect(screen.queryByRole('button', { name: /^agent_c,/ })).toBeNull();
     expect(screen.getByRole('region', { name: 'luna' })).toBeTruthy();
     expect(useLayoutSnapshot().hidden).toEqual(['user/agent_c']);
+  });
+
+  it('moves through the menu with Up, Down, Home and End, and Escape gives focus back to ⋯ (D6)', () => {
+    render(<Live />);
+    const more = screen.getByRole('button', { name: 'More for luna' });
+    fireEvent.click(more);
+    const menu = screen.getByRole('menu', { name: 'luna' });
+    const items = within(menu).getAllByRole('menuitem');
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(menu, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(items[1]);
+    fireEvent.keyDown(menu, { key: 'End' });
+    expect(document.activeElement).toBe(items[items.length - 1]);
+    fireEvent.keyDown(menu, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(menu, { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(items[items.length - 1]);
+    fireEvent.keyDown(menu, { key: 'Home' });
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(menu, { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(more);
+  });
+
+  it('rings a focused avatar, as the design (D4)', () => {
+    render(<Live />);
+    expect(avatar(/^luna,/).className.split(' ')).toEqual(expect.arrayContaining(['focus-visible:ring-2', 'focus-visible:ring-ring']));
   });
 });
 
@@ -229,5 +279,16 @@ describe('CompanionWindow role (#122, agent-bot-identity #535)', () => {
     unmount();
     render(<CompanionWindow soul={luna} paused onClose={() => {}}>body</CompanionWindow>);
     expect(within(screen.getByRole('dialog', { name: 'luna' })).getByText('codex')).toBeTruthy();
+  });
+});
+
+describe('CompanionWindow title Dudle (S3)', () => {
+  it('animates the title bar Dudle with the live state, idle without one', () => {
+    const { unmount } = render(<CompanionWindow soul={luna} paused onClose={() => {}} state="working">body</CompanionWindow>);
+    const bar = screen.getByRole('dialog', { name: 'luna' });
+    expect(bar.querySelector('svg.dudle')?.getAttribute('data-state')).toBe('working');
+    unmount();
+    render(<CompanionWindow soul={luna} paused onClose={() => {}}>body</CompanionWindow>);
+    expect(screen.getByRole('dialog', { name: 'luna' }).querySelector('svg.dudle')?.getAttribute('data-state')).toBe('idle');
   });
 });

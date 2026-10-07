@@ -216,6 +216,22 @@ describe('LaunchForm soul templates (#65)', () => {
     expect((screen.getByLabelText('Harness') as HTMLSelectElement).value).toBe('muse');
   });
 
+  it('labels Name and Role as the design and names the role after the chosen soul (LA2)', async () => {
+    render(form(launcherIn({ phase: 'idle' }), { listTemplates: listed }));
+    await picker();
+    for (const label of ['Name', 'Role']) {
+      const el = screen.getByText(label, { selector: 'label' });
+      expect(el.className).toContain('text-sm font-medium leading-none');
+      expect(screen.getByLabelText(label).id).toBe(el.getAttribute('for'));
+    }
+    expect(screen.getByLabelText('Name').getAttribute('placeholder')).toBe('Optional');
+    expect(screen.getByLabelText('Role').getAttribute('placeholder')).toBe('Coder');
+    fireEvent.click(screen.getByRole('radio', { name: 'Researcher' }));
+    expect(screen.getByLabelText('Role').getAttribute('placeholder')).toBe('Researcher');
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom soul' }));
+    expect(screen.getByLabelText('Role').getAttribute('placeholder')).toBe('Optional, e.g. Researcher');
+  });
+
   it('"Custom soul" shows the package path field and launches the typed path', async () => {
     const launcher = launcherIn({ phase: 'idle' });
     render(form(launcher, { listTemplates: listed }));

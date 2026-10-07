@@ -53,8 +53,8 @@ export function SandboxCard() {
       </div>
       <p className="m-0 text-muted-foreground">{t('sandbox.desc')}</p>
       {saving && <p className="m-0 text-[11px] text-muted-foreground" role="status">{t('sandbox.saving')}</p>}
-      {switchFailure && <p className="error m-0 text-[11px]" role="alert">{t('sandbox.failed', { message: switchFailure })}</p>}
-      {readFailure && <p className="error m-0 text-[11px]" role="alert">{t('sandbox.readFailed', { message: readFailure })}</p>}
+      {switchFailure && <p className="m-0 text-[11px] text-destructive" role="alert">{t('sandbox.failed', { message: switchFailure })}</p>}
+      {readFailure && <p className="m-0 text-[11px] text-destructive" role="alert">{t('sandbox.readFailed', { message: readFailure })}</p>}
       {status && on && (
         <>
           <Select wrapperClassName="w-full" aria-label={t('sandbox.provider')} value="standard_macos_account" onChange={() => {}}

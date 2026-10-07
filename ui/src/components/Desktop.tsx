@@ -3,12 +3,14 @@ import { Archive, ChevronDown, Eye, EyeOff, History, Monitor, MoreHorizontal, Pa
 import { displayName, displayRole, roleAndHarness, soulKey, type CensusRow, type SoulNode } from '../model/census';
 import { companionLabel, teamKeys, teamsOf, type Team } from '../model/fleet';
 import { useI18n } from '../lib/i18n';
+import { menuKeys } from '../lib/keys';
 import { noBadges, type SoulBadges } from '../model/refresh';
 import { layoutActions, type DesktopLayout } from '../state/layout';
 import { ProfileSourceContext } from '../useSoulProfile';
 import { AuditLog } from './AuditLog';
 import { CustomizeDialog } from './CustomizeDialog';
 import { SoulDudle } from './FleetList';
+import type { DudleState } from './Dudle';
 import { CompanionHoverCard, useHoverCard } from './HoverCard';
 import { soulStatus, statusText, StatusDot, type StatusInputs } from './DesktopStatus';
 
@@ -270,7 +272,11 @@ function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unread
 
 const menuItem = 'flex items-center gap-2 rounded-sm px-2 py-1.5 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-none';
 
-/** A small menu that takes focus and closes on Escape or when focus leaves it. */
+/**
+ * A small menu that takes focus, moves it with Up / Down / Home / End (as
+ * Radix ContextMenu), and closes on Escape or when focus leaves it; its
+ * owner hands focus back to the trigger.
+ */
 function MenuBox({ label, onClose, align = 'center', children }: {
   label: string; onClose: () => void; align?: 'center' | 'right';
   children: (first: RefObject<HTMLButtonElement | null>) => ReactNode;
@@ -280,7 +286,7 @@ function MenuBox({ label, onClose, align = 'center', children }: {
   return (
     <div role="menu" aria-label={label}
       className={`absolute top-full z-30 mt-1 grid min-w-[8rem] rounded-md border border-border bg-popover p-1 text-sm shadow-md ${align === 'right' ? 'right-0' : 'left-1/2 -translate-x-1/2'}`}
-      onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }}
+      onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } else menuKeys(e); }}
       onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onClose(); }}>
       {children(first)}
     </div>
@@ -289,7 +295,8 @@ function MenuBox({ label, onClose, align = 'center', children }: {
 
 /**
  * Open, Customize… (right-click only, as the design's), Hide, Hide team and
- * Remove… for one companion: its right-click menu and its team's ⋯.
+ * Remove… for one companion: its right-click menu and its team's ⋯. As the
+ * design, Hide on a team's lead hides the whole team; Hide team stays.
  */
 function SoulMenu({ soul, team, onOpen, onCustomize, onArchive, onClose, done, align }: {
   soul: CensusRow; team?: readonly string[]; onOpen: (soul: CensusRow) => void; onArchive?: (soul: CensusRow) => void;
@@ -317,13 +324,14 @@ function SoulMenu({ soul, team, onOpen, onCustomize, onArchive, onClose, done, a
             </button>
           )}
           <button type="button" role="menuitem" className={menuItem}
-            onClick={() => { done(); layoutActions.setHidden(soulKey(soul), true); }}>
+            onClick={() => { done(); if (team) layoutActions.setTeamHidden(team, true); else layoutActions.setHidden(soulKey(soul), true); }}>
             <EyeOff className="size-3.5" aria-hidden /> {t('bar.hide')}
           </button>
           {team && (
+            // Hide now takes the team (the design); hiding the lead alone stays here.
             <button type="button" role="menuitem" className={menuItem}
-              onClick={() => { done(); layoutActions.setTeamHidden(team, true); }}>
-              <EyeOff className="size-3.5" aria-hidden /> {t('bar.hideTeam')}
+              onClick={() => { done(); layoutActions.setHidden(soulKey(soul), true); }}>
+              <EyeOff className="size-3.5" aria-hidden /> {t('bar.hideOnly')}
             </button>
           )}
           {onArchive && (
@@ -379,7 +387,7 @@ function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = 
         onClick={() => onOpen(soul)}
         onContextMenu={(e) => { e.preventDefault(); setMenu(true); }}
         {...card.trigger}
-        className={`flex flex-col items-center gap-0.5 rounded-lg p-1 ${bare ? 'shrink-0' : 'w-full'} ${selected ? 'bg-accent' : 'hover:bg-accent/50'}`}
+        className={`flex flex-col items-center gap-0.5 rounded-lg p-1 outline-none focus-visible:ring-2 focus-visible:ring-ring ${bare ? 'shrink-0' : 'w-full'} ${selected ? 'bg-accent' : 'hover:bg-accent/50'}`}
       >
         <span className="relative">
           <SoulDudle soul={soul} size={size} paused={paused} state={state === 'awaiting' || state === 'working' ? state : undefined} />
@@ -466,8 +474,10 @@ function DesktopWindow({ head, titleId, onClose, children }: {
  * the design's chrome: a close dot, the Dudle, the mono name and its role · harness line,
  * and a pill for the census's hardened flag when it is known.
  */
-export function CompanionWindow({ soul, paused, onClose, actions, children }: {
+export function CompanionWindow({ soul, paused, onClose, actions, state, children }: {
   soul: CensusRow; paused: boolean; onClose: () => void;
+  /** The title Dudle's face (the design's `state={c.presence}`): awaiting, working or idle. */
+  state?: DudleState;
   /** The chrome's right-hand controls after the pill, such as ⓘ. */
   actions?: ReactNode;
   children: ReactNode;
@@ -478,7 +488,7 @@ export function CompanionWindow({ soul, paused, onClose, actions, children }: {
   return (
     <DesktopWindow titleId={titleId} onClose={onClose} head={(
       <>
-        <SoulDudle soul={soul} size={20} paused={paused} />
+        <SoulDudle soul={soul} size={20} paused={paused} state={state} />
         <h2 id={titleId} className="m-0 truncate font-mono text-xs font-semibold text-foreground">{title}</h2>
         <span className="mr-auto truncate text-[11px] text-muted-foreground">{roleAndHarness(soul)}</span>
         {typeof soul.hardened === 'boolean' && (

@@ -11,6 +11,7 @@ describe('ToolCard', () => {
     const header = screen.getByRole('button', { name: 'Tool call: edit_file — Done' });
     expect(header.getAttribute('aria-expanded')).toBe('false');
     expect(screen.queryByText('Edited 2 lines')).toBeNull();
+    expect(header.className).toContain('focus-visible:ring-2'); // E3
     fireEvent.click(header);
     expect(header.getAttribute('aria-expanded')).toBe('true');
     expect(document.getElementById(header.getAttribute('aria-controls')!)?.textContent).toContain('Edited 2 lines');
