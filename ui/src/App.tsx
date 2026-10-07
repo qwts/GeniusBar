@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Plus, Volume2, VolumeX } from 'lucide-react';
+import { History, Plus, Volume2, VolumeX, X } from 'lucide-react';
 import { ApprovalCounts, ApprovalsList } from './components/ApprovalsList';
 import { ArchiveDialog, ArchivedNotice, liveArchiver, type Archiver } from './components/ArchiveDialog';
 import { inApp, listSoulTemplates, liveComputerUse, popupVisible, soulStopSupported, stopSoul, type ComputerUseSwitch, type RemovedSoul } from './bridge';
@@ -14,6 +14,8 @@ import { LaunchForm } from './components/LaunchForm';
 import { LaunchModal } from './components/LaunchModal';
 import { MenuBar } from './components/MenuBar';
 import { CliTools, type CliToolsApi } from './components/CliTools';
+import { AuditLog } from './components/AuditLog';
+import { FleetMode } from './components/FleetMode';
 import { RemoveServices } from './components/RemoveServices';
 import { SetupPanel } from './components/SetupPanel';
 import { UpdateNotice } from './components/UpdateNotice';
@@ -213,7 +215,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const activePackage = openedPackage && openedPackage.id !== dismissedPackage ? openedPackage : undefined;
   // Window mode's menu is a popover; it opens itself when it has news.
   const [menuOpen, setMenuOpen] = useState(false);
-  const [panel, setPanel] = useState<'cli' | 'remove' | null>(null);
+  const [panel, setPanel] = useState<'cli' | 'remove' | 'audit' | null>(null);
   // An installed soul opened from Finder is that companion, never a new
   // launch (#80); one not in the roster yet keeps the form, and the daemon
   // relaunches it rather than spawning another.
@@ -350,12 +352,17 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
       {/* The design's footer icon row; the rest sits in the ⋯ menu (Lovable audit §4, §7). */}
       <footer className="border-t border-border">
         <div className="flex items-center gap-1.5 p-2 text-xs">
+          <FleetMode roster={roster} />
           <button type="button" aria-label={t('sound')} aria-pressed={sound} onClick={() => setSound(!sound)} className="rounded p-1 text-muted-foreground hover:text-foreground">
             {sound ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />}
           </button>
           <LanguageSelect />
           {footer && <span className={`min-w-0 truncate ${footer.isError ? 'error small' : 'muted small'}`}>{footer.text}</span>}
           <span className="ml-auto flex shrink-0 items-center gap-0.5">
+            <button type="button" className={footerIcon} aria-label={t('auditTitle')} title={t('auditTitle')} aria-pressed={panel === 'audit'}
+              onClick={() => setPanel(panel === 'audit' ? null : 'audit')}>
+              <History className="size-3.5" aria-hidden />
+            </button>
             {canLaunchPackage && (
               <button type="button" className={footerIcon} aria-label={t('addCompanion')} title={t('addCompanion')} onClick={launchPackage}>
                 <Plus className="size-3.5" aria-hidden />
@@ -374,6 +381,16 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
             )}
           </span>
         </div>
+        {/* The design's Audit log page (Lovable route /audit, "All activity"): every companion's records, in the menu. */}
+        {panel === 'audit' && (
+          <section className="border-t border-border" aria-label={t('auditTitle')}>
+            <div className="flex items-center gap-2 px-3 pt-2">
+              <h3 className="m-0 flex-1 text-sm font-medium">{t('auditTitle')} <span className="font-normal text-muted-foreground">· {t('allActivity')}</span></h3>
+              <button type="button" className={footerIcon} aria-label={t('close')} onClick={() => setPanel(null)}><X className="size-3.5" aria-hidden /></button>
+            </div>
+            <div className="max-h-72 overflow-y-auto"><AuditLog agentId={null} roster={roster} /></div>
+          </section>
+        )}
         {panel === 'cli' && cliTools && (
           <div className="border-t border-border px-3 py-2"><CliTools api={cliTools} startOpen onClose={() => setPanel(null)} /></div>
         )}

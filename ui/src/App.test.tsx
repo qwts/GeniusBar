@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
+import { AuditSourceContext } from './components/AuditLog';
 import { emptyComposer, mergeIncoming, emptyChat } from './model/chat';
 import type { CensusRow } from './model/census';
 import { inboxMessage, sampleCensus, sampleConnection, sampleTemplates } from './model/fixtures';
@@ -173,6 +174,18 @@ describe('App setup', () => {
     fireEvent.change(screen.getByLabelText('Harness'), { target: { value: 'claude' } });
     fireEvent.submit(screen.getByRole('form', { name: 'Launch a companion package' }));
     expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { package: '/souls/helper' }, harness: 'claude', name: '', comms: false });
+  });
+
+  it('opens every companion’s audit log from the footer History button (#122)', async () => {
+    const load = vi.fn(async () => []);
+    render(<AuditSourceContext.Provider value={load}><App census={sampleCensus} connection={sampleConnection} isStatic /></AuditSourceContext.Provider>);
+    expect(screen.queryByRole('region', { name: 'Audit log' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Audit log' }));
+    const region = await screen.findByRole('region', { name: 'Audit log' });
+    expect(region.textContent).toContain('All activity');
+    await waitFor(() => expect(load).toHaveBeenCalledWith(null));
+    fireEvent.click(within(region).getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('region', { name: 'Audit log' })).toBeNull();
   });
 
   it('launches a package from the footer, and shows a refusal inline', () => {

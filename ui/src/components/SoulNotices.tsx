@@ -136,6 +136,63 @@ export function useSoulMode(agentId: string, refresh = 0) {
   return { mode, saving, error, change };
 }
 
+/** Every companion's mode at once: all safe, all Auto-Pilot, or mixed. */
+export type FleetModeState = SoulMode | 'mixed';
+
+/**
+ * The fleet's execution mode for the menu footer (Lovable `GeniusBarItem`
+ * mode pill, #122): one read per rostered soul, souls agent-bot cannot
+ * speak for left out, null while none answered. A change sets every soul
+ * that differs, one after another through agent-bot (each may ask the
+ * owner); the first refusal stops the run, keeps what was set, and says
+ * why. Accepted modes reach the per-soul controls through modeChanges.
+ */
+export function useFleetMode(roster: readonly CensusRow[], refresh = 0) {
+  const source = useContext(SoulSourceContext);
+  const [modes, setModes] = useState<Record<string, SoulMode>>({});
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ticket = useRef(0);
+  const ids = roster.map((soul) => soul.agentId).join('\n');
+  useEffect(() => {
+    const mine = ++ticket.current;
+    const list = ids ? ids.split('\n') : [];
+    void Promise.all(list.map((id) => source.mode(id).then((mode) => [id, mode] as const, () => [id, null] as const)))
+      .then((pairs) => {
+        if (ticket.current !== mine) return;
+        const next: Record<string, SoulMode> = {};
+        for (const [id, mode] of pairs) if (mode) next[id] = mode;
+        setModes(next);
+      });
+  }, [ids, refresh, source]);
+  useEffect(() => {
+    const hear = (id: string, next: SoulMode) => setModes((prev) => (id in prev ? { ...prev, [id]: next } : prev));
+    modeChanges.add(hear);
+    return () => { modeChanges.delete(hear); };
+  }, []);
+  const known = Object.values(modes);
+  const mode: FleetModeState | null = known.length === 0 ? null
+    : known.every((m) => m === 'autopilot') ? 'autopilot'
+    : known.every((m) => m === 'safe') ? 'safe' : 'mixed';
+  const change = async (next: SoulMode) => {
+    setSaving(true);
+    setError(null);
+    try {
+      for (const [id, current] of Object.entries(modes)) {
+        if (current === next) continue;
+        const result = await source.setMode(id, next);
+        setModes((prev) => ({ ...prev, [id]: result }));
+        for (const tell of [...modeChanges]) tell(id, result);
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return { mode, count: known.length, saving, error, change };
+}
+
 // A model agent-bot accepted reaches every control showing that soul (the
 // Details row and the ⓘ sheet's row), not only the one used.
 const modelChanges = new Set<(agentId: string, setting: SoulModel) => void>();
