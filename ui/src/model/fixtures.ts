@@ -242,6 +242,7 @@ export const sampleProfile: SoulProfile = {
     template: false,
     parentId: null,
     status: 'active',
+    appearance: null,
   },
   files: [
     { path: 'soul.md', kind: 'soul', size: 214, modifiedAt: '2026-10-01T09:12:00.000Z', text: true },

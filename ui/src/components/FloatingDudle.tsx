@@ -3,7 +3,7 @@ import { History, MessageSquare, MousePointer2, OctagonX, Pause, Play } from 'lu
 import { computerUseSupported, type ComputerUseSwitch, type SoulStopResult } from '../bridge';
 import { useI18n } from '../lib/i18n';
 import { displayName, type CensusRow } from '../model/census';
-import { deriveDudle } from '../model/dudle';
+import { dudleFor } from '../model/dudle';
 import { COMPUTER_USE_ERROR_MS, computerUseToggle, HALT_HOLD_MS, menuStep, pauseQuickAction, settleStop, STOP_SETTLE_MS, stopTargets, type FloatingState, type StopPhase } from '../model/floating';
 import { Dudle } from './Dudle';
 
@@ -177,7 +177,7 @@ export function FloatingDudle({ lead, state, paused = false, computerUser, compu
             }}
             onContextMenu={(e) => { e.preventDefault(); setOpen(true); }}
           >
-            <Dudle spec={deriveDudle(lead.agentId)} state={state} diameter={48} paused={paused} />
+            <Dudle spec={dudleFor(lead)} state={state} diameter={48} paused={paused} />
             {state === 'awaiting' && (
               <span className="absolute right-0 top-0 flex size-3.5" data-testid="awaiting-dot" aria-hidden>
                 <span className="ping-soft absolute inline-flex size-full rounded-full bg-warning" />

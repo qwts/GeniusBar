@@ -1,10 +1,12 @@
-import { useEffect, useId, useMemo, useRef, useState, type PointerEvent, type ReactNode, type RefObject } from 'react';
-import { Archive, ChevronDown, Eye, EyeOff, MessageCircle, Monitor, MoreHorizontal, Plus, Radio, Shield, ShieldOff, Users, X } from 'lucide-react';
+import { useContext, useEffect, useId, useMemo, useRef, useState, type PointerEvent, type ReactNode, type RefObject } from 'react';
+import { Archive, ChevronDown, Eye, EyeOff, MessageCircle, Monitor, MoreHorizontal, Palette, Plus, Radio, Shield, ShieldOff, Users, X } from 'lucide-react';
 import { displayHarness, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
 import { companionLabel, teamKeys, teamsOf, type Team } from '../model/fleet';
 import { useI18n } from '../lib/i18n';
 import { noBadges, type SoulBadges } from '../model/refresh';
 import { layoutActions, type DesktopLayout } from '../state/layout';
+import { ProfileSourceContext } from '../useSoulProfile';
+import { CustomizeDialog } from './CustomizeDialog';
 import { SoulDudle } from './FleetList';
 import { CompanionHoverCard, useHoverCard } from './HoverCard';
 import { soulStatus, statusText, StatusDot, type StatusInputs } from './DesktopStatus';
@@ -267,9 +269,14 @@ function MenuBox({ label, onClose, align = 'center', children }: {
   );
 }
 
-/** Open, Hide, Hide team and Remove… for one companion: its right-click menu and its team's ⋯. */
-function SoulMenu({ soul, team, onOpen, onArchive, onClose, done, align }: {
+/**
+ * Open, Customize… (right-click only, as the design's), Hide, Hide team and
+ * Remove… for one companion: its right-click menu and its team's ⋯.
+ */
+function SoulMenu({ soul, team, onOpen, onCustomize, onArchive, onClose, done, align }: {
   soul: CensusRow; team?: readonly string[]; onOpen: (soul: CensusRow) => void; onArchive?: (soul: CensusRow) => void;
+  /** Opens the Customize dialog (#64); without it the menu has no Customize…. */
+  onCustomize?: () => void;
   /** Escape or focus leaving: close and hand focus back. */
   onClose: () => void;
   /** An item ran: close without moving focus. */
@@ -285,6 +292,12 @@ function SoulMenu({ soul, team, onOpen, onArchive, onClose, done, align }: {
             onClick={() => { done(); onOpen(soul); }}>
             <MessageCircle className="size-3.5" aria-hidden /> {t('bar.open')}
           </button>
+          {onCustomize && (
+            <button type="button" role="menuitem" aria-haspopup="dialog" className={menuItem}
+              onClick={() => { done(); onCustomize(); }}>
+              <Palette className="size-3.5" aria-hidden /> {t('edit.title')}
+            </button>
+          )}
           <button type="button" role="menuitem" className={menuItem}
             onClick={() => { done(); layoutActions.setHidden(soulKey(soul), true); }}>
             <EyeOff className="size-3.5" aria-hidden /> {t('bar.hide')}
@@ -322,8 +335,11 @@ function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = 
 }) {
   const { t } = useI18n();
   const [menu, setMenu] = useState(false);
+  const [customizing, setCustomizing] = useState(false);
+  // Customize… reads agent-bot's profile; no source (a plain browser) offers none.
+  const customizable = useContext(ProfileSourceContext) !== null;
   const button = useRef<HTMLButtonElement>(null);
-  const card = useHoverCard(!menu);
+  const card = useHoverCard(!menu && !customizing);
   const cardId = useId();
   const comms = badges.comms.has(soul.agentId);
   const computer = badges.computerUse.has(soul.agentId);
@@ -375,8 +391,10 @@ function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = 
       {card.open && <CompanionHoverCard id={cardId} soul={soul} status={state} statusText={said} lead={lead} subagents={subagents} />}
       {menu && (
         <SoulMenu soul={soul} team={team} onOpen={onOpen} onArchive={onArchive}
+          onCustomize={customizable ? () => setCustomizing(true) : undefined}
           onClose={() => { setMenu(false); button.current?.focus(); }} done={() => setMenu(false)} />
       )}
+      {customizing && <CustomizeDialog soul={soul} onClose={() => { setCustomizing(false); button.current?.focus(); }} />}
     </div>
   );
 }

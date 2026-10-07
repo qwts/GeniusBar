@@ -9,6 +9,7 @@ import {
   findSoul,
   parentDisplayName,
   soulKey,
+  withHues,
   type CensusRow,
   type Presence,
   type SoulNode,
@@ -171,5 +172,25 @@ describe('Forest helpers', () => {
     expect(findSoul(forest, 'agent_gone')).toBeNull();
     expect(countSouls([])).toBe(0);
     expect(allSouls(forest).map((s) => s.agentId)).toEqual(['agent_p', 'agent_c']);
+  });
+});
+
+describe('withHues (#64)', () => {
+  const a: CensusRow = { account: 'u', agentId: 'agent_a', name: 'a', harness: null, parent: null, presence: 'joined', unacked: 0, lastWake: null };
+  const b: CensusRow = { ...a, agentId: 'agent_b', name: 'b' };
+
+  it('joins declared hues by agent ID and keeps the rest of each row', () => {
+    const out = withHues([a, b], new Map([['agent_a', 210]]));
+    expect(out[0]).toEqual({ ...a, hue: 210 });
+    expect(out[1]).toBe(b);
+  });
+
+  it('keeps the same array when nothing changes, and drops a hue no longer declared', () => {
+    const rows = [a, b];
+    expect(withHues(rows, undefined)).toBe(rows);
+    expect(withHues(rows, new Map())).toBe(rows);
+    const hued = withHues(rows, new Map([['agent_b', 30]]));
+    expect(withHues(hued, new Map([['agent_b', 30]]))).toBe(hued);
+    expect(withHues(hued, new Map())[1]).not.toHaveProperty('hue');
   });
 });

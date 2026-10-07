@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { blinkEyeScale, deriveDudle, hsb, stableHash64 } from './dudle';
+import { blinkEyeScale, deriveDudle, derivedHue, dudleFor, hsb, stableHash64 } from './dudle';
 
 describe('Dudle derivation', () => {
   it('derives the same Dudle for the same soul ID across calls', () => {
@@ -78,5 +78,28 @@ describe('HSB colour', () => {
     expect(hsb(1 / 3, 1, 1)).toBe('rgb(0, 255, 0)');
     expect(hsb(2 / 3, 1, 1)).toBe('rgb(0, 0, 255)');
     expect(hsb(0.5, 0, 0.5)).toBe('rgb(128, 128, 128)');
+  });
+});
+
+describe('dudleFor (#64)', () => {
+  it('is the derived Dudle without a declared hue', () => {
+    expect(dudleFor({ agentId: 'agent_p' })).toEqual(deriveDudle('agent_p'));
+  });
+
+  it('puts a declared hue over the derived one and keeps every other trait', () => {
+    const spec = dudleFor({ agentId: 'agent_p', hue: 210 });
+    expect(spec.bodyHue * 360).toBeCloseTo(210);
+    expect({ ...spec, bodyHue: 0 }).toEqual({ ...deriveDudle('agent_p'), bodyHue: 0 });
+    expect(dudleFor({ agentId: 'agent_p', hue: 0 }).bodyHue).toBe(0);
+  });
+
+  it('gives the derived hue in whole degrees, 0..359', () => {
+    for (const id of ['agent_p', 'agent_c', 'luna', '']) {
+      const hue = derivedHue(id);
+      expect(Number.isInteger(hue)).toBe(true);
+      expect(hue).toBeGreaterThanOrEqual(0);
+      expect(hue).toBeLessThanOrEqual(359);
+      expect(hue).toBe(Math.round(deriveDudle(id).bodyHue * 360) % 360);
+    }
   });
 });

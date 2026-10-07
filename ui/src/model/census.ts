@@ -21,6 +21,11 @@ export interface CensusRow {
   verification?: string | null;
   hardened?: boolean | null;
   daemonWatching?: boolean | null;
+  /**
+   * The Dudle hue the soul declares (soul.json `appearance.hue`, 0..359),
+   * joined from agent-bot's population list by `withHues`; absent derives it.
+   */
+  hue?: number;
 }
 
 /** A soul with its subagents nested underneath. */
@@ -153,4 +158,23 @@ export function buildSoulForest(souls: readonly CensusRow[]): SoulNode[] {
     }
   }
   return forest;
+}
+
+/**
+ * The census with each soul's declared hue (agent-bot `population list`)
+ * joined in: the one place population appearance meets the census rows.
+ * Unchanged rows (and the same array, when nothing changed) are kept so
+ * the forest does not rebuild for nothing.
+ */
+export function withHues(souls: readonly CensusRow[], hues: ReadonlyMap<string, number> | undefined): readonly CensusRow[] {
+  let changed = false;
+  const out = souls.map((soul) => {
+    const hue = hues?.get(soul.agentId);
+    if (hue === soul.hue) return soul;
+    changed = true;
+    if (hue !== undefined) return { ...soul, hue };
+    const { hue: _dropped, ...rest } = soul;
+    return rest;
+  });
+  return changed ? out : souls;
 }

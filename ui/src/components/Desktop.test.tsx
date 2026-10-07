@@ -5,6 +5,8 @@ import { sampleCensus } from '../model/fixtures';
 import { noBadges, type SoulBadges } from '../model/refresh';
 import { translate } from '../lib/i18n';
 import { layoutActions, useLayout } from '../state/layout';
+import { sampleProfile } from '../model/fixtures';
+import { ProfileSourceContext, type ProfileSource } from '../useSoulProfile';
 import { Desktop } from './Desktop';
 import { noStatus, soulStatus, statusText } from './DesktopStatus';
 import { HOVER_OPEN_MS } from './HoverCard';
@@ -159,3 +161,37 @@ describe('Desktop hide and restore', () => {
 function useLayoutSnapshot() {
   return JSON.parse(localStorage.getItem('gb.desktop') ?? '{"hidden":[]}') as { hidden: string[] };
 }
+
+describe('Desktop Customize… (#64)', () => {
+  const profiles: ProfileSource = {
+    profile: vi.fn(async () => sampleProfile),
+    file: vi.fn(async (agentId: string, path: string) => ({ agentId, path, size: 0, contents: '' })),
+  };
+
+  it('offers Customize… between Open and Hide in the right-click menu, and opens the dialog for that companion', async () => {
+    render(<ProfileSourceContext.Provider value={profiles}><Live /></ProfileSourceContext.Provider>);
+    const lead = avatar(/^luna,/);
+    fireEvent.contextMenu(lead);
+    const menu = screen.getByRole('menu', { name: 'luna' });
+    const items = within(menu).getAllByRole('menuitem').map((i) => i.textContent?.trim());
+    expect(items.slice(0, 3)).toEqual(['Open', 'Customize…', 'Hide from desktop']);
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Customize…' }));
+    expect(screen.queryByRole('menu')).toBeNull();
+    const dialog = await screen.findByRole('dialog', { name: 'Luna' });
+    expect(profiles.profile).toHaveBeenCalledWith('agent_p');
+    expect(within(dialog).getByRole('radiogroup', { name: 'Color' })).toBeTruthy();
+    fireEvent.click(within(dialog).getAllByRole('button', { name: 'Close' })[0]);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(lead);
+  });
+
+  it('leaves the team ⋯ menu and a browser without profiles as they were', () => {
+    render(<ProfileSourceContext.Provider value={profiles}><Live /></ProfileSourceContext.Provider>);
+    fireEvent.click(screen.getByRole('button', { name: 'More for luna' }));
+    expect(within(screen.getByRole('menu', { name: 'luna' })).queryByRole('menuitem', { name: 'Customize…' })).toBeNull();
+    cleanup();
+    render(<Live />);
+    fireEvent.contextMenu(avatar(/^luna,/));
+    expect(within(screen.getByRole('menu', { name: 'luna' })).queryByRole('menuitem', { name: 'Customize…' })).toBeNull();
+  });
+});

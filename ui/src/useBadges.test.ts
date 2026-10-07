@@ -119,3 +119,19 @@ describe('useBadges (#122, #137)', () => {
     expect(fake.status).toHaveBeenCalledTimes(4);
   });
 });
+
+describe('useBadges hues (#64)', () => {
+  it('keeps the hues souls declare from the same population call', async () => {
+    const fake: BadgeSources = {
+      status: vi.fn(async () => null),
+      population: vi.fn(async () => [
+        { agentId: 'agent_p', comms: false, managed: true, appearance: { hue: 210 } },
+        { agentId: 'agent_c', comms: false, managed: true },
+      ]),
+      comms: vi.fn(async () => null),
+    };
+    const { result } = renderHook(() => useBadges(['agent_p', 'agent_c'], true, fake));
+    await waitFor(() => expect(result.current.hues && [...result.current.hues]).toEqual([['agent_p', 210]]));
+    expect(fake.population).toHaveBeenCalledTimes(1);
+  });
+});

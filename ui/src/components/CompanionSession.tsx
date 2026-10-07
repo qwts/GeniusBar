@@ -12,7 +12,7 @@ import {
   type SoulNode,
 } from '../model/census';
 import type { ApprovalDecision, ChatEntry, Composer } from '../model/chat';
-import { deriveDudle } from '../model/dudle';
+import { dudleFor } from '../model/dudle';
 import { teamNodeOf } from '../model/fleet';
 import { useI18n, type Translate } from '../lib/i18n';
 import type { LaunchApi } from '../useLaunch';
@@ -141,7 +141,7 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
           <>
             <SoulNotices key={soulKey(soul)} soul={soul} refresh={metricsRefresh} />
             <Conversation name={name} entries={chat.entries} composer={chat.composer} onDraft={chat.onDraft} onSend={chat.onSend}
-              dudle={deriveDudle(soul.agentId)} paused={paused} onResolve={chat.onResolve} />
+              dudle={dudleFor(soul)} paused={paused} onResolve={chat.onResolve} />
           </>
         )}
         {active === 'tree' && <DelegationTree forest={forest} focus={soulKey(soul)} paused={paused} onOpen={onOpen} />}

@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildSoulForest } from '../model/census';
 import { sampleCensus } from '../model/fixtures';
+import { deriveDudle } from '../model/dudle';
 import { FleetList } from './FleetList';
 
 afterEach(cleanup);
@@ -99,5 +100,14 @@ describe('FleetList archive (#94)', () => {
       .toEqual(['Archive: luna', 'Archive: agent_c', 'Archive: old']);
     fireEvent.click(screen.getByRole('button', { name: 'Archive: agent_c' }));
     expect(onArchive).toHaveBeenCalledWith(child);
+  });
+});
+
+describe('FleetList Dudle colour (#64)', () => {
+  it('draws a declared hue over the derived one, and the derived one without', () => {
+    const { container } = render(<FleetList forest={buildSoulForest([{ ...luna, hue: 210 }, child])} paused onOpen={() => {}} />);
+    const bodies = [...container.querySelectorAll('[data-part="body"]')].map((b) => b.getAttribute('fill'));
+    expect(bodies[0]).toBe('hsl(210 70% 62%)');
+    expect(bodies[1]).toBe(`hsl(${Math.round(deriveDudle(child.agentId).bodyHue * 360)} 70% 62%)`);
   });
 });

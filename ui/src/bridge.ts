@@ -287,6 +287,22 @@ export interface HarnessAuthFailure {
   since: string | null;
 }
 
+/** A soul's declared look (soul.json `appearance`): its Dudle's hue in degrees, an integer 0..359. */
+export interface SoulAppearance {
+  hue: number;
+}
+
+/**
+ * The declared appearance, or undefined when there is none or it is not a
+ * whole hue in 0..359 (an older bundle sends none; the Dudle then derives
+ * its hue from the agent ID).
+ */
+export function normalizeAppearance(raw: unknown): SoulAppearance | undefined {
+  if (!isRecord(raw)) return undefined;
+  const hue = raw.hue;
+  return typeof hue === 'number' && Number.isInteger(hue) && hue >= 0 && hue <= 359 ? { hue } : undefined;
+}
+
 /**
  * What agent-bot's population census keeps about a soul that the broker's
  * census does not (#122): its GitHub App slug (null when it joined without
@@ -306,6 +322,8 @@ export interface SoulPopulation {
    * absent when it has none or the bundle predates it.
    */
   brief?: string;
+  /** The soul's declared look; absent when it declares none or the bundle predates it. */
+  appearance?: SoulAppearance;
 }
 
 export function normalizeSoulPopulation(raw: unknown): SoulPopulation | null {
@@ -321,7 +339,13 @@ export function normalizeSoulPopulation(raw: unknown): SoulPopulation | null {
     harnessAuth,
     ...(typeof raw.computerUse === 'boolean' ? { computerUse: raw.computerUse } : {}),
     ...(typeof raw.brief === 'string' && raw.brief.trim() !== '' ? { brief: raw.brief } : {}),
+    ...withAppearance(raw.appearance),
   };
+}
+
+function withAppearance(raw: unknown): { appearance?: SoulAppearance } {
+  const appearance = normalizeAppearance(raw);
+  return appearance ? { appearance } : {};
 }
 
 /** The soul's census record, or null when agent-bot cannot say. */
@@ -592,6 +616,8 @@ export interface PopulationEntry {
   computerUse?: boolean;
   /** The census status (`retired` once archived); null when not reported. */
   status?: string | null;
+  /** The soul's declared look; absent when it declares none or the bundle predates it. */
+  appearance?: SoulAppearance;
 }
 
 /**
@@ -606,7 +632,7 @@ export function normalizePopulationList(raw: unknown): PopulationEntry[] | null 
     && typeof r.comms === 'boolean'
     ? [{ agentId: r.agentId, comms: r.comms, managed: r.managed === true, paused: r.paused === true,
       ...(typeof r.computerUse === 'boolean' ? { computerUse: r.computerUse } : {}),
-      status: typeof r.status === 'string' ? r.status : null }]
+      status: typeof r.status === 'string' ? r.status : null, ...withAppearance(r.appearance) }]
     : []));
 }
 
@@ -944,6 +970,8 @@ export interface SoulProfile {
     template: boolean | null;
     parentId: string | null;
     status: string | null;
+    /** The declared look; null when the soul declares none or the bundle predates it. */
+    appearance: SoulAppearance | null;
   };
   files: SoulProfileFileEntry[];
   skills: SoulProfileSkill[];
@@ -1015,6 +1043,7 @@ export function normalizeSoulProfile(raw: unknown): SoulProfile | null {
       template: typeof p.template === 'boolean' ? p.template : null,
       parentId: text(p.parentId),
       status: text(p.status),
+      appearance: normalizeAppearance(p.appearance) ?? null,
     },
     files,
     skills,

@@ -1,14 +1,14 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Archive, Eye, EyeOff, Search, Users } from 'lucide-react';
 import { availabilityNote, displayHarness, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
-import { deriveDudle } from '../model/dudle';
+import { dudleFor } from '../model/dudle';
 import { companionLabel, searchTeams, teamKeys, teamsOf } from '../model/fleet';
 import { useI18n } from '../lib/i18n';
 import { Dudle } from './Dudle';
 
 /** A soul's Dudle, faded once it has left. */
 export function SoulDudle({ soul, size, paused, label }: { soul: CensusRow; size: number; paused: boolean; label?: string }) {
-  return <Dudle spec={deriveDudle(soul.agentId)} diameter={size} paused={paused} label={label} dim={soul.presence === 'left'} />;
+  return <Dudle spec={dudleFor(soul)} diameter={size} paused={paused} label={label} dim={soul.presence === 'left'} />;
 }
 
 /** Window mode only: which companions the desktop hides. */

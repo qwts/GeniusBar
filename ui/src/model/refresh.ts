@@ -52,6 +52,11 @@ export interface SoulBadges {
   computerUse: ReadonlySet<string>;
   /** Souls with a turn in flight (daemon status `busy`), for the floating Dudle. */
   busy: ReadonlySet<string>;
+  /**
+   * Declared Dudle hues by agent ID, from the same `population_list` read;
+   * absent before it answers or from a bundle without the list.
+   */
+  hues?: ReadonlyMap<string, number>;
 }
 
 export const noBadges: SoulBadges = { comms: new Set(), computerUse: new Set(), busy: new Set() };
@@ -83,4 +88,14 @@ export function commsAmong(entries: readonly Pick<SoulComms, 'agentId' | 'comms'
 /** Same members, so a poll that changed nothing keeps the old set and skips a render. */
 export function sameSet(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
   return a.size === b.size && [...a].every((x) => b.has(x));
+}
+
+/** Declared hues by agent ID from one `population_list` read; souls without one are left out. */
+export function huesOf(entries: readonly { agentId: string; appearance?: { hue: number } }[]): ReadonlyMap<string, number> {
+  return new Map(entries.flatMap((e) => (e.appearance ? [[e.agentId, e.appearance.hue] as const] : [])));
+}
+
+/** Same hues, so a poll that changed nothing keeps the old map and skips a render. */
+export function sameHues(a: ReadonlyMap<string, number> | undefined, b: ReadonlyMap<string, number>): boolean {
+  return a !== undefined && a.size === b.size && [...a].every(([id, hue]) => b.get(id) === hue);
 }
