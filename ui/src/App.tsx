@@ -235,8 +235,9 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   // joined into the census here, before anything draws a Dudle.
   const badgeIds = useMemo(() => [...new Set(census.filter((s) => s.presence !== 'left').map((s) => s.agentId))], [census]);
   // The tray popup reads them too (#122): it is the one that knows a soul
-  // drives the screen, and opens the perimeter over it.
-  const liveBadges = useBadges(badgeIds, !badges && inApp() && !isStatic);
+  // drives the screen, and opens the perimeter over it. It reads for every
+  // window (#223): the surfaces follow what it stores.
+  const liveBadges = useBadges(badgeIds, !badges && inApp() && !isStatic, undefined, { share: 'publish' });
   const hues = (badges ?? liveBadges).hues;
   // The same read carries the roles souls declare (agent-bot-identity #535).
   const roles = (badges ?? liveBadges).roles;

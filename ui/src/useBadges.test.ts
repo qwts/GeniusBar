@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DaemonStatus } from './bridge';
-import { COMMS_INTERVAL_MS, STATUS_INTERVAL_MS, useBadges, type BadgeSources } from './useBadges';
+import { BADGES_STALE_MS, BADGES_STORAGE_KEY, COMMS_INTERVAL_MS, fromStoredBadges, STATUS_INTERVAL_MS, toStoredBadges, useBadges, type BadgeSources, type StoredBadges } from './useBadges';
 
 afterEach(() => vi.useRealTimers());
 
@@ -150,5 +150,66 @@ describe('useBadges roles (agent-bot-identity #535)', () => {
     await waitFor(() => expect(result.current.roles && [...result.current.roles])
       .toEqual([['agent_p', { role: 'Release captain', roleLine: 'Release captain' }]]));
     expect(fake.population).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('useBadges shared between windows (#223)', () => {
+  const memory = () => {
+    const items = new Map<string, string>();
+    return { getItem: (k: string) => items.get(k) ?? null, setItem: (k: string, v: string) => { items.set(k, v); }, items };
+  };
+  const stored = (at: number, computerUse: string[] = ['agent_c']): StoredBadges =>
+    toStoredBadges({ comms: new Set(['agent_p']), computerUse: new Set(computerUse), busy: new Set(), hues: new Map([['agent_p', 200]]), roles: new Map([['agent_p', { role: 'lead' }]]) }, at);
+
+  it('round-trips sets and maps through storage and rejects what does not parse', () => {
+    const back = fromStoredBadges(JSON.stringify(stored(1_000)));
+    expect(back).toEqual({ at: 1_000, comms: ['agent_p'], computerUse: ['agent_c'], busy: [], hues: [['agent_p', 200]], roles: [['agent_p', { role: 'lead' }]] });
+    expect(fromStoredBadges(null)).toBeNull();
+    expect(fromStoredBadges('{')).toBeNull();
+    expect(fromStoredBadges('{"at":1,"comms":[1],"computerUse":[],"busy":[]}')).toBeNull();
+    expect(fromStoredBadges('[]')).toBeNull();
+  });
+
+  it('a publisher stores each read, stamped, even when nothing changed', async () => {
+    vi.useFakeTimers();
+    let at = 1_000;
+    const storage = memory();
+    const fake = sources(['agent_c'], ['agent_p']);
+    renderHook(() => useBadges(['agent_p', 'agent_c'], true, fake, { share: 'publish', storage, now: () => at }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    const first = fromStoredBadges(storage.getItem(BADGES_STORAGE_KEY));
+    expect(first?.computerUse).toEqual(['agent_c']);
+    expect(first?.comms).toEqual(['agent_p']);
+    at = 6_000;
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(fromStoredBadges(storage.getItem(BADGES_STORAGE_KEY))?.at).toBe(6_000);
+  });
+
+  it('a follower shows a fresh stored set without reading agent-bot, and takes the next from the storage event', async () => {
+    const storage = memory();
+    storage.setItem(BADGES_STORAGE_KEY, JSON.stringify(stored(10_000)));
+    const fake = sources(['agent_other'], []);
+    const { result } = renderHook(() => useBadges(['agent_p', 'agent_c'], true, fake, { share: 'follow', storage, now: () => 12_000 }));
+    await waitFor(() => expect([...result.current.computerUse]).toEqual(['agent_c']));
+    expect([...result.current.comms]).toEqual(['agent_p']);
+    expect(result.current.hues?.get('agent_p')).toBe(200);
+    expect(result.current.roles?.get('agent_p')).toEqual({ role: 'lead' });
+    expect(fake.status).not.toHaveBeenCalled();
+    expect(fake.population).not.toHaveBeenCalled();
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: BADGES_STORAGE_KEY, newValue: JSON.stringify(stored(11_000, [])) }));
+    });
+    await waitFor(() => expect(result.current.computerUse.size).toBe(0));
+    expect(fake.status).not.toHaveBeenCalled();
+  });
+
+  it('a follower reads agent-bot itself while the stored set is stale, and stores nothing', async () => {
+    const storage = memory();
+    storage.setItem(BADGES_STORAGE_KEY, JSON.stringify(stored(10_000)));
+    const fake = sources(['agent_p'], []);
+    const { result } = renderHook(() => useBadges(['agent_p'], true, fake, { share: 'follow', storage, now: () => 10_000 + BADGES_STALE_MS + 1 }));
+    await waitFor(() => expect([...result.current.computerUse]).toEqual(['agent_p']));
+    expect(fake.status).toHaveBeenCalledTimes(1);
+    expect(fromStoredBadges(storage.getItem(BADGES_STORAGE_KEY))?.at).toBe(10_000);
   });
 });
