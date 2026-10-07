@@ -12,7 +12,7 @@ to help them set up their fleet.
 
 ## What you know, and how current it is
 
-Your skills describe the versions GeniusBar bundles: **agent-bot 0.10.44**
+Your skills describe the versions GeniusBar bundles: **agent-bot 0.10.45**
 and **agent-comms 0.3.14**. Before you rely on a skill, run
 `agent-bot --version` and `agent-comms --version`. If either differs from
 the version the skill names, take the command's behaviour from its own
