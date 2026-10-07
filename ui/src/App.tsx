@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { History, Plus, Volume2, VolumeX, X } from 'lucide-react';
 import { ApprovalCounts, ApprovalsList } from './components/ApprovalsList';
 import { ArchiveDialog, ArchivedNotice, liveArchiver, type Archiver } from './components/ArchiveDialog';
-import { inApp, listSoulTemplates, liveComputerUse, popupVisible, soulStopSupported, stopSoul, type ComputerUseSwitch, type RemovedSoul } from './bridge';
+import { currentWindow, inApp, listSoulTemplates, liveComputerUse, openSurface, popupVisible, soulStopSupported, stopSoul, syncTeamWindows, type ComputerUseSwitch, type RemovedSoul, type SurfaceRequest, type TeamWindowSpec } from './bridge';
 import { FooterMenu } from './components/FooterMenu';
 import { CompanionSession, ComputerUseContext, InfoButton, type SessionTab } from './components/CompanionSession';
 import { AuditWindow, CompanionWindow, Desktop } from './components/Desktop';
@@ -33,7 +33,9 @@ import { useBadges } from './useBadges';
 import { needsSetup, type ExistingServices, type SetupState } from './model/setup';
 import { disconnected, emptyRosterText, footerStatus, healthHeader, type ConnectionSnapshot } from './model/status';
 import { updateNotice, type UpdateStatus } from './model/updates';
-import { layoutActions, useLayout } from './state/layout';
+import { desktopWindowsOn, layoutActions, useLayout } from './state/layout';
+import { SurfaceOpenerContext, type OpenSurface } from './surfaces/opener';
+import { useTeamWindows } from './useTeamWindows';
 import { usePreferences } from './state/preferences';
 import { DefaultHarness } from './components/DefaultHarness';
 import { defaultSandboxSource, SandboxProvider, useSandbox, type SandboxSource } from './components/Sandbox';
@@ -51,6 +53,26 @@ import { useChimes, useSound } from './useSound';
 
 /** The tray's popup, or `--window`'s desktop; the shell picks (app_mode). */
 export type AppMode = 'tray' | 'window';
+
+/**
+ * The popup's native windows (#223): sessions, the audit log, Customize and
+ * Launch open in their own windows, and every team card is one on the
+ * desktop. Each `open` rejects when the shell has none, and the popup then
+ * shows that view itself, as before.
+ */
+export interface NativeSurfaces {
+  open: OpenSurface;
+  /** Hides the popup once a window opened in front of it. */
+  hide: () => Promise<void>;
+  /** The coordinator's `sync_team_windows`. */
+  sync: (teams: TeamWindowSpec[]) => Promise<boolean>;
+}
+
+const liveSurfaces: NativeSurfaces = {
+  open: (request) => openSurface(request),
+  hide: () => currentWindow()?.hide() ?? Promise.resolve(),
+  sync: (teams) => syncTeamWindows(teams),
+};
 
 interface AppProps {
   mode?: AppMode;
@@ -113,6 +135,10 @@ interface AppProps {
   profileSource?: ProfileSource;
   /** Whether the popup is showing, for the desktop window's chimes (#122); the app asks the shell when absent. */
   popupShowing?: () => Promise<boolean>;
+  /** The popup's native windows (#223); the live tray popup uses the shell's when absent, null keeps every view in the popup. */
+  surfaces?: NativeSurfaces | null;
+  /** False while archived souls may still be in the census (#223): no team window until agent-bot's population has been read once. */
+  rosterSettled?: boolean;
   /** Sandboxing (agent-bot `sandbox`, #66); the app uses agent-bot when absent, null hides it. */
   sandboxSource?: SandboxSource | null;
   /** GitHub identities (agent-bot `identity apps`, #67); the app uses agent-bot when absent, null hides them. */
@@ -146,18 +172,28 @@ function usePageHidden(): boolean {
 const NO_CENSUS: readonly CensusRow[] = [];
 
 export function App(props: AppProps) {
+  return <AppProviders {...props}><Shell {...props} /></AppProviders>;
+}
+
+/**
+ * The language, and the agent-bot sources the companion views read, live
+ * in the app and absent in a static render. The popup and every native
+ * surface (#223) sit inside the same providers.
+ */
+export function AppProviders({ isStatic, computerUseSwitch, profileSource, sandboxSource, identityAppsSource, children }:
+  Pick<AppProps, 'isStatic' | 'computerUseSwitch' | 'profileSource' | 'sandboxSource' | 'identityAppsSource'> & { children: ReactNode }) {
   // The Details rows' computer-use switch (#122); the quick menu's comes as a prop in Shell.
-  const computerUse = props.computerUseSwitch ?? (inApp() && !props.isStatic ? liveComputerUse : null);
-  const profiles = props.profileSource ?? (inApp() && !props.isStatic ? liveProfileSource : null);
-  const sandbox = props.sandboxSource === undefined ? defaultSandboxSource(props.isStatic) : props.sandboxSource;
-  const identities = props.identityAppsSource === undefined ? defaultIdentityAppsSource(props.isStatic) : props.identityAppsSource;
+  const computerUse = computerUseSwitch ?? (inApp() && !isStatic ? liveComputerUse : null);
+  const profiles = profileSource ?? (inApp() && !isStatic ? liveProfileSource : null);
+  const sandbox = sandboxSource === undefined ? defaultSandboxSource(isStatic) : sandboxSource;
+  const identities = identityAppsSource === undefined ? defaultIdentityAppsSource(isStatic) : identityAppsSource;
   return (
     <I18nProvider>
       <ComputerUseContext.Provider value={computerUse}>
         <ProfileSourceContext.Provider value={profiles}>
           <SandboxProvider source={sandbox}>
             <IdentityAppsProvider source={identities}>
-              <Shell {...props} />
+              {children}
             </IdentityAppsProvider>
           </SandboxProvider>
         </ProfileSourceContext.Provider>
@@ -182,8 +218,14 @@ function LanguageSelect() {
 
 // The GeniusBar menu (the tray popup's content, and the toolbar popover in
 // window mode) and, from it, one companion's session.
-function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onOpenDesktop, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, floatingButton = false, archiver, stopper, pauser, computerUseSwitch, templateLister, popupShowing }: AppProps) {
+function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onOpenDesktop, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, floatingButton = false, archiver, stopper, pauser, computerUseSwitch, templateLister, popupShowing, surfaces, rosterSettled = true }: AppProps) {
   const { t, lang } = useI18n();
+  // Only the live tray popup opens native windows (#223); --window and snapshots keep theirs.
+  const native = mode !== 'tray' ? null : surfaces === undefined ? (inApp() && !isStatic ? liveSurfaces : null) : surfaces;
+  // Opens a native window and hides the popup behind it; rejects when there
+  // is none, so the caller shows the view in the popup instead.
+  const openNative = useMemo<OpenSurface | null>(() => native && ((request: SurfaceRequest) =>
+    native.open(request).then(() => { native.hide().catch(() => {}); })), [native]);
   const sandbox = useSandbox();
   // The badges' population read also carries the hues souls declare (#64),
   // joined into the census here, before anything draws a Dudle.
@@ -237,9 +279,12 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   // Window mode's Audit log is a desktop window (Lovable route /audit); the
   // tray keeps it as a panel in the popup, which is the whole app there.
   const [auditWindow, setAuditWindow] = useState(false);
+  const toggleAuditPanel = () => setPanel((open) => (open === 'audit' ? null : 'audit'));
   const openAudit = mode === 'window'
     ? () => { setAuditWindow(true); setMenuOpen(false); }
-    : () => setPanel(panel === 'audit' ? null : 'audit');
+    // The popup opens the audit window (#223); without one, its panel.
+    : openNative ? () => { openNative({ surface: 'audit' }).catch(toggleAuditPanel); }
+    : toggleAuditPanel;
   // An installed soul opened from Finder is that companion, never a new
   // launch (#80); one not in the roster yet keeps the form, and the daemon
   // relaunches it rather than spawning another.
@@ -279,7 +324,9 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   // The launch dialog: soul templates first (Starter preselected), then a
   // Custom soul path. The footer + (#97) and the palette open it as "add a
   // companion"; the ⋯ menu keeps it as "Launch soul…" for a package.
-  const launchPackage = () => { setSelectedKey(null); setLaunchingPackage(true); setMenuOpen(false); };
+  const launchHere = () => { setSelectedKey(null); setLaunchingPackage(true); setMenuOpen(false); };
+  // The popup's + opens the launch window (#223); without one, the dialog here.
+  const launchPackage = openNative ? () => { openNative({ surface: 'launch' }).catch(launchHere); } : launchHere;
   useEffect(() => { if (showSetup || showStarter) setMenuOpen(true); }, [showSetup, showStarter]);
   const { defaultHarness } = usePreferences();
   const launch = useMemo(() => launcher && {
@@ -291,6 +338,9 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     roster,
   }, [launcher, roster, defaultHarness]);
   const layout = useLayout();
+  // The popup keeps each team's native window in step (#223), once a census has come.
+  useTeamWindows(forest, layout, Boolean(native) && connection.lastRefresh !== null && rosterSettled, native?.sync);
+  const desktopOn = desktopWindowsOn(layout);
   // The menu bar's Auto-Pilot banner and amber G (Lovable MenuBar): window mode only.
   const fleetMode = useFleetMode(mode === 'window' ? roster : NO_CENSUS);
   // Pause all / Resume (#122): the desktop's menu bar chip and quick action.
@@ -319,8 +369,11 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   );
 
   const open = (soul: CensusRow) => {
-    setSelectedKey(soulKey(soul));
+    const key = soulKey(soul);
     setMenuOpen(false);
+    // The popup opens the session in its own window (#223); without one, here.
+    if (openNative) openNative({ surface: 'session', soul: key }).catch(() => setSelectedKey(key));
+    else setSelectedKey(key);
   };
   // The floating Dudle's quick menu opens its lead on a given tab; the
   // session remounts so the tab applies even when it is already open.
@@ -401,9 +454,10 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
               <Plus className="size-3.5" aria-hidden />
             </button>
           )}
-          {(openDesktop || canLaunchPackage || cliTools || canCheckUpdates || onRemoveServices || onRefresh) && (
+          {(openDesktop || native || canLaunchPackage || cliTools || canCheckUpdates || onRemoveServices || onRefresh) && (
             <FooterMenu items={[
               openDesktop && { label: t('openDesktop'), run: openDesktop },
+              native && { label: t('desktopWindows'), checked: desktopOn, run: () => layoutActions.setDesktopWindows(!desktopOn) },
               canCheckUpdates && { label: t('checkUpdates'), run: checkUpdates },
               canLaunchPackage && { label: t('launchPackage'), run: launchPackage },
               cliTools && { label: t('cli.action'), run: () => setPanel('cli') },
@@ -515,11 +569,13 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   if (mode === 'tray') {
     // An open session keeps the update line above it, as the panel did before R6.
     return (
-      <main className="gb flex h-full flex-col overflow-y-auto bg-popover">
-        {session ? <>{updates && <UpdateNotice status={updates.status} onAction={updates.act} />}{session}</> : menu()}
-        {launchModal}
-        {archiveUi}
-      </main>
+      <SurfaceOpenerContext.Provider value={openNative}>
+        <main className="gb flex h-full flex-col overflow-y-auto bg-popover">
+          {session ? <>{updates && <UpdateNotice status={updates.status} onAction={updates.act} />}{session}</> : menu()}
+          {launchModal}
+          {archiveUi}
+        </main>
+      </SurfaceOpenerContext.Provider>
     );
   }
 

@@ -86,6 +86,16 @@
   :focus-visible { outline: 2px solid var(--color-ring); outline-offset: 1px; }
 }
 
+/*
+ * A native team window (#223): a transparent window on the macOS desktop
+ * whose page paints only its card, so the wallpaper shows around it.
+ */
+html.gb-transparent, html.gb-transparent body, html.gb-transparent #root {
+  height: auto;
+  overflow: hidden;
+  background: transparent;
+}
+
 .gb-wallpaper {
   background:
     radial-gradient(65% 55% at 18% 8%, color-mix(in oklab, var(--primary) 13%, transparent), transparent 70%),

@@ -34,6 +34,10 @@ export async function brokerInstalled(outcome: CensusOutcome,
 export function useCensus(enabled: boolean = inApp(), population: () => Promise<PopulationEntry[] | null> = populationList) {
   const [rows, setRows] = useState<readonly CensusRow[]>([]);
   const [archivedBy, setArchivedBy] = useState<PopulationEntry[] | null>(null);
+  // Whether agent-bot's population has been read once (#223): until then
+  // the rows may still hold archived souls, and a native team window for
+  // one would appear only to close a moment later.
+  const [populationRead, setPopulationRead] = useState(false);
   const [connection, setConnection] = useState<ConnectionSnapshot>(disconnected);
   const inFlight = useRef(false);
   const readPopulation = useRef(population);
@@ -53,6 +57,7 @@ export function useCensus(enabled: boolean = inApp(), population: () => Promise<
       if (archived) {
         const list = await readPopulation.current().catch(() => null);
         if (list) setArchivedBy(list);
+        setPopulationRead(true);
       }
     } finally {
       inFlight.current = false;
@@ -72,5 +77,5 @@ export function useCensus(enabled: boolean = inApp(), population: () => Promise<
 
   const census = useMemo(() => withoutArchived(rows, archivedBy), [rows, archivedBy]);
   const refreshAll = useCallback(() => refresh(), [refresh]);
-  return { census, connection, refresh: enabled ? refreshAll : undefined };
+  return { census, connection, refresh: enabled ? refreshAll : undefined, settled: !enabled || populationRead };
 }

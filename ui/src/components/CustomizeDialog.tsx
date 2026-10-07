@@ -96,14 +96,20 @@ type Drafts = Record<string, { original: string; current: string }>;
  * read-only viewer.
  * Escape, ×, Close or a backdrop click closes it.
  */
-export function CustomizeDialog({ soul, onClose, save = saveRevision, state }: {
+export function CustomizeDialog({ soul, onClose, save = saveRevision, state, page = false }: {
   soul: CensusRow; onClose: () => void; save?: SaveRevision;
   /** The title Dudle's face, as the design's `state={c.presence}`: awaiting, working or idle. */
   state?: DudleState;
+  /** Its own native window (#223): the dialog is the page, with no backdrop. */
+  page?: boolean;
 }) {
   // Reload starts over: a fresh read of the profile, the edits dropped.
   const [generation, setGeneration] = useState(0);
   const pressedBackdrop = useRef(false);
+
+  if (page) {
+    return <CustomizeBody key={generation} soul={soul} onClose={onClose} save={save} state={state} page onReload={() => setGeneration((g) => g + 1)} />;
+  }
 
   // Portalled to the body, as the ⓘ sheet: the companion window's transform
   // would contain the fixed overlay, and its title bar would take the drag.
@@ -117,7 +123,7 @@ export function CustomizeDialog({ soul, onClose, save = saveRevision, state }: {
   );
 }
 
-function CustomizeBody({ soul, onClose, save, onReload, state }: { soul: CensusRow; onClose: () => void; save: SaveRevision; onReload: () => void; state?: DudleState }) {
+function CustomizeBody({ soul, onClose, save, onReload, state, page = false }: { soul: CensusRow; onClose: () => void; save: SaveRevision; onReload: () => void; state?: DudleState; page?: boolean }) {
   const { t } = useI18n();
   const ids = useId();
   const titleId = `${ids}-title`;
@@ -194,9 +200,11 @@ function CustomizeBody({ soul, onClose, save, onReload, state }: { soul: CensusR
   return (
     <section role="dialog" aria-modal="true" aria-labelledby={titleId}
       onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }}
-      className="relative grid max-h-full w-full max-w-2xl gap-4 overflow-y-auto rounded-lg border border-border bg-background p-6 shadow-lg">
+      // As a window's page (#223) it fills the window, below the native traffic lights.
+      className={page ? 'relative grid min-h-full w-full content-start gap-4 bg-background p-6 pt-10'
+        : 'relative grid max-h-full w-full max-w-2xl gap-4 overflow-y-auto rounded-lg border border-border bg-background p-6 shadow-lg'}>
       <button type="button" onClick={onClose} aria-label={t('close')}
-        className="absolute top-4 right-4 rounded-sm text-foreground opacity-70 outline-none hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring">
+        className={`absolute right-4 rounded-sm text-foreground opacity-70 outline-none hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring ${page ? 'top-10' : 'top-4'}`}>
         <X className="size-4" aria-hidden />
       </button>
       <div className="flex items-center gap-3 pr-8">

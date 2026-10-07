@@ -1,8 +1,9 @@
 // The web view's only path to agent-comms: the shell relays each call to
 // the Node bridge (#7), which holds the principal credential.
 import { invoke } from '@tauri-apps/api/core';
-import { Window } from '@tauri-apps/api/window';
+import { getCurrentWindow, LogicalSize, Window } from '@tauri-apps/api/window';
 import { normalizeAudit, type AuditRecord } from './model/audit';
+import type { QueryTab, WindowSurface } from './model/surface';
 import { normalizeApproval, normalizeApprovals, normalizeAsides, type ApprovalRecord, type AsideRecord } from './model/chat';
 
 export type BridgeMethod = 'census' | 'send' | 'inbox' | 'ack' | 'launch' | 'launchStatus' | 'auditExport';
@@ -606,6 +607,90 @@ export async function servicesInstalled(invokeImpl: typeof invoke = invoke): Pro
 /** Opens the companion desktop window beside the tray popup, or focuses it (#69). */
 export async function openDesktop(invokeImpl: typeof invoke = invoke): Promise<void> {
   await invokeImpl('open_desktop');
+}
+
+/** A native window to open or focus (#223): a session, the audit log, Customize, or Launch. */
+export interface SurfaceRequest {
+  surface: WindowSurface;
+  /** The roster key (account/agentId); optional for audit (all activity). */
+  soul?: string;
+  tab?: QueryTab;
+  action?: 'archive';
+}
+
+/**
+ * Opens that surface's window, or focuses the one already open (#223).
+ * Rejects outside the app, under a snapshot, and with a shell that has no
+ * such command, so the caller keeps the in-popup view as its fallback.
+ */
+export async function openSurface({ surface, soul, tab, action }: SurfaceRequest, invokeImpl: typeof invoke = invoke): Promise<void> {
+  if (!inApp() && invokeImpl === invoke) throw new BridgeError('not-in-app', 'Native windows need the app.');
+  await invokeImpl('open_surface', { surface, soul, tab, action });
+}
+
+/** One team card's native window (#223), in logical screen points. */
+export interface TeamWindowSpec {
+  /** The lead's roster key. */
+  key: string;
+  x?: number;
+  y?: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * The popup's coordinator call (#223): one window per team in the list,
+ * the rest closed. True when native team windows are in use; false in
+ * `--window` mode, on other platforms, under a snapshot, outside the app,
+ * or with a shell that cannot (an error is the same answer).
+ */
+export async function syncTeamWindows(teams: readonly TeamWindowSpec[], invokeImpl: typeof invoke = invoke): Promise<boolean> {
+  if (!inApp() && invokeImpl === invoke) return false;
+  try {
+    return (await invokeImpl<unknown>('sync_team_windows', { teams })) === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * What a native surface does with its own window (#223), in logical points.
+ * The pages take it as a prop, so tests and the preview pass a fake.
+ */
+export interface SurfaceWindow {
+  close(): Promise<void>;
+  hide(): Promise<void>;
+  setSize(width: number, height: number): Promise<void>;
+  /** The window's top-left on screen (its outer position). */
+  position(): Promise<{ x: number; y: number }>;
+  /** Calls `handler` after each move (`tauri://move`); resolves with the unlisten. */
+  onMoved(handler: () => void): Promise<() => void>;
+  setTitle(title: string): Promise<void>;
+}
+
+/** The part of Tauri's window the surfaces use. */
+export type TauriWindowLike = Pick<Window, 'close' | 'hide' | 'setSize' | 'outerPosition' | 'onMoved' | 'setTitle'>;
+
+/**
+ * This web view's window, or null outside the app. Physical positions turn
+ * logical with the page's devicePixelRatio, the scale of the screen the
+ * window is on, so no scale-factor permission is needed.
+ */
+export function currentWindow(get: () => TauriWindowLike = getCurrentWindow): SurfaceWindow | null {
+  if (!inApp() && get === getCurrentWindow) return null;
+  const w = get();
+  const scale = () => (typeof window !== 'undefined' && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1);
+  return {
+    close: () => w.close(),
+    hide: () => w.hide(),
+    setSize: (width, height) => w.setSize(new LogicalSize(width, height)),
+    position: async () => {
+      const at = (await w.outerPosition()).toLogical(scale());
+      return { x: at.x, y: at.y };
+    },
+    onMoved: (handler) => w.onMoved(() => handler()),
+    setTitle: (title) => w.setTitle(title),
+  };
 }
 
 /** A window the popup check needs: only whether it is showing. */

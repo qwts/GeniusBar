@@ -23,13 +23,22 @@
 // (&templates=0 shows the form an agent-bot without `soul templates` gives);
 // ⓘ offers Customize…, showing sampleProfile read-only for any companion
 // (&customize=1 opens it on load for the selected one, &customize=0 hides it
-// as an agent-bot without `soul profile` would):
+// as an agent-bot without `soul profile` would);
+// &surface=team|session|audit|customize|launch (with &soul=user/agent_p,
+// and &tab= / &action=archive for a session) shows that native window's
+// page (#223), and what it opens opens in a new tab:
 // the app on the fixed fixtures, without Tauri. Not part of the build.
 import { StrictMode, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { App, type AppMode } from './App';
+import { App, AppProviders, type AppMode } from './App';
 import type { Archiver } from './components/ArchiveDialog';
-import type { ComputerUseSwitch } from './bridge';
+import type { ComputerUseSwitch, SurfaceRequest } from './bridge';
+import { parseSurface } from './model/surface';
+import { AuditSurface } from './surfaces/AuditSurface';
+import { CustomizeSurface } from './surfaces/CustomizeSurface';
+import { LaunchSurface } from './surfaces/LaunchSurface';
+import { SessionSurface } from './surfaces/SessionSurface';
+import { TeamSurface } from './surfaces/TeamSurface';
 import type { Stopper } from './components/FloatingDudle';
 import { AuditSourceContext, type AuditSource } from './components/AuditLog';
 import { SoulSourceContext, type SoulSource } from './components/SoulNotices';
@@ -201,6 +210,25 @@ function Preview() {
       <CustomizeDialog soul={customized} onClose={() => setCustomizing(false)} />
     </ProfileSourceContext.Provider></I18nProvider>
   );
+  // A native window's page (#223) on the same fixtures; what it opens, a new tab opens.
+  const query = parseSurface(location.search);
+  if (query.surface !== null && query.surface !== 'tray' && query.surface !== 'window') {
+    const data = { census: souls, loaded: true, chat, badges: sampleBadges, win: null };
+    const open = async ({ surface, soul, tab, action }: SurfaceRequest) => {
+      const next = new URLSearchParams({ surface, ...(soul ? { soul } : {}), ...(tab ? { tab } : {}), ...(action ? { action } : {}) });
+      window.open(`?${next}`, '_blank');
+    };
+    const launcher = { state: { phase: 'idle' as const }, launch: async () => {}, reset: () => {} };
+    return (
+      <AppProviders profileSource={profileSource} computerUseSwitch={computerUseSwitch}>
+        {query.surface === 'team' && <TeamSurface {...data} soul={query.soul} open={open} />}
+        {query.surface === 'session' && <SessionSurface {...data} soul={query.soul} tab={query.tab} action={query.action} open={open} launcher={launcher} archiver={archiver} />}
+        {query.surface === 'audit' && <AuditSurface {...data} soul={query.soul} />}
+        {query.surface === 'customize' && <CustomizeSurface {...data} soul={query.soul} />}
+        {query.surface === 'launch' && <LaunchSurface {...data} launcher={launcher} open={open} listTemplates={templateLister} />}
+      </AppProviders>
+    );
+  }
   // The tray popup is a fixed 384×560 window (tauri.conf.json).
   return <>{mode === 'tray' ? <div style={{ width: 384, height: 560, margin: 16, outline: '1px solid #444' }}>{app}</div> : app}{dialog}</>;
 }

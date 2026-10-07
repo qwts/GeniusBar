@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { en, type Catalog, type MessageKey } from '../locales/en';
 import { es } from '../locales/es';
 
@@ -40,6 +40,14 @@ const I18nContext = createContext<I18n>({ lang: 'en', setLang: () => {}, t: (key
 
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState(initialLang);
+  // The language picked in the popup reaches the app's other windows (#223).
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === LANG_KEY && (e.newValue === 'en' || e.newValue === 'es')) setLangState(e.newValue);
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
   const value = useMemo<I18n>(() => ({
     lang,
     setLang: (next) => {

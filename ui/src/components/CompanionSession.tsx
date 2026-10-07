@@ -29,6 +29,7 @@ import { ActsAs, GitHubAppRow, useIdentityApps } from './IdentityApps';
 import { useSandbox } from './Sandbox';
 import { runsAsText, SandboxChip } from './SandboxChip';
 import { SoulNotices, SoulSourceContext, useSoulMode, useSoulModel, useSoulPopulation } from './SoulNotices';
+import { SurfaceOpenerContext } from '../surfaces/opener';
 
 /** The conversation with this soul, when chat is available (#17). */
 export interface SoulChat {
@@ -731,6 +732,7 @@ export function InfoButton({ soul, state }: {
   const titleId = useId();
   useEffect(() => { if (open) close.current?.focus(); }, [open]);
   const { supported: customizable } = useSoulProfile(soul.agentId, open);
+  const openSurface = useContext(SurfaceOpenerContext);
   const name = displayName(soul);
   return (
     <>
@@ -767,7 +769,12 @@ export function InfoButton({ soul, state }: {
             </div>
             {customizable && (
               <div className="flex justify-end">
-                <button type="button" aria-haspopup="dialog" onClick={() => { setOpen(false); setCustomizing(true); }}
+                <button type="button" aria-haspopup="dialog" onClick={() => {
+                  setOpen(false);
+                  // In the app Customize is its own window (#223); without one, the dialog here.
+                  if (openSurface) openSurface({ surface: 'customize', soul: soulKey(soul) }).catch(() => setCustomizing(true));
+                  else setCustomizing(true);
+                }}
                   className="inline-flex min-h-8 items-center gap-2 rounded-md border border-border px-3 text-sm font-medium hover:bg-accent">
                   <Palette className="size-3.5" aria-hidden />
                   {t('edit.title')}

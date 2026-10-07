@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { MoreHorizontal } from 'lucide-react';
+import { Check, MoreHorizontal } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { menuKeys } from '../lib/keys';
 
-export type FooterItem = { label: string; run: () => void; destructive?: boolean } | 'separator';
+export type FooterItem = {
+  label: string; run: () => void; destructive?: boolean;
+  /** A switch (#223): a checkable item, ticked while on. */
+  checked?: boolean;
+} | 'separator';
 
 /**
  * The G menu footer's ⋯ (Lovable 20.03.42): a floating menu of the
@@ -42,9 +46,11 @@ export function FooterMenu({ items }: { items: readonly (FooterItem | false | nu
             const ref = firstSet ? undefined : first;
             firstSet = true;
             return (
-              <button key={item.label} ref={ref} type="button" role="menuitem"
+              <button key={item.label} ref={ref} type="button" role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
+                aria-checked={item.checked}
                 onClick={() => { setOpen(false); item.run(); }}
-                className={`rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none ${item.destructive ? 'text-destructive' : ''}`}>
+                className={`flex items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none ${item.destructive ? 'text-destructive' : ''}`}>
+                {item.checked !== undefined && <Check className={`size-3.5 shrink-0 ${item.checked ? '' : 'invisible'}`} aria-hidden />}
                 {item.label}
               </button>
             );

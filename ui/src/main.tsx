@@ -7,6 +7,8 @@ import type { CliToolsApi } from './components/CliTools';
 import type { DevTools, HarnessAuth, Starter } from './components/FirstLaunch';
 import { inApp, openDesktop } from './bridge';
 import { menuApprovals } from './model/approvals';
+import { parseSurface } from './model/surface';
+import { LiveSurface } from './surfaces/LiveSurface';
 import { useCensus } from './useCensus';
 import { useChat } from './useChat';
 import { useLaunch } from './useLaunch';
@@ -25,7 +27,7 @@ import './styles.css';
 // renders the same popup statically and changes nothing: no inbox polling
 // or acks, and no Finder-opened packages taken from the queue.
 function Live({ snapshot }: { snapshot: SnapshotOptions | null }) {
-  const { census, connection, refresh } = useCensus();
+  const { census, connection, refresh, settled } = useCensus();
   const select = useSnapshot(snapshot, census, connection, refresh);
   const { setup, existing, runSetup } = useSetup(() => { void refresh?.(); });
   const chat = useChat({ enabled: inApp() && !snapshot, roster: census });
@@ -106,7 +108,7 @@ function Live({ snapshot }: { snapshot: SnapshotOptions | null }) {
   const [mode, setMode] = useState<AppMode>('tray');
   useEffect(() => { invoke<AppMode>('app_mode').then(setMode, () => {}); }, []);
   return (
-    <App mode={mode} census={census} connection={connection} onRefresh={refresh} setup={setup} isStatic={Boolean(snapshot)} select={select}
+    <App mode={mode} census={census} connection={connection} rosterSettled={settled} onRefresh={refresh} setup={setup} isStatic={Boolean(snapshot)} select={select}
       onSetup={(migrate) => { void runSetup(migrate); }} existingServices={existing} cliTools={cliTools} chat={snapshot ? undefined : chat} launcher={launcher} starter={starter} harnessAuth={harnessAuth}
       devTools={devTools} openedPackage={openedPackage} updates={updates}
       onOpenDesktop={inApp() && !snapshot ? () => { void openDesktop().catch(() => {}); } : undefined}
@@ -116,8 +118,13 @@ function Live({ snapshot }: { snapshot: SnapshotOptions | null }) {
 
 // The shell says before the first render whether this is a snapshot.
 const snapshot = inApp() ? await invoke<SnapshotOptions | null>('snapshot_options').catch(() => null) : null;
+// Which window this is (#223): the popup and the --window desktop are
+// today's Live; a team card, a session, the audit log, Customize and
+// Launch are native windows of their own.
+const query = parseSurface(location.search);
+const native = query.surface !== null && query.surface !== 'tray' && query.surface !== 'window';
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <Live snapshot={snapshot} />
+    {native ? <LiveSurface query={query} snapshot={Boolean(snapshot)} /> : <Live snapshot={snapshot} />}
   </StrictMode>,
 );
