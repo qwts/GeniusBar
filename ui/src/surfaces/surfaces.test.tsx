@@ -147,6 +147,16 @@ describe('SessionSurface (#223)', () => {
     await waitFor(() => expect(win.setTitle).toHaveBeenCalledWith('luna — GeniusBar'));
   });
 
+  it('offers the header\'s Stop from the shared badges and the live stopper (#122)', async () => {
+    const { win } = fakeWindow();
+    const stopped: string[] = [];
+    const stopper = { supported: async () => true, stop: async (id: string) => { stopped.push(id); return { agentId: id, stopped: true } as never; } };
+    const badges = { comms: new Set<string>(), computerUse: new Set(['agent_c']), busy: new Set<string>() };
+    render(<SessionSurface {...data} badges={badges} stopper={stopper} soul="user/agent_c" tab={null} action={null} win={win} open={null} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop: agent_c is using the computer' }));
+    await waitFor(() => expect(stopped).toEqual(['agent_c']));
+  });
+
   it('closes the window on Escape outside a field, once', () => {
     const { win } = fakeWindow();
     render(<SessionSurface {...data} soul="user/agent_p" tab={null} action={null} win={win} open={null} />);

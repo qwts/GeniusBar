@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArchiveDialog, type Archiver } from '../components/ArchiveDialog';
 import { CompanionSession, InfoButton, type SessionTab } from '../components/CompanionSession';
 import { CompanionWindow } from '../components/Desktop';
+import type { Stopper } from '../components/FloatingDudle';
 import { liveState } from '../components/FleetList';
 import { useSandbox } from '../components/Sandbox';
 import { SandboxChip } from '../components/SandboxChip';
@@ -21,13 +22,15 @@ import { SurfaceOpenerContext, type OpenSurface } from './opener';
  * `tab` opens it on that tab; `action=archive` opens with the Archive
  * confirmation showing. Escape or a finished archive closes the window.
  */
-export function SessionSurface({ soul: key, tab, action, census, loaded, chat, badges, win, isStatic = false, open, launcher, archiver }: SurfaceData & {
+export function SessionSurface({ soul: key, tab, action, census, loaded, chat, badges, win, isStatic = false, open, launcher, archiver, stopper }: SurfaceData & {
   soul: string | null;
   tab: SessionTab | null;
   action: 'archive' | null;
   open: OpenSurface | null;
   launcher?: LaunchApi;
   archiver?: Archiver;
+  /** Halts this soul while it drives the screen (#122): the header's Stop. */
+  stopper?: Stopper;
 }) {
   const { t } = useI18n();
   const sandbox = useSandbox();
@@ -98,6 +101,8 @@ export function SessionSurface({ soul: key, tab, action, census, loaded, chat, b
             onClose={close}
             awaiting={awaiting}
             busy={busy}
+            computerUse={badges?.computerUse}
+            stopper={stopper}
           />
         </CompanionWindow>
         {archiving && archiver && (

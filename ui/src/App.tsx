@@ -400,6 +400,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     setTimeout(() => document.querySelector<HTMLTextAreaElement>('[role="tabpanel"] textarea')?.focus(), 50);
   };
 
+  // The perimeter's stopper, for the session header's Stop too (#122).
+  const sessionStopper = stopper ?? (inApp() && !isStatic ? liveStopper : undefined);
   const session = selected && (
     <CompanionSession
       key={quick.n}
@@ -422,6 +424,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
       showBack={mode === 'tray'}
       awaiting={awaitingIds}
       busy={busyIds}
+      computerUse={(badges ?? liveBadges).computerUse}
+      stopper={sessionStopper}
     />
   );
 
@@ -634,7 +638,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
       <FloatingDudle showButton={floatingButton} lead={floatingLead(forest, layout.hidden)} paused={paused}
         state={floatingState({ roster, approvals: waiting.length, busy: shownBadges.busy, computerUse: shownBadges.computerUse })}
         computerUser={computerUserName(roster, shownBadges.computerUse)}
-        computerUse={shownBadges.computerUse} stopper={stopper ?? (inApp() && !isStatic ? liveStopper : undefined)}
+        computerUse={shownBadges.computerUse} stopper={sessionStopper}
         fleetPaused={fleet.paused} onTogglePause={toggleFleet}
         computerUseSwitch={computerUseSwitch ?? (inApp() && !isStatic ? liveComputerUse : undefined)}
         onPrompt={prompt} onHistory={(soul) => openOn(soul, 'audit')} />

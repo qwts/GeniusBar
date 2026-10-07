@@ -1,6 +1,6 @@
-import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, Cpu, Info, LogIn, MousePointer2, Palette, Radio, ShieldCheck, X, Zap } from 'lucide-react';
+import { ArrowLeft, Cpu, Info, LogIn, MousePointer2, OctagonX, Palette, Radio, ShieldCheck, X, Zap } from 'lucide-react';
 import { computerUseSupported, runtimeMetrics, setSoulComms, soulComms, type ComputerUseSwitch, type RuntimeMetrics, type RuntimeObservation, type SoulColdWake, type SoulComms, type SoulMode, type SoulModel, type SoulPopulation } from '../bridge';
 import {
   availabilityNote,
@@ -22,6 +22,7 @@ import { AuditLog } from './AuditLog';
 import { Conversation } from './Conversation';
 import { CustomizeDialog } from './CustomizeDialog';
 import { liveState, presenceText, SoulDudle } from './FleetList';
+import { useStop, type Stopper } from './FloatingDudle';
 import type { DudleState } from './Dudle';
 import { LaunchForm } from './LaunchForm';
 import { ModelSelect } from './ModelField';
@@ -74,6 +75,38 @@ interface CompanionSessionProps {
   awaiting?: ReadonlySet<string>;
   /** Agent IDs mid-turn (daemon status `busy`): the working face, "Working…". */
   busy?: ReadonlySet<string>;
+  /** Agent IDs driving the screen (#122): while this soul is among them the header offers Stop. */
+  computerUse?: ReadonlySet<string>;
+  /** Halts this soul's turn (agent-bot `soul stop`); without one the header offers no Stop. */
+  stopper?: Stopper;
+}
+
+/**
+ * The session's Stop (#122): the perimeter's Stop for this one soul, in
+ * the header while it drives the screen. The window's own Escape closes
+ * the session, so here Stop is the button alone, with no Escape hold.
+ */
+export function SessionStop({ soul, computerUse, stopper }: { soul: CensusRow; computerUse?: ReadonlySet<string>; stopper?: Stopper }) {
+  const { t } = useI18n();
+  const driving = computerUse?.has(soul.agentId) ?? false;
+  // Only this soul, so Stop never halts a teammate; empty once the daemon drops it, which settles "stopping".
+  const targets = useMemo(() => new Set(driving ? [soul.agentId] : []), [driving, soul.agentId]);
+  // Probed (an agent-bot run) only once a soul drives, not on every session opened.
+  const stop = useStop(driving ? stopper : undefined, targets);
+  if (!driving || !stop.offered) return null;
+  const name = displayName(soul);
+  return (
+    <>
+      <button type="button" onClick={() => { void stop.halt(); }} disabled={stop.phase.phase === 'stopping'}
+        title={t('computerActive', { name })} aria-label={`${t('stop')}: ${t('computerActive', { name })}`}
+        className="flex min-h-7 shrink-0 items-center gap-1 rounded-full bg-warning px-3 py-0.5 text-xs font-semibold text-warning-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-70">
+        <OctagonX className="size-3.5" aria-hidden /> {stop.phase.phase === 'stopping' ? t('stopping') : t('stop')}
+      </button>
+      {stop.phase.phase === 'failed' && (
+        <p role="alert" className="m-0 basis-full truncate text-xs text-destructive">{t('stopFailed', { message: stop.phase.message })}</p>
+      )}
+    </>
+  );
 }
 
 /**
@@ -81,7 +114,7 @@ interface CompanionSessionProps {
  * tree, its audit log, and the read-only details with Launch, in the
  * design's order. Without chat it opens on the details.
  */
-export function CompanionSession({ soul, forest, roster, paused = false, chat, launch, onOpen, onClose, showBack = false, metricsRefresh = 0, initialTab, awaiting, busy }: CompanionSessionProps) {
+export function CompanionSession({ soul, forest, roster, paused = false, chat, launch, onOpen, onClose, showBack = false, metricsRefresh = 0, initialTab, awaiting, busy, computerUse, stopper }: CompanionSessionProps) {
   const { t } = useI18n();
   const ids = useId();
   const back = useRef<HTMLButtonElement>(null);
@@ -117,7 +150,8 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
             {roleAndHarness(soul)} · {presenceText(soul, state, t)}
           </p>
         </div>
-      {/* The design's segmented tabs, at the header's right. */}
+      {/* Stop while this soul drives the screen (#122), then the design's segmented tabs at the header's right. */}
+      <SessionStop soul={soul} computerUse={computerUse} stopper={stopper} />
       {showBack && <SandboxChip soul={soul} />}
       {showBack && <InfoButton soul={soul} state={state} />}
       <div role="tablist" aria-label={name} className="ml-auto flex h-9 items-center gap-0.5 rounded-lg bg-muted p-1"
