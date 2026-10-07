@@ -11,7 +11,8 @@ import type { MessageKey } from '../locales/en';
 // key; GeniusBar sees only the secret-free list and passes a key file's
 // path, picked in the native open dialog by the Rust shell. With the
 // `github-identity` add-on off the list is empty and mutations answer
-// `identity-app-disabled`.
+// `identity-app-disabled`. agent-bot-identity #554 adds the add-on's switch,
+// its state in the list (`addons`) and removing an App from this Mac.
 
 /** Where an App is installed, as agent-bot cached it on connect or rotation. */
 export interface IdentityInstallation {
@@ -44,6 +45,34 @@ export interface IdentityApp {
   liveMint: { status: 'ready' | 'failed' | 'unknown'; code?: string | null; checkedAt?: string | null };
 }
 
+/**
+ * Which add-ons agent-bot's list reports on (agent-bot-identity #554); an
+ * older bundle reports none, and the section then shows the switch read-only.
+ */
+export interface IdentityAddons {
+  'github-identity': boolean;
+}
+
+/** The list envelope: the Apps, and the add-on state when agent-bot reports it. */
+export interface IdentityAppsList {
+  apps: IdentityApp[];
+  addons: IdentityAddons | null;
+}
+
+/** What `identity app remove` forgot on this Mac: names only, never contents. */
+export interface IdentityAppRemoved {
+  slug: string;
+  id: string | null;
+  removed: { storeItem: { store: string; name: string; existed: boolean } | null; configRecord: boolean };
+}
+
+/** The add-on switch's answer. */
+export interface IdentityAddonState {
+  addon: string;
+  enabled: boolean;
+  changed: boolean;
+}
+
 /** `{id, slug, installUrl}`; a rotation adds the retired key's fingerprint. */
 export interface IdentityAppResult {
   id: string;
@@ -60,7 +89,7 @@ export type IdentityCreateStatus =
 /** Where identities come from: agent-bot in the app; tests and the preview pass their own. */
 export interface IdentityAppsSource {
   /** Rejects when the bundled agent-bot has no `identity apps`, which hides the feature. */
-  list: () => Promise<IdentityApp[]>;
+  list: () => Promise<IdentityAppsList>;
   /** Owner-gated by agent-bot; resolves once its loopback page is listening. */
   create: () => Promise<{ handle: number; localUrl: string }>;
   createStatus: (handle: number) => Promise<IdentityCreateStatus>;
@@ -69,6 +98,10 @@ export interface IdentityAppsSource {
   connect: (id: string, prompt: string) => Promise<IdentityAppResult>;
   rotateKey: (slug: string, prompt: string) => Promise<IdentityAppResult>;
   assign: (slug: string, target: { soul: string } | { harness: string }) => Promise<unknown>;
+  /** Forgets the App on this Mac; refused (`identity-app-assigned`) while a harness or soul uses it. Owner-gated. */
+  remove: (slug: string) => Promise<IdentityAppRemoved>;
+  /** Switches the add-on; works while it is off. Owner-gated. */
+  setAddon: (name: keyof IdentityAddons, enabled: boolean) => Promise<IdentityAddonState>;
   /** Opens the create page or a github.com page in the owner's browser. */
   open: (url: string) => Promise<void>;
 }
@@ -106,6 +139,34 @@ export function normalizeIdentityApp(raw: unknown): IdentityApp | null {
 export function normalizeIdentityApps(raw: unknown): IdentityApp[] | null {
   if (!isRecord(raw) || !Array.isArray(raw.apps)) return null;
   return raw.apps.map(normalizeIdentityApp).filter((a): a is IdentityApp => a !== null);
+}
+
+/** The envelope; `addons` is null when agent-bot does not report the add-on (an older bundle). */
+export function normalizeIdentityAppsList(raw: unknown): IdentityAppsList | null {
+  const apps = normalizeIdentityApps(raw);
+  if (apps === null || !isRecord(raw)) return null;
+  const on = isRecord(raw.addons) ? raw.addons['github-identity'] : undefined;
+  return { apps, addons: typeof on === 'boolean' ? { 'github-identity': on } : null };
+}
+
+function normalizeRemoved(raw: unknown): IdentityAppRemoved | null {
+  if (!isRecord(raw) || typeof raw.slug !== 'string') return null;
+  const removed = isRecord(raw.removed) ? raw.removed : {};
+  const item = removed.storeItem;
+  return {
+    slug: raw.slug,
+    id: typeof raw.id === 'string' ? raw.id : null,
+    removed: {
+      storeItem: isRecord(item) && typeof item.store === 'string' && typeof item.name === 'string'
+        ? { store: item.store, name: item.name, existed: item.existed === true } : null,
+      configRecord: removed.configRecord === true,
+    },
+  };
+}
+
+function normalizeAddon(raw: unknown): IdentityAddonState | null {
+  if (!isRecord(raw) || typeof raw.addon !== 'string' || typeof raw.enabled !== 'boolean') return null;
+  return { addon: raw.addon, enabled: raw.enabled, changed: raw.changed === true };
 }
 
 function normalizeResult(raw: unknown): IdentityAppResult | null {
@@ -152,7 +213,7 @@ async function call<T>(command: string, args: Record<string, unknown>, normalize
 const anything = (raw: unknown) => raw ?? {};
 
 export const liveIdentityApps: IdentityAppsSource = {
-  list: () => call('identity_apps_list', {}, normalizeIdentityApps, 'agent-bot gave no App list'),
+  list: () => call('identity_apps_list', {}, normalizeIdentityAppsList, 'agent-bot gave no App list'),
   create: () => call('identity_app_create', {}, (raw) => (isRecord(raw) && typeof raw.handle === 'number' && typeof raw.localUrl === 'string'
     ? { handle: raw.handle, localUrl: raw.localUrl } : null), 'agent-bot gave no App creation page'),
   createStatus: (handle) => call('identity_app_create_status', { handle }, normalizeCreateStatus, 'agent-bot gave no App creation status'),
@@ -160,6 +221,8 @@ export const liveIdentityApps: IdentityAppsSource = {
   connect: (id, prompt) => call('identity_app_connect', { id, prompt }, normalizeResult, 'agent-bot gave no App'),
   rotateKey: (slug, prompt) => call('identity_app_rotate_key', { slug, prompt }, normalizeResult, 'agent-bot gave no App'),
   assign: (slug, target) => call('identity_app_assign', { slug, ...target }, anything, 'agent-bot gave no assignment'),
+  remove: (slug) => call('identity_app_remove', { slug }, normalizeRemoved, 'agent-bot gave no removal'),
+  setAddon: (name, enabled) => call('identity_addon_set', { name, enabled }, normalizeAddon, 'agent-bot gave no add-on state'),
   open: (url) => call('identity_app_open', { url }, () => undefined, ''),
 };
 
@@ -174,10 +237,12 @@ export interface IdentityAppsApi {
   hidden: boolean;
   /** Null until the first read answers. */
   apps: IdentityApp[] | null;
+  /** Null until the first read answers, and from an older bundle, which cannot switch the add-on. */
+  addons: IdentityAddons | null;
   reload: () => void;
 }
 
-const HIDDEN: IdentityAppsApi = { source: null, hidden: true, apps: null, reload: () => {} };
+const HIDDEN: IdentityAppsApi = { source: null, hidden: true, apps: null, addons: null, reload: () => {} };
 const IdentityAppsContext = createContext<IdentityAppsApi>(HIDDEN);
 
 export function useIdentityApps(): IdentityAppsApi {
@@ -190,20 +255,20 @@ export function useIdentityApps(): IdentityAppsApi {
  * no `identity apps`. Only the latest read settles.
  */
 export function IdentityAppsProvider({ source, children }: { source: IdentityAppsSource | null; children: ReactNode }) {
-  const [apps, setApps] = useState<IdentityApp[] | null>(null);
+  const [list, setList] = useState<IdentityAppsList | null>(null);
   const [failed, setFailed] = useState(false);
   const ticket = useRef(0);
   const reload = useCallback(() => {
     if (!source) return;
     const mine = ++ticket.current;
     source.list().then(
-      (next) => { if (ticket.current === mine) { setApps(next); setFailed(false); } },
-      () => { if (ticket.current === mine) { setApps(null); setFailed(true); } },
+      (next) => { if (ticket.current === mine) { setList(next); setFailed(false); } },
+      () => { if (ticket.current === mine) { setList(null); setFailed(true); } },
     );
   }, [source]);
   const api = useMemo<IdentityAppsApi>(() => (source
-    ? { source, hidden: failed, apps: failed ? null : apps, reload }
-    : HIDDEN), [source, failed, apps, reload]);
+    ? { source, hidden: failed, apps: failed ? null : list?.apps ?? null, addons: failed ? null : list?.addons ?? null, reload }
+    : HIDDEN), [source, failed, list, reload]);
   return <IdentityAppsContext.Provider value={api}>{children}</IdentityAppsContext.Provider>;
 }
 

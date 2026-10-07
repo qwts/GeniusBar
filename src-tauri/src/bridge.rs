@@ -4520,6 +4520,35 @@ pub async fn identity_app_assign<R: Runtime>(
     parse_identity_app_assign(&output.stdout, &output.stderr)
 }
 
+/// Forgets a managed App on this Mac (agent-bot-identity #554): its stored
+/// key and its config record go; the App itself stays on github.com.
+/// agent-bot refuses with `identity-app-assigned`, naming each harness and
+/// soul that still uses it. `{slug, id, removed: {storeItem, configRecord}}`,
+/// names only.
+#[tauri::command]
+pub async fn identity_app_remove<R: Runtime>(
+    app: AppHandle<R>,
+    slug: String,
+) -> Result<Value, BridgeError> {
+    let args = identity_app_remove_args(&slug)?;
+    let output = run_agent_bot(&app, args, "identity-app-unavailable").await?;
+    parse_identity_app_remove(&output.stdout, &output.stderr)
+}
+
+/// The owner's switch for an agent-bot add-on (agent-bot-identity #554):
+/// `identity addon github-identity on|off`, which works while the add-on is
+/// off and is owner-gated like every App change. `{addon, enabled, changed}`.
+#[tauri::command]
+pub async fn identity_addon_set<R: Runtime>(
+    app: AppHandle<R>,
+    name: String,
+    enabled: bool,
+) -> Result<Value, BridgeError> {
+    let args = identity_addon_args(&name, enabled)?;
+    let output = run_agent_bot(&app, args, "identity-app-unavailable").await?;
+    parse_identity_addon(&output.stdout, &output.stderr)
+}
+
 /// Starts GitHub's manifest flow with `identity app create --manifest
 /// --json`: agent-bot asks the owner, opens a ten-minute loopback listener
 /// and prints `{status: "pending", localUrl}`, which this returns at once
@@ -4930,6 +4959,35 @@ fn identity_app_assign_args(
     ])
 }
 
+fn identity_app_remove_args(slug: &str) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    identity_app_slug(slug)?;
+    Ok(vec![
+        "identity".into(),
+        "app".into(),
+        "remove".into(),
+        slug.into(),
+        "--json".into(),
+    ])
+}
+
+/// The add-ons `identity addon` switches; `persona-accounts` has its own
+/// command (`sandbox on|off`).
+const IDENTITY_ADDONS: [&str; 1] = ["github-identity"];
+
+fn identity_addon_args(name: &str, enabled: bool) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    if !IDENTITY_ADDONS.contains(&name) {
+        return Err(identity_invalid("unknown add-on"));
+    }
+    let state = if enabled { "on" } else { "off" };
+    Ok(vec![
+        "identity".into(),
+        "addon".into(),
+        name.into(),
+        state.into(),
+        "--json".into(),
+    ])
+}
+
 /// Never lets key material through an error message, even one agent-bot
 /// did not construct (a stray stderr line).
 fn identity_error(result: Result<Value, BridgeError>) -> Result<Value, BridgeError> {
@@ -5053,7 +5111,17 @@ fn parse_identity_apps_list(stdout: &[u8], stderr: &[u8]) -> Result<Value, Bridg
         .as_array()
         .map(|rows| rows.iter().filter_map(identity_app_row).collect())
         .unwrap_or_default();
-    Ok(json!({ "apps": apps }))
+    let mut result = json!({ "apps": apps });
+    // agent-bot-identity #554 reports whether the add-on is on; an older
+    // bundle has no `addons`, and the menu then shows the switch read-only.
+    if let Some(on) = list
+        .get("addons")
+        .and_then(|addons| addons.get("github-identity"))
+        .and_then(Value::as_bool)
+    {
+        result["addons"] = json!({ "github-identity": on });
+    }
+    Ok(result)
 }
 
 /// A connect or rotation result: `{id, slug, installUrl}`, and `retired`
@@ -5102,6 +5170,56 @@ fn parse_identity_app_assign(stdout: &[u8], stderr: &[u8]) -> Result<Value, Brid
         }
     }
     Ok(result)
+}
+
+/// A removal: `{slug, id, removed: {storeItem: {store, name, existed} | null,
+/// configRecord}}`. `storeItem` is null for a metadata-only record.
+fn parse_identity_app_remove(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    let value = parse_identity(stdout, stderr, "agent-bot gave no removal", |value| {
+        value
+            .get("slug")
+            .and_then(Value::as_str)
+            .is_some_and(valid_identity_slug)
+            && value.get("removed").is_some_and(Value::is_object)
+    })?;
+    let removed = &value["removed"];
+    let item = &removed["storeItem"];
+    let store_item = match (str_field(item, "store"), str_field(item, "name")) {
+        (Some(store), Some(name))
+            if !name.contains("-----BEGIN") && !name.contains("PRIVATE KEY") =>
+        {
+            json!({
+                "store": store,
+                "name": name,
+                "existed": item.get("existed").and_then(Value::as_bool).unwrap_or(false),
+            })
+        }
+        _ => Value::Null,
+    };
+    Ok(json!({
+        "slug": value["slug"],
+        "id": str_field(&value, "id"),
+        "removed": {
+            "storeItem": store_item,
+            "configRecord": removed.get("configRecord").and_then(Value::as_bool).unwrap_or(false),
+        },
+    }))
+}
+
+/// An add-on switch: `{addon, enabled, changed}`.
+fn parse_identity_addon(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    let value = parse_identity(stdout, stderr, "agent-bot gave no add-on state", |value| {
+        value
+            .get("addon")
+            .and_then(Value::as_str)
+            .is_some_and(|name| IDENTITY_ADDONS.contains(&name))
+            && value.get("enabled").and_then(Value::as_bool).is_some()
+    })?;
+    Ok(json!({
+        "addon": value["addon"],
+        "enabled": value["enabled"],
+        "changed": value.get("changed").and_then(Value::as_bool).unwrap_or(false),
+    }))
 }
 
 #[derive(Debug, PartialEq)]
@@ -5425,6 +5543,133 @@ mod identity_app_tests {
         assert_eq!(
             parse_create_line(b"Open http://127.0.0.1:1/"),
             CreateLine::Other
+        );
+    }
+
+    #[test]
+    fn builds_remove_and_addon_arguments() {
+        assert_eq!(
+            identity_app_remove_args("luna-bot").unwrap(),
+            vec!["identity", "app", "remove", "luna-bot", "--json"]
+        );
+        for slug in ["", "--json", "Luna", "a b"] {
+            assert_eq!(
+                identity_app_remove_args(slug).unwrap_err().code,
+                "identity-app-invalid"
+            );
+        }
+        assert_eq!(
+            identity_addon_args("github-identity", true).unwrap(),
+            vec!["identity", "addon", "github-identity", "on", "--json"]
+        );
+        assert_eq!(
+            identity_addon_args("github-identity", false).unwrap(),
+            vec!["identity", "addon", "github-identity", "off", "--json"]
+        );
+        for name in ["", "persona-accounts", "--json", "github-identity "] {
+            assert_eq!(
+                identity_addon_args(name, true).unwrap_err().code,
+                "identity-app-invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn passes_the_add_on_state_through_the_list() {
+        assert_eq!(
+            parse_identity_apps_list(
+                b"{\"schemaVersion\":1,\"addons\":{\"github-identity\":false,\"x\":1},\"apps\":[]}\n",
+                b""
+            )
+            .unwrap(),
+            json!({ "apps": [], "addons": { "github-identity": false } })
+        );
+        assert_eq!(
+            parse_identity_apps_list(
+                b"{\"schemaVersion\":1,\"addons\":{\"github-identity\":true},\"apps\":[]}\n",
+                b""
+            )
+            .unwrap()["addons"],
+            json!({ "github-identity": true })
+        );
+        // An older bundle, or a value that is not a bool: no `addons` at all.
+        for stdout in [
+            &b"{\"schemaVersion\":1,\"apps\":[]}\n"[..],
+            &b"{\"schemaVersion\":1,\"addons\":{\"github-identity\":\"on\"},\"apps\":[]}\n"[..],
+        ] {
+            assert!(parse_identity_apps_list(stdout, b"")
+                .unwrap()
+                .get("addons")
+                .is_none());
+        }
+    }
+
+    #[test]
+    fn parses_removal_and_addon_results() {
+        assert_eq!(
+            parse_identity_app_remove(
+                br#"{"slug":"luna-bot","id":"123","removed":{"storeItem":{"store":"keychain","name":"agent-bot.app.luna-bot/github-app/luna-bot","existed":true,"pem":"x"},"configRecord":true},"extra":1}
+"#,
+                b""
+            )
+            .unwrap(),
+            json!({
+                "slug": "luna-bot",
+                "id": "123",
+                "removed": {
+                    "storeItem": {
+                        "store": "keychain",
+                        "name": "agent-bot.app.luna-bot/github-app/luna-bot",
+                        "existed": true,
+                    },
+                    "configRecord": true,
+                },
+            })
+        );
+        assert_eq!(
+            parse_identity_app_remove(
+                b"{\"slug\":\"old-app\",\"id\":\"9\",\"removed\":{\"storeItem\":null,\"configRecord\":true}}\n",
+                b""
+            )
+            .unwrap()["removed"],
+            json!({ "storeItem": null, "configRecord": true })
+        );
+        assert_eq!(
+            parse_identity_app_remove(
+                b"{\"error\":{\"code\":\"identity-app-assigned\",\"message\":\"luna-bot is still used by harness codex and soul agent_1; assign them another App first.\"}}\n",
+                b""
+            ),
+            Err(BridgeError::new(
+                "identity-app-assigned",
+                "luna-bot is still used by harness codex and soul agent_1; assign them another App first."
+            ))
+        );
+        assert_eq!(
+            parse_identity_app_remove(b"{\"slug\":\"luna-bot\"}\n", b"")
+                .unwrap_err()
+                .message,
+            "agent-bot gave no removal"
+        );
+        assert_eq!(
+            parse_identity_addon(
+                b"{\"addon\":\"github-identity\",\"enabled\":true,\"changed\":true,\"x\":1}\n",
+                b""
+            )
+            .unwrap(),
+            json!({ "addon": "github-identity", "enabled": true, "changed": true })
+        );
+        assert_eq!(
+            parse_identity_addon(
+                b"{\"error\":{\"code\":\"identity-app-owner-required\",\"message\":\"The owner did not approve.\"}}\n",
+                b""
+            ),
+            Err(BridgeError::new("identity-app-owner-required", "The owner did not approve."))
+        );
+        assert_eq!(
+            parse_identity_addon(b"{\"addon\":\"other\",\"enabled\":true}\n", b"")
+                .unwrap_err()
+                .code,
+            "identity-app-failed"
         );
     }
 
