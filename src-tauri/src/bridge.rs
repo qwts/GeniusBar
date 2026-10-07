@@ -92,6 +92,8 @@ pub struct Bridge {
     setting_up: AtomicBool,
     child: Mutex<Option<CommandChild>>,
     pending: Mutex<HashMap<u64, oneshot::Sender<Reply>>>,
+    /// Requests seen per method, so `shell.log` shows the page still asking (#223).
+    calls: Mutex<HashMap<String, u64>>,
 }
 
 impl Bridge {
@@ -226,6 +228,15 @@ pub async fn bridge<R: Runtime>(
         return Err(BridgeError::new("bad-request", "unknown method"));
     }
     let id = state.next_id.fetch_add(1, Ordering::Relaxed) + 1;
+    let seen = {
+        let mut calls = state.calls.lock().unwrap();
+        let count = calls.entry(method.clone()).or_insert(0);
+        *count += 1;
+        *count
+    };
+    if seen == 1 || seen % 12 == 0 {
+        crate::windows::log_line(&app, &format!("bridge {method} x{seen}"));
+    }
     let (sender, receiver) = oneshot::channel();
     state.pending.lock().unwrap().insert(id, sender);
     let line = format!(
