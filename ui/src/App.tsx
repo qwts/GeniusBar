@@ -234,7 +234,9 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   // The badges' population read also carries the hues souls declare (#64),
   // joined into the census here, before anything draws a Dudle.
   const badgeIds = useMemo(() => [...new Set(census.filter((s) => s.presence !== 'left').map((s) => s.agentId))], [census]);
-  const liveBadges = useBadges(badgeIds, !badges && mode === 'window' && inApp() && !isStatic);
+  // The tray popup reads them too (#122): it is the one that knows a soul
+  // drives the screen, and opens the perimeter over it.
+  const liveBadges = useBadges(badgeIds, !badges && inApp() && !isStatic);
   const hues = (badges ?? liveBadges).hues;
   // The same read carries the roles souls declare (agent-bot-identity #535).
   const roles = (badges ?? liveBadges).roles;
