@@ -3677,6 +3677,11 @@ pub struct SoulRevisionEdit {
     /// alone, empty removes it, otherwise one line of at most 60 characters.
     #[serde(default)]
     role: Option<String>,
+    /// The manifest's `skills.disabled` (agent-bot 0.10.43, #64): absent
+    /// leaves it alone; `{ "disabled": [names] }` is the whole list of the
+    /// package's skills switched off, and an empty list removes the key.
+    #[serde(default)]
+    skills: Option<Value>,
     #[serde(default)]
     files: std::collections::BTreeMap<String, String>,
 }
@@ -3733,6 +3738,7 @@ pub async fn soul_revision_edit<R: Runtime>(
         && edit.description.is_none()
         && edit.appearance.is_none()
         && edit.role.is_none()
+        && edit.skills.is_none()
         && edit.files.is_empty()
     {
         return Err(revision_invalid("nothing changed"));
@@ -3953,6 +3959,38 @@ fn manifest_appearance(value: &Value) -> Result<Option<u64>, BridgeError> {
     }
 }
 
+/// The `skills.disabled` list an edit asks for: `{ "disabled": [names] }`,
+/// each a skill `profile` lists (agent-bot refuses an unknown name too, but
+/// after the copy; here is sooner), deduplicated and sorted.
+fn manifest_skills(value: &Value, profile: &Value) -> Result<Vec<String>, BridgeError> {
+    let invalid =
+        || revision_invalid("skills must be { \"disabled\": [names] } naming the package's skills");
+    let disabled = value
+        .as_object()
+        .filter(|o| o.len() == 1)
+        .and_then(|o| o.get("disabled"))
+        .and_then(Value::as_array)
+        .ok_or_else(invalid)?;
+    let known: std::collections::BTreeSet<&str> = profile
+        .get("skills")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|r| r.get("name").and_then(Value::as_str))
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut names = std::collections::BTreeSet::new();
+    for name in disabled {
+        let name = name
+            .as_str()
+            .filter(|n| known.contains(n))
+            .ok_or_else(invalid)?;
+        names.insert(name.to_string());
+    }
+    Ok(names.into_iter().collect())
+}
+
 /// Checks the edit against `profile` (`soul profile --json`), copies the
 /// package into `temp` and applies the edit there. Answers the soul's Agent
 /// ID and the edited copy.
@@ -4019,6 +4057,11 @@ fn prepare_revision_edit(
             }
         })
         .transpose()?;
+    let skills = edit
+        .skills
+        .as_ref()
+        .map(|value| manifest_skills(value, profile))
+        .transpose()?;
 
     let copy = temp.join("edit.soul");
     if !std::fs::symlink_metadata(package).is_ok_and(|m| m.is_dir()) {
@@ -4036,7 +4079,12 @@ fn prepare_revision_edit(
         }
         std::fs::write(&file, contents).map_err(failed)?;
     }
-    if name.is_some() || description.is_some() || appearance.is_some() || role.is_some() {
+    if name.is_some()
+        || description.is_some()
+        || appearance.is_some()
+        || role.is_some()
+        || skills.is_some()
+    {
         let file = copied_file(&copy, "soul.json")?;
         let text = std::fs::read_to_string(&file).map_err(failed)?;
         let mut manifest: serde_json::Map<String, Value> = serde_json::from_str(&text)
@@ -4064,6 +4112,26 @@ fn prepare_revision_edit(
                 manifest.remove("role");
             }
             None => {}
+        }
+        if let Some(disabled) = skills {
+            // Other `skills` keys agent-bot may grow are kept; an empty list
+            // leaves no `disabled`, and no `skills` at all when nothing else
+            // is in it.
+            let mut declaration = manifest
+                .remove("skills")
+                .and_then(|v| v.as_object().cloned())
+                .unwrap_or_default();
+            if disabled.is_empty() {
+                declaration.remove("disabled");
+            } else {
+                declaration.insert(
+                    "disabled".into(),
+                    Value::Array(disabled.into_iter().map(Value::String).collect()),
+                );
+            }
+            if !declaration.is_empty() {
+                manifest.insert("skills".into(), Value::Object(declaration));
+            }
         }
         // agent-bot sets parentRevision and recomputes revision when it
         // records the edit; the copy keeps the package's.
@@ -4170,6 +4238,10 @@ mod soul_revision_edit_tests {
             json!({
                 "agentId": "agent_p",
                 "profile": {"name": "luna", "package": self.package(), "revision": "sha256:aa"},
+                "skills": [
+                    {"name": "review", "source": "sop", "enabled": true},
+                    {"name": "triage", "source": "soul", "enabled": true},
+                ],
                 "files": [
                     {"path": "AGENTS.md", "kind": "context", "text": true},
                     {"path": "CLAUDE.md", "kind": "generated", "text": true},
@@ -4377,6 +4449,49 @@ mod soul_revision_edit_tests {
             temp.path()
         )
         .is_err());
+    }
+
+    #[test]
+    fn writes_or_removes_the_skills_declaration() {
+        let fixture = Fixture::new();
+        let manifest_of = |copy: &std::path::Path| -> Value {
+            serde_json::from_str(&std::fs::read_to_string(copy.join("soul.json")).unwrap()).unwrap()
+        };
+        // A skills-only edit is an edit; names are deduplicated and sorted.
+        let temp = RevisionCopy::new().unwrap();
+        let mut off = edit(&[]);
+        off.skills = Some(json!({ "disabled": ["triage", "review", "triage"] }));
+        let (_, copy) = prepare_revision_edit(&fixture.profile(), None, &off, temp.path()).unwrap();
+        assert_eq!(
+            manifest_of(&copy)["skills"],
+            json!({ "disabled": ["review", "triage"] })
+        );
+        assert_eq!(manifest_of(&copy)["name"], "Luna");
+        // An empty list removes the key.
+        let temp2 = RevisionCopy::new().unwrap();
+        let mut on = edit(&[]);
+        on.skills = Some(json!({ "disabled": [] }));
+        let (_, copy2) =
+            prepare_revision_edit(&fixture.profile(), None, &on, temp2.path()).unwrap();
+        assert!(manifest_of(&copy2).get("skills").is_none());
+        // A name the package has no skill for, or another shape, is refused.
+        for bad in [
+            json!({ "disabled": ["ship"] }),
+            json!({ "disabled": "triage" }),
+            json!({ "disabled": ["triage"], "other": 1 }),
+            json!(["triage"]),
+            json!(null),
+        ] {
+            let temp3 = RevisionCopy::new().unwrap();
+            let mut wrong = edit(&[]);
+            wrong.skills = Some(bad);
+            assert_eq!(
+                prepare_revision_edit(&fixture.profile(), None, &wrong, temp3.path())
+                    .unwrap_err()
+                    .code,
+                "soul-revision-invalid"
+            );
+        }
     }
 
     #[test]

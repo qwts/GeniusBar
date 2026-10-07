@@ -408,6 +408,8 @@ export const es: Catalog = {
   'edit.skills': 'Habilidades',
   'edit.skillSoul': 'propia',
   'edit.skillSop': 'SOP',
+  'edit.skillOn': '{name} activada',
+  'edit.skillsHint': 'Una habilidad desactivada queda en el paquete, pero no se carga.',
   'edit.credentials': 'Credenciales',
   'edit.files': 'Archivos',
   'edit.bytes': '{count} bytes',

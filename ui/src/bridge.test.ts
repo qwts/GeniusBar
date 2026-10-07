@@ -631,7 +631,7 @@ describe('soul profile (#64)', () => {
     agentId: 'agent_p',
     profile: { name: 'luna', displayName: 'Luna', description: 'Leads.', harness: 'claude', package: '/s/Luna.soul', revision: 'r1', template: false, parentId: null, status: 'active' },
     files: [{ path: 'soul.md', kind: 'soul', size: 12, modifiedAt: '2026-10-01T00:00:00.000Z', text: true }, { path: '', kind: 'soul' }, { path: 'x.bin', kind: 'odd', text: 'yes' }],
-    skills: [{ name: 'review', source: 'sop', path: 'sop/skills/review/SKILL.md', commit: 'abc123' }, { name: 'notes', source: 'soul', path: 'skills/notes/SKILL.md', commit: null }, { source: 'sop' }],
+    skills: [{ name: 'review', source: 'sop', path: 'sop/skills/review/SKILL.md', commit: 'abc123', enabled: true }, { name: 'notes', source: 'soul', path: 'skills/notes/SKILL.md', commit: null, enabled: true }, { source: 'sop' }],
     credentials: [{ name: 'luna-app', provider: 'github', status: 'declared', value: 'ghs_secret', path: '/keys/luna.pem' }],
     sop: { resolved: { source: 'qwts/sop', commit: 'abc123' }, override: { path: 'agent-sop.toml', workflows: ['workflows/ship.toml', 4] } },
     errors: [{ area: 'sop', message: 'pins need the network' }, { area: 'x' }],
@@ -641,14 +641,14 @@ describe('soul profile (#64)', () => {
     const profile = normalizeSoulProfile(raw);
     expect(profile).toEqual({
       agentId: 'agent_p',
-      profile: { name: 'luna', displayName: 'Luna', description: 'Leads.', harness: 'claude', package: '/s/Luna.soul', revision: 'r1', template: false, parentId: null, status: 'active', appearance: null },
+      profile: { name: 'luna', displayName: 'Luna', description: 'Leads.', harness: 'claude', package: '/s/Luna.soul', revision: 'r1', template: false, parentId: null, status: 'active', appearance: null, skillsDisabled: [] },
       files: [
         { path: 'soul.md', kind: 'soul', size: 12, modifiedAt: '2026-10-01T00:00:00.000Z', text: true },
         { path: 'x.bin', kind: 'context', size: null, modifiedAt: null, text: false },
       ],
       skills: [
-        { name: 'review', source: 'sop', path: 'sop/skills/review/SKILL.md', commit: 'abc123' },
-        { name: 'notes', source: 'soul', path: 'skills/notes/SKILL.md', commit: null },
+        { name: 'review', source: 'sop', path: 'sop/skills/review/SKILL.md', commit: 'abc123', enabled: true },
+        { name: 'notes', source: 'soul', path: 'skills/notes/SKILL.md', commit: null, enabled: true },
       ],
       credentials: [{ name: 'luna-app', provider: 'github', status: 'declared' }],
       sop: { resolved: { source: 'qwts/sop', commit: 'abc123' }, override: { path: 'agent-sop.toml', workflows: ['workflows/ship.toml'] } },
