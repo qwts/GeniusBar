@@ -56,6 +56,21 @@ export function deriveDudle(soulId: string): DudleSpec {
   };
 }
 
+/** The derived body hue in whole degrees, 0..359: what a soul with no declared colour shows. */
+export function derivedHue(soulId: string): number {
+  return Math.round(deriveDudle(soulId).bodyHue * 360) % 360;
+}
+
+/**
+ * The one way a soul's Dudle is drawn: derived from its agent ID, with the
+ * hue the soul declares (soul.json `appearance.hue`, degrees 0..359) over
+ * the derived one when it has one.
+ */
+export function dudleFor(soul: { agentId: string; hue?: number }): DudleSpec {
+  const spec = deriveDudle(soul.agentId);
+  return soul.hue === undefined ? spec : { ...spec, bodyHue: soul.hue / 360 };
+}
+
 /**
  * Eyelid scale for the idle blink: 1 while open, dipping smoothly to 0.08
  * mid-blink, continuous at both edges of the closed window.

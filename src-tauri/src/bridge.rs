@@ -3583,8 +3583,8 @@ mod soul_profile_tests {
 }
 
 /// The owner's edits from the Customize dialog's Save (#64): the soul's
-/// manifest name and description, and the text of its editable Context
-/// files, keyed by their path in the package.
+/// manifest name, description and appearance, and the text of its editable
+/// Context files, keyed by their path in the package.
 #[derive(Debug, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SoulRevisionEdit {
@@ -3592,6 +3592,10 @@ pub struct SoulRevisionEdit {
     name: Option<String>,
     #[serde(default)]
     description: Option<String>,
+    /// The manifest's `appearance` (agent-bot `appearance.hue`, 0..359):
+    /// absent leaves it alone, `null` removes it, `{ "hue": N }` sets it.
+    #[serde(default)]
+    appearance: Option<Value>,
     #[serde(default)]
     files: std::collections::BTreeMap<String, String>,
 }
@@ -3642,7 +3646,11 @@ pub async fn soul_revision_edit<R: Runtime>(
 ) -> Result<Value, BridgeError> {
     let agent = profile_argument(agent, "agent")?;
     let reason = revision_reason(&reason)?;
-    if edit.name.is_none() && edit.description.is_none() && edit.files.is_empty() {
+    if edit.name.is_none()
+        && edit.description.is_none()
+        && edit.appearance.is_none()
+        && edit.files.is_empty()
+    {
         return Err(revision_invalid("nothing changed"));
     }
     let args = vec![
@@ -3831,6 +3839,27 @@ fn manifest_text(
     Ok(value.to_string())
 }
 
+/// The `appearance` an edit asks for: `null` removes the key (`Ok(None)`),
+/// `{ "hue": N }` with an integer 0..359 sets it (`Ok(Some(N))`); agent-bot
+/// accepts nothing else, so nothing else is sent.
+fn manifest_appearance(value: &Value) -> Result<Option<u64>, BridgeError> {
+    if value.is_null() {
+        return Ok(None);
+    }
+    let hue = value
+        .as_object()
+        .filter(|o| o.len() == 1)
+        .and_then(|o| o.get("hue"))
+        .and_then(Value::as_u64)
+        .filter(|hue| *hue <= 359);
+    match hue {
+        Some(hue) => Ok(Some(hue)),
+        None => Err(revision_invalid(
+            "the appearance must be null or a hue from 0 to 359",
+        )),
+    }
+}
+
 /// Checks the edit against `profile` (`soul profile --json`), copies the
 /// package into `temp` and applies the edit there. Answers the soul's Agent
 /// ID and the edited copy.
@@ -3880,6 +3909,11 @@ fn prepare_revision_edit(
         .as_deref()
         .map(|d| manifest_text(d, "description", MAX_DESCRIPTION_CHARS, true))
         .transpose()?;
+    let appearance = edit
+        .appearance
+        .as_ref()
+        .map(manifest_appearance)
+        .transpose()?;
 
     let copy = temp.join("edit.soul");
     if !std::fs::symlink_metadata(package).is_ok_and(|m| m.is_dir()) {
@@ -3897,7 +3931,7 @@ fn prepare_revision_edit(
         }
         std::fs::write(&file, contents).map_err(failed)?;
     }
-    if name.is_some() || description.is_some() {
+    if name.is_some() || description.is_some() || appearance.is_some() {
         let file = copied_file(&copy, "soul.json")?;
         let text = std::fs::read_to_string(&file).map_err(failed)?;
         let mut manifest: serde_json::Map<String, Value> = serde_json::from_str(&text)
@@ -3907,6 +3941,15 @@ fn prepare_revision_edit(
         }
         if let Some(description) = description {
             manifest.insert("description".into(), Value::String(description));
+        }
+        match appearance {
+            Some(Some(hue)) => {
+                manifest.insert("appearance".into(), serde_json::json!({ "hue": hue }));
+            }
+            Some(None) => {
+                manifest.remove("appearance");
+            }
+            None => {}
         }
         // agent-bot sets parentRevision and recomputes revision when it
         // records the edit; the copy keeps the package's.
@@ -4045,6 +4088,7 @@ mod soul_revision_edit_tests {
         let mut request = edit(&[("AGENTS.md", "# New\n"), ("skills/triage/SKILL.md", "x")]);
         request.name = Some(" Nova ".into());
         request.description = Some("Reviews.\nCarefully.".into());
+        request.appearance = Some(serde_json::json!({ "hue": 210 }));
         let (agent, copy) =
             prepare_revision_edit(&fixture.profile(), Some("sha256:aa"), &request, temp.path())
                 .unwrap();
@@ -4067,8 +4111,20 @@ mod soul_revision_edit_tests {
                 .unwrap();
         assert_eq!(manifest["name"], "Nova");
         assert_eq!(manifest["description"], "Reviews.\nCarefully.");
+        assert_eq!(manifest["appearance"], serde_json::json!({ "hue": 210 }));
         assert_eq!(manifest["revision"], "sha256:aa");
         assert_eq!(manifest["x-unknown"], 1);
+        // `null` removes the colour again; a colour-only edit is an edit.
+        let temp2 = RevisionCopy::new().unwrap();
+        let mut clear = edit(&[]);
+        clear.appearance = Some(Value::Null);
+        let (_, copy2) =
+            prepare_revision_edit(&fixture.profile(), None, &clear, temp2.path()).unwrap();
+        let cleared: Value =
+            serde_json::from_str(&std::fs::read_to_string(copy2.join("soul.json")).unwrap())
+                .unwrap();
+        assert!(cleared.get("appearance").is_none());
+        assert_eq!(cleared["name"], "Luna");
         // Working state never reaches the copy.
         assert!(!copy.join(".soul-state").exists());
         assert!(!copy.join("worktrees").exists());
@@ -4172,6 +4228,24 @@ mod soul_revision_edit_tests {
         let mut multiline = edit(&[]);
         multiline.name = Some("a\nb".into());
         assert!(prepare_revision_edit(&fixture.profile(), None, &multiline, temp.path()).is_err());
+        for bad in [
+            serde_json::json!({ "hue": 360 }),
+            serde_json::json!({ "hue": -1 }),
+            serde_json::json!({ "hue": 1.5 }),
+            serde_json::json!({ "hue": "x" }),
+            serde_json::json!({}),
+            serde_json::json!({ "hue": 1, "extra": true }),
+            serde_json::json!("red"),
+        ] {
+            let mut colour = edit(&[]);
+            colour.appearance = Some(bad);
+            assert_eq!(
+                prepare_revision_edit(&fixture.profile(), None, &colour, temp.path())
+                    .unwrap_err()
+                    .code,
+                "soul-revision-invalid"
+            );
+        }
         let big = "x".repeat(MAX_EDIT_BYTES + 1);
         assert!(prepare_revision_edit(
             &fixture.profile(),

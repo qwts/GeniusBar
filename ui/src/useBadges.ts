@@ -1,12 +1,13 @@
 // The desktop's avatar badges (#122): which souls have agent comms on and
-// which drive the screen. Read from agent-bot: comms for every soul in one
+// which drive the screen, and the Dudle hues souls declare (#64), from the
+// same population read. Read from agent-bot: comms for every soul in one
 // `population list` run each minute (#137), falling back to one run per soul
 // on an older bundle; the computer-use and busy lists every 15 s, or on the
 // census cadence while a soul drives the screen or is mid-turn so the badge
 // and the floating Dudle's working state clear promptly.
 import { useEffect, useRef, useState } from 'react';
 import { daemonStatus, populationList, soulComms, type DaemonStatus, type PopulationEntry, type SoulComms } from './bridge';
-import { busyOf, commsAmong, commsOf, computerUseOf, noBadges, sameSet, type SoulBadges } from './model/refresh';
+import { busyOf, commsAmong, commsOf, computerUseOf, huesOf, noBadges, sameHues, sameSet, type SoulBadges } from './model/refresh';
 import { CENSUS_INTERVAL_MS } from './useCensus';
 
 export const COMMS_INTERVAL_MS = 60_000;
@@ -65,12 +66,14 @@ export function useBadges(agentIds: readonly string[], enabled: boolean, sources
       busy = true;
       try {
         let next: ReadonlySet<string>;
+        let hues: ReadonlyMap<string, number> | undefined;
         if (list.length === 0) {
           next = new Set();
         } else {
           const all = await source.current.population().catch(() => null);
           if (all) {
             next = commsAmong(all, list);
+            hues = huesOf(all);
           } else {
             // Older bundle: one agent-bot run per soul, one at a time.
             const states: (SoulComms | null)[] = [];
@@ -81,7 +84,14 @@ export function useBadges(agentIds: readonly string[], enabled: boolean, sources
             next = commsOf(states);
           }
         }
-        if (active) setBadges((b) => (sameSet(b.comms, next) ? b : { ...b, comms: next }));
+        if (active) {
+          setBadges((b) => {
+            const sameComms = sameSet(b.comms, next);
+            const keepHues = hues === undefined || sameHues(b.hues, hues);
+            if (sameComms && keepHues) return b;
+            return { ...b, ...(sameComms ? {} : { comms: next }), ...(keepHues ? {} : { hues }) };
+          });
+        }
       } finally { busy = false; }
     };
     void read();

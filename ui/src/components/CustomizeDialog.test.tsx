@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BridgeError, type SoulProfile, type SoulProfileFile } from '../bridge';
+import { derivedHue } from '../model/dudle';
 import { sampleCensus, sampleProfile, sampleProfileFiles } from '../model/fixtures';
 import { ProfileSourceContext, type ProfileSource } from '../useSoulProfile';
 import { CustomizeDialog, type SaveRevision } from './CustomizeDialog';
@@ -45,7 +46,6 @@ describe('CustomizeDialog (#64)', () => {
     expect(within(dialog).getByText('/Users/user/Souls/Luna.soul')).toBeTruthy();
     expect(within(dialog).getByText('2026.10.1')).toBeTruthy();
     expect((within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
-    expect(within(dialog).queryByText('Color')).toBeNull();
   });
 
   it('shows the SOP, skills with source and commit, credential names and status, and the files', async () => {
@@ -259,5 +259,93 @@ describe('CustomizeDialog (#64)', () => {
     expect((await within(fresh).findByLabelText('Name') as HTMLInputElement).value).toBe('Luna');
     expect(within(fresh).queryByRole('alert')).toBeNull();
     expect((within(fresh).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe('CustomizeDialog colour (#64)', () => {
+  const bodyHue = (dialog: HTMLElement) => dialog.querySelector('[data-part="body"]')?.getAttribute('fill');
+  const withHue = (hue: number | null): ProfileSource => source({
+    profile: vi.fn(async (): Promise<SoulProfile> => ({ ...sampleProfile, profile: { ...sampleProfile.profile, appearance: hue === null ? null : { hue } } })),
+  });
+
+  it('starts at the derived hue with no swatch chosen off the swatches, and previews a swatch live', async () => {
+    const { dialog } = open(source());
+    await within(dialog).findByDisplayValue('Luna');
+    const derived = derivedHue(luna.agentId);
+    const range = within(dialog).getByRole('slider', { name: 'Color' }) as HTMLInputElement;
+    expect(range.value).toBe(String(derived));
+    expect(range.getAttribute('aria-valuetext')).toBe(`${derived}°, the default`);
+    const group = within(dialog).getByRole('radiogroup', { name: 'Color' });
+    const swatches = within(group).getAllByRole('radio');
+    expect(swatches.map((r) => r.getAttribute('aria-label'))).toEqual(['0°', '30°', '60°', '120°', '170°', '210°', '250°', '280°', '320°']);
+    expect(within(dialog).queryByRole('button', { name: 'Use the default color' })).toBeNull();
+    fireEvent.click(within(group).getByRole('radio', { name: '210°' }));
+    expect(within(group).getByRole('radio', { name: '210°' }).getAttribute('aria-checked')).toBe('true');
+    expect(within(group).getByRole('radio', { name: '210°' }).className).toContain('ring-2');
+    expect(range.value).toBe('210');
+    expect(bodyHue(dialog)).toBe('hsl(210 70% 62%)');
+    expect((within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('moves between swatches with the arrow keys, and follows the slider', async () => {
+    const { dialog } = open(withHue(210));
+    await within(dialog).findByDisplayValue('Luna');
+    const group = within(dialog).getByRole('radiogroup', { name: 'Color' });
+    const at210 = within(group).getByRole('radio', { name: '210°' });
+    expect(at210.getAttribute('aria-checked')).toBe('true');
+    expect(at210.tabIndex).toBe(0);
+    at210.focus();
+    fireEvent.keyDown(group, { key: 'ArrowRight' });
+    expect(within(group).getByRole('radio', { name: '250°' }).getAttribute('aria-checked')).toBe('true');
+    fireEvent.change(within(dialog).getByRole('slider', { name: 'Color' }), { target: { value: '99' } });
+    expect(within(group).queryByRole('radio', { checked: true })).toBeNull();
+    // Off the swatches, the first stays reachable by Tab.
+    expect(within(group).getByRole('radio', { name: '0°' }).tabIndex).toBe(0);
+    expect(bodyHue(dialog)).toBe('hsl(99 70% 62%)');
+  });
+
+  it('saves a chosen hue as appearance, and nothing else', async () => {
+    const save = vi.fn<SaveRevision>(async () => ({ revision: REVISION }));
+    const { dialog } = open(source(), vi.fn(), undefined, save);
+    await within(dialog).findByDisplayValue('Luna');
+    fireEvent.click(within(dialog).getByRole('radio', { name: '170°' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    expect(save).toHaveBeenCalledWith('agent_p', {
+      expectedRevision: '2026.10.1', reason: 'Edited in GeniusBar', edit: { appearance: { hue: 170 }, files: {} },
+    });
+    await within(dialog).findByText('Saved as revision 4be1c0ffee5a.');
+    expect((within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(bodyHue(dialog)).toBe('hsl(170 70% 62%)');
+  });
+
+  it('starts at the declared hue, and clearing it saves appearance as removed', async () => {
+    const save = vi.fn<SaveRevision>(async () => ({ revision: REVISION }));
+    const { dialog } = open(withHue(30), vi.fn(), undefined, save);
+    await within(dialog).findByDisplayValue('Luna');
+    expect((within(dialog).getByRole('slider', { name: 'Color' }) as HTMLInputElement).value).toBe('30');
+    expect(bodyHue(dialog)).toBe('hsl(30 70% 62%)');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Use the default color' }));
+    const derived = derivedHue(luna.agentId);
+    expect((within(dialog).getByRole('slider', { name: 'Color' }) as HTMLInputElement).value).toBe(String(derived));
+    expect(bodyHue(dialog)).toBe(`hsl(${derived} 70% 62%)`);
+    expect(within(dialog).queryByRole('button', { name: 'Use the default color' })).toBeNull();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    expect(save).toHaveBeenCalledWith('agent_p', expect.objectContaining({ edit: { appearance: null, files: {} } }));
+  });
+
+  it('leaves appearance out of a save that did not touch the colour, and picking the same hue back is clean', async () => {
+    const save = vi.fn<SaveRevision>(async () => ({ revision: REVISION }));
+    const { dialog } = open(withHue(210), vi.fn(), undefined, save);
+    await within(dialog).findByDisplayValue('Luna');
+    const button = within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement;
+    fireEvent.click(within(dialog).getByRole('radio', { name: '0°' }));
+    expect(button.disabled).toBe(false);
+    fireEvent.click(within(dialog).getByRole('radio', { name: '210°' }));
+    expect(button.disabled).toBe(true);
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Nova' } });
+    fireEvent.click(button);
+    const [, request] = save.mock.calls[0];
+    expect(request.edit).toEqual({ name: 'Nova', files: {} });
+    expect(request.edit).not.toHaveProperty('appearance');
   });
 });

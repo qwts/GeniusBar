@@ -21,7 +21,7 @@ import { I18nProvider, LANGS, useI18n, type Lang } from './lib/i18n';
 import { menuApprovals, workingCount } from './model/approvals';
 import { canLaunch } from './model/launch';
 import { conversationOf, emptyComposer, unreadOf } from './model/chat';
-import { allSouls, buildSoulForest, displayName, findSoul, soulKey, type CensusRow } from './model/census';
+import { allSouls, buildSoulForest, displayName, findSoul, soulKey, withHues, type CensusRow } from './model/census';
 import { computerUserName, floatingLead, floatingState } from './model/floating';
 import type { SoulBadges } from './model/refresh';
 import { useBadges } from './useBadges';
@@ -169,7 +169,13 @@ function LanguageSelect() {
 function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onOpenDesktop, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, floatingButton = false, archiver, stopper, pauser, computerUseSwitch, templateLister, popupShowing }: AppProps) {
   const { t } = useI18n();
   const sandbox = useSandbox();
-  const forest = useMemo(() => buildSoulForest(census), [census]);
+  // The badges' population read also carries the hues souls declare (#64),
+  // joined into the census here, before anything draws a Dudle.
+  const badgeIds = useMemo(() => [...new Set(census.filter((s) => s.presence !== 'left').map((s) => s.agentId))], [census]);
+  const liveBadges = useBadges(badgeIds, !badges && mode === 'window' && inApp() && !isStatic);
+  const hues = (badges ?? liveBadges).hues;
+  const hued = useMemo(() => withHues(census, hues), [census, hues]);
+  const forest = useMemo(() => buildSoulForest(hued), [hued]);
   const roster = useMemo(() => allSouls(forest), [forest]);
   // Selection holds the roster key and resolves against each census, so
   // the session shows fresh values and closes if the soul disappears.
@@ -259,8 +265,6 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const [archiving, setArchiving] = useState<CensusRow | null>(null);
   const [archivedText, setArchivedText] = useState<string | null>(null);
   const clearArchived = useCallback(() => setArchivedText(null), []);
-  const badgeIds = useMemo(() => roster.filter((s) => s.presence !== 'left').map((s) => s.agentId), [roster]);
-  const liveBadges = useBadges(badgeIds, !badges && mode === 'window' && inApp() && !isStatic);
   const onArchived = (soul: CensusRow, result: RemovedSoul) => {
     const name = displayName(soul);
     layoutActions.setHidden(soulKey(soul), false);

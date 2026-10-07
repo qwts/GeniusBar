@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyCensus, busyOf, commsAmong, commsOf, computerUseOf, sameSet } from './refresh';
+import { applyCensus, busyOf, commsAmong, commsOf, computerUseOf, huesOf, sameHues, sameSet } from './refresh';
 import { disconnected, STARTING_WINDOW_MS, unpairedMessage } from './status';
 import { needsSetup } from './setup';
 
@@ -111,5 +111,15 @@ describe('desktop badges (#122)', () => {
     const list = [{ agentId: 'a', comms: true }, { agentId: 'b', comms: false }, { agentId: 'hidden', comms: true }];
     expect([...commsAmong(list, ['a', 'b', 'missing'])]).toEqual(['a']);
     expect(commsAmong(list, []).size).toBe(0);
+  });
+});
+
+describe('declared hues (#64)', () => {
+  it('maps the souls that declare one, and compares maps by content', () => {
+    const hues = huesOf([{ agentId: 'agent_a', appearance: { hue: 210 } }, { agentId: 'agent_b' }]);
+    expect([...hues]).toEqual([['agent_a', 210]]);
+    expect(sameHues(undefined, hues)).toBe(false);
+    expect(sameHues(new Map([['agent_a', 210]]), hues)).toBe(true);
+    expect(sameHues(new Map([['agent_a', 30]]), hues)).toBe(false);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BridgeError, call, openDesktop, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, savedBrief, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported, normalizeSoulComputerUse, soulComputerUse, soulComputerUseSupported, liveComputerUse, listSoulTemplates, normalizeSoulTemplates, normalizeSoulProfile, soulProfile, soulProfileFile, popupVisible } from './bridge';
+import { BridgeError, call, openDesktop, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, normalizeAppearance, savedBrief, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported, normalizeSoulComputerUse, soulComputerUse, soulComputerUseSupported, liveComputerUse, listSoulTemplates, normalizeSoulTemplates, normalizeSoulProfile, soulProfile, soulProfileFile, popupVisible } from './bridge';
 
 describe('bridge', () => {
   it('invokes the shell command with the method and params', async () => {
@@ -618,7 +618,7 @@ describe('soul profile (#64)', () => {
     const profile = normalizeSoulProfile(raw);
     expect(profile).toEqual({
       agentId: 'agent_p',
-      profile: { name: 'luna', displayName: 'Luna', description: 'Leads.', harness: 'claude', package: '/s/Luna.soul', revision: 'r1', template: false, parentId: null, status: 'active' },
+      profile: { name: 'luna', displayName: 'Luna', description: 'Leads.', harness: 'claude', package: '/s/Luna.soul', revision: 'r1', template: false, parentId: null, status: 'active', appearance: null },
       files: [
         { path: 'soul.md', kind: 'soul', size: 12, modifiedAt: '2026-10-01T00:00:00.000Z', text: true },
         { path: 'x.bin', kind: 'context', size: null, modifiedAt: null, text: false },
@@ -671,5 +671,43 @@ describe('popupVisible (#122)', () => {
     await expect(popupVisible(async () => { throw new Error('no window'); })).resolves.toBe(false);
     // Outside the app there is no popup.
     await expect(popupVisible()).resolves.toBe(false);
+  });
+});
+
+describe('soul appearance (#64)', () => {
+  it('keeps a whole hue in 0..359 and drops anything else', () => {
+    expect(normalizeAppearance({ hue: 210 })).toEqual({ hue: 210 });
+    expect(normalizeAppearance({ hue: 0 })).toEqual({ hue: 0 });
+    expect(normalizeAppearance({ hue: 359 })).toEqual({ hue: 359 });
+    for (const bad of [{ hue: -1 }, { hue: 360 }, { hue: 'x' }, { hue: 12.5 }, { hue: Number.NaN }, {}, null, 'x', 210]) {
+      expect(normalizeAppearance(bad)).toBeUndefined();
+    }
+  });
+
+  it('carries the hue on population rows and records, and leaves malformed ones out', () => {
+    const rows = normalizePopulationList([
+      { agentId: 'agent_1', comms: true, appearance: { hue: 210 } },
+      { agentId: 'agent_2', comms: true, appearance: { hue: -1 } },
+      { agentId: 'agent_3', comms: true, appearance: { hue: 360 } },
+      { agentId: 'agent_4', comms: true, appearance: { hue: 'x' } },
+      { agentId: 'agent_5', comms: true, appearance: {} },
+      { agentId: 'agent_6', comms: true },
+    ])!;
+    expect(rows[0]).toEqual({ agentId: 'agent_1', comms: true, managed: false, paused: false, status: null, appearance: { hue: 210 } });
+    for (const row of rows.slice(1)) expect(row).not.toHaveProperty('appearance');
+    expect(normalizeSoulPopulation({ agentId: 'a', appearance: { hue: 210 } })?.appearance).toEqual({ hue: 210 });
+    for (const appearance of [{ hue: -1 }, { hue: 360 }, { hue: 'x' }, {}]) {
+      expect(normalizeSoulPopulation({ agentId: 'a', appearance })).not.toHaveProperty('appearance');
+    }
+  });
+
+  it('reads the profile\'s appearance, null when absent or malformed', () => {
+    const raw = (appearance: unknown) => ({ agentId: 'agent_p', profile: { name: 'luna', appearance } });
+    expect(normalizeSoulProfile(raw({ hue: 210 }))?.profile.appearance).toEqual({ hue: 210 });
+    expect(normalizeSoulProfile(raw(null))?.profile.appearance).toBeNull();
+    expect(normalizeSoulProfile(raw(undefined))?.profile.appearance).toBeNull();
+    for (const bad of [{ hue: -1 }, { hue: 360 }, { hue: 'x' }, {}]) {
+      expect(normalizeSoulProfile(raw(bad))?.profile.appearance).toBeNull();
+    }
   });
 });

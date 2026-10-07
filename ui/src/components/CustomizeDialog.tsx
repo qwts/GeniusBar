@@ -6,6 +6,8 @@ import { BridgeError, inApp, type SoulProfileFileEntry } from '../bridge';
 import { displayHarness, displayName, type CensusRow } from '../model/census';
 import { useI18n, type Translate } from '../lib/i18n';
 import { ProfileSourceContext, useSoulProfile } from '../useSoulProfile';
+import { derivedHue } from '../model/dudle';
+import { radioGroupKeys } from '../lib/radioGroup';
 import { SoulDudle } from './FleetList';
 
 type Tab = 'profile' | 'context';
@@ -22,8 +24,15 @@ export interface RevisionEditRequest {
   /** The revision the dialog read; the bridge refuses when it moved. */
   expectedRevision: string | null;
   reason: string;
-  edit: { name?: string; description?: string; files: Record<string, string> };
+  /**
+   * `appearance`: the soul.json key to write (`{ hue }`, 0..359) or remove
+   * (null, back to the hue derived from the agent ID); absent leaves it.
+   */
+  edit: { name?: string; description?: string; appearance?: { hue: number } | null; files: Record<string, string> };
 }
+
+/** The design's colour swatches, in degrees. */
+export const SWATCHES: readonly number[] = [0, 30, 60, 120, 170, 210, 250, 280, 320];
 
 /** Records the owner's edits as a new revision; resolves with its hash. */
 export type SaveRevision = (agentId: string, request: RevisionEditRequest) => Promise<{ revision: string }>;
@@ -65,9 +74,9 @@ type Drafts = Record<string, { original: string; current: string }>;
 
 /**
  * The design's Customize… dialog (Lovable `EditDialog`, #64): Profile
- * (name, role, description) and Context (the SOP, skills, credentials and
+ * (name, role, description, colour) and Context (the SOP, skills, credentials and
  * the files the harness loads), from agent-bot `soul profile`, read each
- * time it opens. Name and description, and the soul's own instruction and
+ * time it opens. Name, description and colour, and the soul's own instruction and
  * skill files, can be edited; Save records them as one owner-approved
  * revision of the soul's package (agent-bot `soul revision edit`, which asks
  * the owner itself), with a one-line reason. Role stays read-only (the
@@ -98,8 +107,9 @@ function CustomizeBody({ soul, onClose, save, onReload }: { soul: CensusRow; onC
   const { profile, loading, error } = useSoulProfile(soul.agentId, true);
   const [tab, setTab] = useState<Tab>('profile');
   const [viewing, setViewing] = useState<string | null>(null);
-  const [draft, setDraft] = useState<{ name?: string; description?: string }>({});
-  const [saved, setSaved] = useState<{ name?: string; description?: string }>({});
+  // hue: a number is a declared colour, null the derived one; undefined untouched.
+  const [draft, setDraft] = useState<{ name?: string; description?: string; hue?: number | null }>({});
+  const [saved, setSaved] = useState<{ name?: string; description?: string; hue?: number | null }>({});
   const [files, setFiles] = useState<Drafts>({});
   const [reason, setReason] = useState(() => t('edit.reasonDefault'));
   const [saving, setSaving] = useState(false);
@@ -118,11 +128,16 @@ function CustomizeBody({ soul, onClose, save, onReload }: { soul: CensusRow; onC
   const baseDescription = saved.description ?? profile?.profile.description ?? '';
   const name = draft.name ?? baseName;
   const description = draft.description ?? baseDescription;
+  // Until the profile answers, the census's population hue stands in.
+  const baseHue = saved.hue !== undefined ? saved.hue
+    : profile ? profile.profile.appearance?.hue ?? null : soul.hue ?? null;
+  const hue = draft.hue !== undefined ? draft.hue : baseHue;
   const harness = profile?.profile.harness ?? displayHarness(soul);
   const nameChanged = draft.name !== undefined && draft.name.trim() !== baseName;
   const descriptionChanged = draft.description !== undefined && draft.description.trim() !== baseDescription.trim();
   const changedFiles = Object.entries(files).filter(([, f]) => f.current !== f.original);
-  const dirty = nameChanged || descriptionChanged || changedFiles.length > 0;
+  const hueChanged = draft.hue !== undefined && draft.hue !== baseHue;
+  const dirty = nameChanged || descriptionChanged || hueChanged || changedFiles.length > 0;
   const valid = (!nameChanged || name.trim() !== '') && (!descriptionChanged || description.trim() !== '') && reason.trim() !== '';
   const editable = profile !== null;
 
@@ -132,12 +147,14 @@ function CustomizeBody({ soul, onClose, save, onReload }: { soul: CensusRow; onC
     const edit: RevisionEditRequest['edit'] = { files: Object.fromEntries(changedFiles.map(([path, f]) => [path, f.current])) };
     if (nameChanged) edit.name = name.trim();
     if (descriptionChanged) edit.description = description.trim();
+    if (hueChanged) edit.appearance = draft.hue === null || draft.hue === undefined ? null : { hue: draft.hue };
     setSaving(true);
     edited();
     try {
       const record = await save(profile.agentId, { expectedRevision: profile.profile.revision, reason: reason.trim(), edit });
       setResult(record.revision);
-      setSaved((s) => ({ name: edit.name ?? s.name, description: edit.description ?? s.description }));
+      setSaved((s) => ({ name: edit.name ?? s.name, description: edit.description ?? s.description,
+        hue: edit.appearance === undefined ? s.hue : edit.appearance?.hue ?? null }));
       setDraft({});
       setFiles((all) => Object.fromEntries(Object.entries(all).map(([path, f]) => [path, { original: f.current, current: f.current }])));
     } catch (failure) {
@@ -157,7 +174,8 @@ function CustomizeBody({ soul, onClose, save, onReload }: { soul: CensusRow; onC
         <X className="size-4" aria-hidden />
       </button>
       <div className="flex items-center gap-3 pr-8">
-        <SoulDudle soul={soul} size={36} paused={false} />
+        {/* The chosen colour, live, as the design's title. */}
+        <SoulDudle soul={hue === null ? { ...soul, hue: undefined } : { ...soul, hue }} size={36} paused={false} />
         <h2 id={titleId} className="m-0 truncate text-lg font-semibold tracking-tight">{baseName}</h2>
         <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">{harness}</span>
       </div>
@@ -187,6 +205,8 @@ function CustomizeBody({ soul, onClose, save, onReload }: { soul: CensusRow; onC
           <ProfilePanel ids={ids} name={name} description={description} editable={editable}
             onName={(value) => { setDraft((d) => ({ ...d, name: value })); edited(); }}
             onDescription={(value) => { setDraft((d) => ({ ...d, description: value })); edited(); }}
+            hue={hue ?? derivedHue(soul.agentId)} declared={hue !== null}
+            onHue={(value) => { setDraft((d) => ({ ...d, hue: value })); edited(); }}
             facts={profile ? [
               [t('edit.handle'), profile.profile.name],
               [t('field.harness'), profile.profile.harness],
@@ -252,9 +272,12 @@ function CustomizeBody({ soul, onClose, save, onReload }: { soul: CensusRow; onC
 }
 
 /** The design's Profile tab: Name and Role, then Description; then the profile's other facts. Role stays read-only. */
-function ProfilePanel({ ids, name, description, editable, onName, onDescription, facts }: {
+function ProfilePanel({ ids, name, description, editable, onName, onDescription, hue, declared, onHue, facts }: {
   ids: string; name: string; description: string; editable: boolean;
-  onName: (value: string) => void; onDescription: (value: string) => void; facts: [string, string | null][];
+  onName: (value: string) => void; onDescription: (value: string) => void;
+  /** The hue shown, 0..359; `declared` false when it is the derived one. */
+  hue: number; declared: boolean; onHue: (value: number | null) => void;
+  facts: [string, string | null][];
 }) {
   const { t } = useI18n();
   return (
@@ -276,6 +299,7 @@ function ProfilePanel({ ids, name, description, editable, onName, onDescription,
         <textarea id={`${ids}-desc`} className={`${field} resize-none`} rows={3} value={description} maxLength={500}
           placeholder={t('edit.descriptionHint')} disabled={!editable} onChange={(e) => onDescription(e.target.value)} />
       </div>
+      <ColourField ids={ids} hue={hue} declared={declared} editable={editable} onHue={onHue} />
       {facts.length > 0 && (
         <dl className="m-0 divide-y divide-border rounded-md border border-border text-sm">
           {facts.map(([term, value]) => (
@@ -287,6 +311,42 @@ function ProfilePanel({ ids, name, description, editable, onName, onDescription,
         </dl>
       )}
     </>
+  );
+}
+
+/**
+ * The design's colour control: a hue slider and nine swatches (a radio
+ * group, arrow keys move and select), and a way back to the hue derived
+ * from the agent ID.
+ */
+function ColourField({ ids, hue, declared, editable, onHue }: {
+  ids: string; hue: number; declared: boolean; editable: boolean; onHue: (value: number | null) => void;
+}) {
+  const { t } = useI18n();
+  const onSwatch = SWATCHES.includes(hue);
+  return (
+    <div className="grid gap-2">
+      <label htmlFor={`${ids}-hue`} className={label}>{t('edit.color')}</label>
+      <input id={`${ids}-hue`} type="range" min={0} max={359} step={1} value={hue} disabled={!editable}
+        aria-valuetext={declared ? t('edit.hueValue', { hue }) : t('edit.hueDerived', { hue })}
+        onChange={(e) => onHue(Number(e.target.value))} className="w-full accent-primary" />
+      <div className="flex flex-wrap items-center gap-1.5">
+        <div role="radiogroup" aria-label={t('edit.color')} onKeyDown={radioGroupKeys} className="flex flex-wrap gap-1.5">
+          {SWATCHES.map((h) => (
+            <button key={h} type="button" role="radio" aria-checked={hue === h} aria-label={`${h}°`} disabled={!editable}
+              tabIndex={hue === h || (!onSwatch && h === SWATCHES[0]) ? 0 : -1} onClick={() => onHue(h)}
+              className={`size-6 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 ${hue === h ? 'ring-2 ring-foreground' : ''}`}
+              style={{ background: `oklch(0.7 0.15 ${h})` }} />
+          ))}
+        </div>
+        {declared && editable && (
+          <button type="button" onClick={() => onHue(null)}
+            className="ml-auto rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground">
+            {t('edit.colorDefault')}
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 

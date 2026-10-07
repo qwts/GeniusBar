@@ -17,8 +17,9 @@ interface DudleProps {
 
 /**
  * The Dudle, drawn as Lovable's design: a wide round body with a sheen,
- * dark eyes with white glints, and blush. The hue still comes from the
- * soul's agent ID (deriveDudle), so a soul keeps its colour. Breathe,
+ * dark eyes with white glints, and blush. The hue comes from the soul's
+ * agent ID (deriveDudle), so a soul keeps its colour, unless the soul
+ * declares one (dudleFor, #64). Breathe,
  * blink, bounce (awaiting) and glance (working) are CSS animations that
  * stop under reduced motion or while paused.
  */
