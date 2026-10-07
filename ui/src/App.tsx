@@ -235,6 +235,9 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const canLaunchPackage = Boolean(launcher && !showSetup && !launchingPackage);
   // Only the tray popup opens the desktop; the desktop is already open.
   const openDesktop = mode === 'tray' ? onOpenDesktop : undefined;
+  // The launch dialog: soul templates first (Starter preselected), then a
+  // Custom soul path. The footer + (#97) and the palette open it as "add a
+  // companion"; the ⋯ menu keeps it as "Launch soul…" for a package.
   const launchPackage = () => { setSelectedKey(null); setLaunchingPackage(true); setMenuOpen(false); };
   useEffect(() => { if (showSetup || showStarter) setMenuOpen(true); }, [showSetup, showStarter]);
   const { defaultHarness } = usePreferences();
@@ -350,7 +353,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
           {footer && <span className={`min-w-0 truncate ${footer.isError ? 'error small' : 'muted small'}`}>{footer.text}</span>}
           <span className="ml-auto flex shrink-0 items-center gap-0.5">
             {canLaunchPackage && (
-              <button type="button" className={footerIcon} aria-label={t('launchPackage')} title={t('launchPackage')} onClick={launchPackage}>
+              <button type="button" className={footerIcon} aria-label={t('addCompanion')} title={t('addCompanion')} onClick={launchPackage}>
                 <Plus className="size-3.5" aria-hidden />
               </button>
             )}
@@ -445,7 +448,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     <div className="gb flex h-full flex-col">
       <MenuBar open={menuOpen} onOpenChange={setMenuOpen} tone={header.tone} title={header.title}
         attention={attention} onReset={layoutActions.reset} unread={unreadTotal} approvals={waiting.length} forest={forest} paused={paused} onJump={open}
-        fleetPaused={fleet.paused} onResume={toggleFleet}>
+        fleetPaused={fleet.paused} onResume={toggleFleet}
+        onLaunch={canLaunchPackage ? launchPackage : undefined} hiddenCount={layout.hidden.length} onShowAll={layoutActions.showAll}>
         {menu({ hidden: layout.hidden, onToggle: layoutActions.setHidden, onToggleTeam: layoutActions.setTeamHidden, onShowAll: layoutActions.showAll })}
       </MenuBar>
       <Desktop forest={forest} layout={layout} paused={paused} unreadOf={unread} selectedKey={openKey} onOpen={open}

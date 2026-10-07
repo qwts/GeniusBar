@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
-import { LayoutGrid, Pause, Search } from 'lucide-react';
+import { Eye, LayoutGrid, Pause, Plus, Search } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { badgeText } from '../model/approvals';
 import { allSouls, displayHarness, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
@@ -23,7 +23,7 @@ function useClickAway(ref: RefObject<HTMLElement | null>, open: boolean, close: 
  * (agent-bot `soul pause`), the design's "Companions paused" chip leads
  * the right side; clicking it resumes them.
  */
-export function MenuBar({ open, onOpenChange, tone, title, attention = null, onReset, unread, approvals = 0, forest, paused, onJump, fleetPaused = false, onResume, children }: {
+export function MenuBar({ open, onOpenChange, tone, title, attention = null, onReset, unread, approvals = 0, forest, paused, onJump, fleetPaused = false, onResume, onLaunch, hiddenCount = 0, onShowAll, children }: {
   open: boolean; onOpenChange: (open: boolean) => void; tone: string; title: string;
   attention?: { text: string; isError: boolean } | null; onReset: () => void;
   /** Unread messages across the fleet, badged on the GeniusBar item. */
@@ -35,6 +35,11 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
   fleetPaused?: boolean;
   /** Resumes the paused companions (Lovable `togglePause` while paused). */
   onResume?: () => void;
+  /** Opens the launch dialog; the palette offers "Launch a companion…" when given. */
+  onLaunch?: () => void;
+  /** Companions hidden from the desktop; the palette offers "Show all hidden" while above zero. */
+  hiddenCount?: number;
+  onShowAll?: () => void;
   children: ReactNode;
 }) {
   const { t, lang } = useI18n();
@@ -150,7 +155,10 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
         <time className="pl-1 text-foreground" dateTime={now.toISOString()}>{clock}</time>
       </div>
       {palette && <Palette forest={forest} paused={paused} onClose={() => setPalette(false)}
-        onJump={(soul) => { setPalette(false); onJump(soul); }} />}
+        onJump={(soul) => { setPalette(false); onJump(soul); }}
+        onLaunch={onLaunch && (() => { setPalette(false); onLaunch(); })}
+        onShowAll={onShowAll && hiddenCount > 0 ? () => { setPalette(false); onShowAll(); } : undefined}
+        hiddenCount={hiddenCount} />}
     </header>
   );
 }
@@ -168,13 +176,23 @@ function useClock(paused: boolean): Date {
   return now;
 }
 
-/** ⌘K jump-to-companion palette, grouped by team. */
-function Palette({ forest, paused, onClose, onJump }: {
+type PaletteOption = { key: string; id: string; run: () => void };
+type PaletteAction = { key: string; label: string; icon: typeof Plus; run: () => void };
+
+/**
+ * ⌘K jump-to-companion palette, grouped by team, with the launch and
+ * show-all actions below the companions. A combobox: the arrow keys move
+ * the highlight (`aria-activedescendant`), Enter picks it, typing filters.
+ */
+function Palette({ forest, paused, onClose, onJump, onLaunch, onShowAll, hiddenCount }: {
   forest: readonly SoulNode[]; paused: boolean; onClose: () => void; onJump: (soul: CensusRow) => void;
+  onLaunch?: () => void; onShowAll?: () => void; hiddenCount: number;
 }) {
   const { t } = useI18n();
   const [q, setQ] = useState('');
+  const [active, setActive] = useState(0);
   const box = useRef<HTMLDivElement>(null);
+  const ids = useId();
   useClickAway(box, true, onClose);
   // A modal: focus returns where it was when the palette closes.
   // Read while rendering, before the search box takes focus.
@@ -185,6 +203,50 @@ function Palette({ forest, paused, onClose, onJump }: {
   const teams = forest
     .map((node) => ({ key: soulKey(node.soul), heading: displayName(node.soul), souls: allSouls([node]).filter(match) }))
     .filter((team) => team.souls.length > 0);
+  const actions: PaletteAction[] = [];
+  if (onLaunch) actions.push({ key: 'launch', label: t('bar.launch'), icon: Plus, run: onLaunch });
+  if (onShowAll) actions.push({ key: 'showAll', label: t('bar.showAll', { count: hiddenCount }), icon: Eye, run: onShowAll });
+  const shownActions = actions.filter((a) => !query || a.label.toLowerCase().includes(query));
+  // Ids by position: roster keys can hold characters an id should not.
+  const options: PaletteOption[] = [
+    ...teams.flatMap((team) => team.souls.map((soul) => ({ key: `soul:${soulKey(soul)}`, run: () => onJump(soul) }))),
+    ...shownActions.map((a) => ({ key: `action:${a.key}`, run: a.run })),
+  ].map((o, i) => ({ ...o, id: `${ids}-option-${i}` }));
+  const current = options.length > 0 ? Math.min(active, options.length - 1) : -1;
+  const activeId = current >= 0 ? options[current].id : undefined;
+  useEffect(() => {
+    if (activeId) document.getElementById(activeId)?.scrollIntoView?.({ block: 'nearest' });
+  }, [activeId]);
+  const onInputKey = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (options.length === 0) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      setActive((current + step + options.length) % options.length);
+    } else if (e.key === 'Home' || e.key === 'End') {
+      e.preventDefault();
+      setActive(e.key === 'Home' ? 0 : options.length - 1);
+    } else if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      options[current].run();
+    }
+  };
+  const option = (key: string, children: ReactNode) => {
+    const index = options.findIndex((o) => o.key === key);
+    const { id, run } = options[index];
+    const selected = index === current;
+    return (
+      <div key={key} id={id} role="option" aria-selected={selected}
+        onMouseMove={() => { if (!selected) setActive(index); }}
+        // Keep focus in the search box; the click still picks.
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={run}
+        className={`flex w-full cursor-default items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${selected ? 'bg-accent' : ''}`}>
+        {children}
+      </div>
+    );
+  };
+  const listId = `${ids}-list`;
   return (
     <div className="fixed inset-0 z-50 grid place-items-start justify-center bg-black/50 pt-[15vh]">
       <div ref={box} role="dialog" aria-modal="true" aria-label={t('bar.palette')}
@@ -195,25 +257,37 @@ function Palette({ forest, paused, onClose, onJump }: {
         className="w-[30rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border bg-popover shadow-2xl">
         <div className="flex items-center gap-2 border-b border-border px-3">
           <Search className="size-4 text-muted-foreground" aria-hidden />
-          <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('bar.search')} aria-label={t('bar.search')}
+          <input autoFocus value={q} onChange={(e) => { setQ(e.target.value); setActive(0); }} onKeyDown={onInputKey}
+            placeholder={t('bar.search')} aria-label={t('bar.search')}
+            role="combobox" aria-expanded="true" aria-controls={listId} aria-autocomplete="list" aria-activedescendant={activeId}
             className="h-11 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground" />
         </div>
         <div className="max-h-80 overflow-y-auto p-1">
-          {teams.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">{t('bar.noResults')}</p>}
-          {teams.map((team) => (
-            <div key={team.key} role="group" aria-label={team.heading}>
-              <h3 className="m-0 px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">{team.heading}</h3>
-              {team.souls.map((soul) => (
-                <button key={soulKey(soul)} type="button" onClick={() => onJump(soul)}
-                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none">
-                  <SoulDudle soul={soul} size={18} paused={paused} />
-                  <span>{displayName(soul)}</span>
-                  <span className="font-mono text-xs text-muted-foreground">{displayHarness(soul)}</span>
-                  <span className="ml-auto text-xs text-muted-foreground">{t(`presence.${soul.presence}`)}</span>
-                </button>
-              ))}
-            </div>
-          ))}
+          {options.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">{t('bar.noResults')}</p>}
+          <div id={listId} role="listbox" aria-label={t('bar.palette')}>
+            {teams.map((team) => (
+              <div key={team.key} role="group" aria-label={team.heading}>
+                <h3 aria-hidden className="m-0 px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">{team.heading}</h3>
+                {team.souls.map((soul) => option(`soul:${soulKey(soul)}`, (
+                  <>
+                    <SoulDudle soul={soul} size={18} paused={paused} />
+                    <span>{displayName(soul)}</span>
+                    <span className="font-mono text-xs text-muted-foreground">{displayHarness(soul)}</span>
+                    <span className="ml-auto text-xs text-muted-foreground">{t(`presence.${soul.presence}`)}</span>
+                  </>
+                )))}
+              </div>
+            ))}
+            {shownActions.length > 0 && (
+              <div role="group" aria-label={t('bar.actions')}>
+                {teams.length > 0 && <div role="presentation" className="-mx-1 my-1 h-px bg-border" />}
+                <h3 aria-hidden className="m-0 px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">{t('bar.actions')}</h3>
+                {shownActions.map((a) => option(`action:${a.key}`, (
+                  <><a.icon className="size-4 text-muted-foreground" aria-hidden /><span>{a.label}</span></>
+                )))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
