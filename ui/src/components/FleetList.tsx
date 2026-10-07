@@ -49,7 +49,7 @@ interface FleetListProps {
 
 /**
  * The GeniusBar menu's fleet (R6): one group per team, its lead first and
- * subagents indented beneath, with a search over name, ID and harness.
+ * subagents indented beneath, with a search over name, ID, harness and role.
  * Every companion opens, 'left' ones included.
  */
 export function FleetList({ forest, paused, unreadOf, onOpen, hiding, empty, onArchive, awaiting, busy }: FleetListProps) {

@@ -711,3 +711,22 @@ describe('soul appearance (#64)', () => {
     }
   });
 });
+
+describe('role and roleLine (agent-bot-identity #535)', () => {
+  it('carries a declared role and role line from population_list, and leaves them out when absent', () => {
+    expect(normalizePopulationList([
+      { agentId: 'agent_a', comms: true, role: 'Release captain', roleLine: 'Release captain' },
+      { agentId: 'agent_b', comms: false, role: null, roleLine: 'Lead, 2 subagents' },
+      { agentId: 'agent_c', comms: false, role: '  ' },
+    ])).toEqual([
+      { agentId: 'agent_a', comms: true, managed: false, paused: false, status: null, role: 'Release captain', roleLine: 'Release captain' },
+      { agentId: 'agent_b', comms: false, managed: false, paused: false, status: null, roleLine: 'Lead, 2 subagents' },
+      { agentId: 'agent_c', comms: false, managed: false, paused: false, status: null },
+    ]);
+  });
+
+  it('carries the role from population show', () => {
+    expect(normalizeSoulPopulation({ agentId: 'a', role: 'Reviewer', roleLine: 'Reviewer' })).toMatchObject({ role: 'Reviewer', roleLine: 'Reviewer' });
+    expect(normalizeSoulPopulation({ agentId: 'a', role: null })).not.toHaveProperty('role');
+  });
+});

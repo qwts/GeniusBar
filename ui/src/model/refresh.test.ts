@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyCensus, busyOf, commsAmong, commsOf, computerUseOf, huesOf, sameHues, sameSet } from './refresh';
+import { applyCensus, busyOf, commsAmong, commsOf, computerUseOf, huesOf, rolesOf, sameHues, sameRoles, sameSet } from './refresh';
 import { disconnected, STARTING_WINDOW_MS, unpairedMessage } from './status';
 import { needsSetup } from './setup';
 
@@ -121,5 +121,28 @@ describe('declared hues (#64)', () => {
     expect(sameHues(undefined, hues)).toBe(false);
     expect(sameHues(new Map([['agent_a', 210]]), hues)).toBe(true);
     expect(sameHues(new Map([['agent_a', 30]]), hues)).toBe(false);
+  });
+});
+
+describe('rolesOf (agent-bot-identity #535)', () => {
+  it('keeps each declared role and role line by agent ID, and leaves out souls with neither', () => {
+    const roles = rolesOf([
+      { agentId: 'agent_a', role: 'Release captain', roleLine: 'Release captain' },
+      { agentId: 'agent_b', role: null, roleLine: 'Lead, 2 subagents' },
+      { agentId: 'agent_c' },
+    ]);
+    expect([...roles]).toEqual([
+      ['agent_a', { role: 'Release captain', roleLine: 'Release captain' }],
+      ['agent_b', { roleLine: 'Lead, 2 subagents' }],
+    ]);
+    expect(sameRoles(undefined, roles)).toBe(false);
+    expect(sameRoles(rolesOf([
+      { agentId: 'agent_a', role: 'Release captain', roleLine: 'Release captain' },
+      { agentId: 'agent_b', roleLine: 'Lead, 2 subagents' },
+    ]), roles)).toBe(true);
+    expect(sameRoles(rolesOf([
+      { agentId: 'agent_a', role: 'Reviewer', roleLine: 'Reviewer' },
+      { agentId: 'agent_b', roleLine: 'Lead, 2 subagents' },
+    ]), roles)).toBe(false);
   });
 });

@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboard
 import { Eye, History, Pause, Plus, Search, Zap } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { badgeText } from '../model/approvals';
-import { displayHarness, displayName, soulKey, type CensusRow, type SoulNode } from '../model/census';
+import { displayHarness, displayName, displayRole, soulKey, type CensusRow, type SoulNode } from '../model/census';
 import { teamsOf } from '../model/fleet';
 import { SoulDudle } from './FleetList';
 
@@ -221,7 +221,7 @@ function Palette({ forest, paused, onClose, onJump, onLaunch, onShowAll, hiddenC
   const [before] = useState(() => document.activeElement as HTMLElement | null);
   useEffect(() => () => before?.focus(), [before]);
   const query = q.trim().toLowerCase();
-  const match = (s: CensusRow) => !query || `${displayName(s)} ${displayHarness(s)} ${s.agentId}`.toLowerCase().includes(query);
+  const match = (s: CensusRow) => !query || `${displayName(s)} ${displayHarness(s)} ${s.role ?? ''} ${s.agentId}`.toLowerCase().includes(query);
   // As the design (and the fleet list): teams under their lead's name, then
   // every companion with no team pooled under "No team".
   const grouped = teamsOf(forest);
@@ -300,7 +300,7 @@ function Palette({ forest, paused, onClose, onJump, onLaunch, onShowAll, hiddenC
                   <>
                     <SoulDudle soul={soul} size={18} paused={paused} />
                     <span>{displayName(soul)}</span>
-                    <span className="font-mono text-xs text-muted-foreground">{displayHarness(soul)}</span>
+                    <span className={`${soul.role ? '' : 'font-mono '}text-xs text-muted-foreground`}>{displayRole(soul)}</span>
                     <span className="ml-auto text-xs text-muted-foreground">{t(`presence.${soul.presence}`)}</span>
                   </>
                 )))}

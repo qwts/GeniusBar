@@ -1568,8 +1568,10 @@ fn parse_soul_population(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeEr
                 "managed": field("managed"),
                 "comms": field("comms"),
                 "roleLine": field("roleLine"),
+                "role": field("role"),
                 "computerUse": field("computerUse"),
                 "brief": field("brief"),
+                "appearance": field("appearance"),
             }));
         }
     }
@@ -1667,7 +1669,8 @@ mod details_rows_tests {
   "managed": true,
   "comms": true,
   "harnessAuth": {"status": "expired", "harness": "claude", "since": "2026-10-05T10:00:00.000Z"},
-  "roleLine": "Lead, 2 subagents",
+  "role": "Release captain",
+  "roleLine": "Release captain",
   "computerUse": false,
   "brief": "Review open PRs"
 }
@@ -1689,6 +1692,10 @@ mod details_rows_tests {
         // without one has none.
         assert_eq!(record["brief"], "Review open PRs");
         assert_eq!(bare["brief"], Value::Null);
+        // The declared role (agent-bot-identity #535) beside its roleLine.
+        assert_eq!(record["role"], "Release captain");
+        assert_eq!(record["roleLine"], "Release captain");
+        assert_eq!(bare["role"], Value::Null);
         assert_eq!(
             parse_soul_population(b"", b"agent-population: no population record for agent_3\n"),
             Err(BridgeError::new(
@@ -3169,6 +3176,9 @@ fn parse_population_list(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeEr
                     "comms": field("comms"),
                     "paused": field("paused"),
                     "computerUse": field("computerUse"),
+                    "appearance": field("appearance"),
+                    "role": field("role"),
+                    "roleLine": field("roleLine"),
                 }))
             })
             .collect();
@@ -3239,6 +3249,31 @@ mod population_list_tests {
         assert_eq!(souls[0]["computerUse"], false);
         assert_eq!(souls[1]["computerUse"], Value::Null);
         assert_eq!(parse_population_list(b"[]\n", b"").unwrap(), json!([]));
+    }
+
+    #[test]
+    fn carries_the_role_and_appearance_of_each_census_record() {
+        let list = parse_population_list(
+            br#"[
+  {"id": "agent_1", "comms": true, "role": "Release captain", "roleLine": "Release captain",
+   "appearance": {"hue": 210}},
+  {"id": "agent_2", "comms": false, "role": null, "roleLine": "Lead, 2 subagents"},
+  {"id": "agent_3", "comms": false}
+]
+"#,
+            b"",
+        )
+        .unwrap();
+        let souls = list.as_array().unwrap();
+        assert_eq!(souls[0]["role"], "Release captain");
+        assert_eq!(souls[0]["roleLine"], "Release captain");
+        assert_eq!(souls[0]["appearance"], json!({"hue": 210}));
+        assert_eq!(souls[1]["role"], Value::Null);
+        assert_eq!(souls[1]["roleLine"], "Lead, 2 subagents");
+        // An older agent-bot sends none of them.
+        assert_eq!(souls[2]["role"], Value::Null);
+        assert_eq!(souls[2]["roleLine"], Value::Null);
+        assert_eq!(souls[2]["appearance"], Value::Null);
     }
 
     #[test]
@@ -3596,6 +3631,10 @@ pub struct SoulRevisionEdit {
     /// absent leaves it alone, `null` removes it, `{ "hue": N }` sets it.
     #[serde(default)]
     appearance: Option<Value>,
+    /// The manifest's `role` (agent-bot-identity #535): absent leaves it
+    /// alone, empty removes it, otherwise one line of at most 60 characters.
+    #[serde(default)]
+    role: Option<String>,
     #[serde(default)]
     files: std::collections::BTreeMap<String, String>,
 }
@@ -3624,6 +3663,8 @@ const WORKING_STATE: [&str; 2] = ["worktrees", ".soul-state"];
 const MAX_EDIT_BYTES: usize = 256 * 1024;
 const MAX_NAME_CHARS: usize = 80;
 const MAX_DESCRIPTION_CHARS: usize = 2000;
+/// agent-bot trims a soul's role to 60 characters (`withRoles`).
+const MAX_ROLE_CHARS: usize = 60;
 const MAX_REASON_CHARS: usize = 200;
 
 /// Records the owner's Customize edits as a new revision of the soul's
@@ -3649,6 +3690,7 @@ pub async fn soul_revision_edit<R: Runtime>(
     if edit.name.is_none()
         && edit.description.is_none()
         && edit.appearance.is_none()
+        && edit.role.is_none()
         && edit.files.is_empty()
     {
         return Err(revision_invalid("nothing changed"));
@@ -3914,6 +3956,18 @@ fn prepare_revision_edit(
         .as_ref()
         .map(manifest_appearance)
         .transpose()?;
+    // An empty role removes the key (`Some(None)`).
+    let role = edit
+        .role
+        .as_deref()
+        .map(|r| {
+            if r.trim().is_empty() {
+                Ok(None)
+            } else {
+                manifest_text(r, "role", MAX_ROLE_CHARS, false).map(Some)
+            }
+        })
+        .transpose()?;
 
     let copy = temp.join("edit.soul");
     if !std::fs::symlink_metadata(package).is_ok_and(|m| m.is_dir()) {
@@ -3931,7 +3985,7 @@ fn prepare_revision_edit(
         }
         std::fs::write(&file, contents).map_err(failed)?;
     }
-    if name.is_some() || description.is_some() || appearance.is_some() {
+    if name.is_some() || description.is_some() || appearance.is_some() || role.is_some() {
         let file = copied_file(&copy, "soul.json")?;
         let text = std::fs::read_to_string(&file).map_err(failed)?;
         let mut manifest: serde_json::Map<String, Value> = serde_json::from_str(&text)
@@ -3948,6 +4002,15 @@ fn prepare_revision_edit(
             }
             Some(None) => {
                 manifest.remove("appearance");
+            }
+            None => {}
+        }
+        match role {
+            Some(Some(role)) => {
+                manifest.insert("role".into(), Value::String(role));
+            }
+            Some(None) => {
+                manifest.remove("role");
             }
             None => {}
         }
@@ -4263,6 +4326,47 @@ mod soul_revision_edit_tests {
             temp.path()
         )
         .is_err());
+    }
+
+    #[test]
+    fn writes_or_removes_the_role() {
+        let fixture = Fixture::new();
+        // A role-only edit is an edit; the role is trimmed.
+        let temp = RevisionCopy::new().unwrap();
+        let mut set = edit(&[]);
+        set.role = Some("  Release captain ".into());
+        let (_, copy) = prepare_revision_edit(&fixture.profile(), None, &set, temp.path()).unwrap();
+        let manifest: Value =
+            serde_json::from_str(&std::fs::read_to_string(copy.join("soul.json")).unwrap())
+                .unwrap();
+        assert_eq!(manifest["role"], "Release captain");
+        assert_eq!(manifest["name"], "Luna");
+        // Empty (or blank) removes the key.
+        let temp2 = RevisionCopy::new().unwrap();
+        let mut clear = edit(&[]);
+        clear.role = Some("  ".into());
+        let (_, copy2) =
+            prepare_revision_edit(&fixture.profile(), None, &clear, temp2.path()).unwrap();
+        let cleared: Value =
+            serde_json::from_str(&std::fs::read_to_string(copy2.join("soul.json")).unwrap())
+                .unwrap();
+        assert!(cleared.get("role").is_none());
+        // One line of at most 60 characters.
+        let temp3 = RevisionCopy::new().unwrap();
+        let mut long = edit(&[]);
+        long.role = Some("r".repeat(61));
+        assert_eq!(
+            prepare_revision_edit(&fixture.profile(), None, &long, temp3.path())
+                .unwrap_err()
+                .code,
+            "soul-revision-invalid"
+        );
+        let mut multiline = edit(&[]);
+        multiline.role = Some("Lead\nReviewer".into());
+        assert!(prepare_revision_edit(&fixture.profile(), None, &multiline, temp3.path()).is_err());
+        let mut sixty = edit(&[]);
+        sixty.role = Some("r".repeat(60));
+        assert!(prepare_revision_edit(&fixture.profile(), None, &sixty, temp3.path()).is_ok());
     }
 
     #[test]

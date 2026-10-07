@@ -27,7 +27,8 @@ export function teamsOf(forest: readonly SoulNode[]): Team[] {
 export function matchesQuery(soul: CensusRow, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  return [displayName(soul), soul.agentId, soul.harness ?? ''].some((text) => text.toLowerCase().includes(q));
+  // The declared role too, as the design's search matches it (agent-bot-identity #535).
+  return [displayName(soul), soul.agentId, soul.harness ?? '', soul.role ?? ''].some((text) => text.toLowerCase().includes(q));
 }
 
 /**

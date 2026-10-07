@@ -5,6 +5,7 @@ import { computerUseSupported, runtimeMetrics, setSoulComms, soulComms, type Com
 import {
   availabilityNote,
   displayHarness,
+  roleAndHarness,
   displayName,
   parentDisplayName,
   soulKey,
@@ -103,7 +104,7 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
         <div className="min-w-[9rem] flex-1">
           <h2 className="m-0 truncate text-base font-semibold">{name}</h2>
           <p className="m-0 truncate text-xs text-muted-foreground">
-            {displayHarness(soul)} · {t(`presence.${soul.presence}`)}
+            {roleAndHarness(soul)} · {t(`presence.${soul.presence}`)}
           </p>
         </div>
       {/* The design's segmented tabs, at the header's right. */}
@@ -797,7 +798,7 @@ export function InfoButton({ soul }: { soul: CensusRow }) {
             </button>
             <div>
               <h2 id={titleId} className="m-0 text-lg leading-none font-semibold tracking-tight">{t('details.title')} · {name}</h2>
-              <p className="m-0 text-sm text-muted-foreground">{displayHarness(soul)}</p>
+              <p className="m-0 text-sm text-muted-foreground">{roleAndHarness(soul)}</p>
             </div>
             <div className="divide-y divide-border rounded-md border border-border empty:hidden">
               <WakeRow soul={soul} />

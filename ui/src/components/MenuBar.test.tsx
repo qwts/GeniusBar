@@ -4,6 +4,7 @@ import { App } from '../App';
 import { emptyChat } from '../model/chat';
 import { sampleApprovals, sampleCensus, sampleConnection, samplePaused } from '../model/fixtures';
 import { layoutActions } from '../state/layout';
+import { noBadges } from '../model/refresh';
 import type { LaunchApi } from '../useLaunch';
 import type { Pauser } from '../usePause';
 import type { ChatApi } from '../useChat';
@@ -308,5 +309,41 @@ describe('the ⌘K palette’s actions and keys (#122)', () => {
     expect(input.getAttribute('aria-activedescendant')).toBe(first.id);
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(screen.getByRole('dialog', { name: 'agent_c' })).toBeTruthy();
+  });
+});
+
+describe('the declared role in the palette and on the desktop (#122, agent-bot-identity #535)', () => {
+  const roles = new Map([['agent_p', { role: 'Release captain', roleLine: 'Release captain' }]]);
+  const desk = () => render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic
+    badges={{ ...noBadges, roles }} />);
+  const openPalette = () => {
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    return screen.getByRole('dialog', { name: 'Jump to companion' });
+  };
+
+  it('subtitles a palette option with the role, else the harness, and searches the role', () => {
+    desk();
+    const palette = openPalette();
+    const texts = within(palette).getAllByRole('option').map((o) => o.textContent ?? '');
+    const luna = texts.find((x) => x.startsWith('luna'));
+    expect(luna).toContain('Release captain');
+    expect(luna).not.toContain('codex');
+    // A soul with no role keeps its harness line.
+    expect(texts.find((x) => x.startsWith('agent_c'))).toContain('unknown harness');
+    fireEvent.change(within(palette).getByRole('combobox', { name: 'Search companions…' }), { target: { value: 'captain' } });
+    expect(within(palette).getAllByRole('option').map((o) => o.textContent ?? '').filter((x) => x.startsWith('luna'))).toHaveLength(1);
+    expect(within(palette).getAllByRole('option').some((o) => (o.textContent ?? '').startsWith('agent_c'))).toBe(false);
+  });
+
+  it('subtitles the team card with the role and the subagent count', () => {
+    desk();
+    const card = screen.getByRole('region', { name: 'luna' });
+    expect(within(card).getByText(/^Release captain · /)).toBeTruthy();
+  });
+
+  it('keeps the harness on the team card without a role', () => {
+    render(<App mode="window" census={sampleCensus} connection={sampleConnection} isStatic badges={noBadges} />);
+    const card = screen.getByRole('region', { name: 'luna' });
+    expect(within(card).getByText(/^codex · /)).toBeTruthy();
   });
 });

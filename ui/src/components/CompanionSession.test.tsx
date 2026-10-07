@@ -781,3 +781,28 @@ describe('Customize… in the ⓘ sheet (#64)', () => {
     expect(within(details).queryByRole('button', { name: 'Customize…' })).toBeNull();
   });
 });
+
+describe('the declared role (#122, agent-bot-identity #535)', () => {
+  const captain = { ...luna, role: 'Release captain' };
+
+  it('heads the session with role · harness · presence, and the harness alone without a role', () => {
+    const { unmount } = render(<CompanionSession soul={captain} forest={forest} roster={sampleCensus} paused onOpen={() => {}} onClose={() => {}} />);
+    expect(screen.getByText('Release captain · codex · Ready')).toBeTruthy();
+    unmount();
+    render(<CompanionSession soul={luna} forest={forest} roster={sampleCensus} paused onOpen={() => {}} onClose={() => {}} />);
+    expect(screen.getByText('codex · Ready')).toBeTruthy();
+    expect(screen.queryByText(/Release captain/)).toBeNull();
+  });
+
+  it('shows the role under the ⓘ sheet\'s title, and the harness without one', async () => {
+    const { InfoButton } = await import('./CompanionSession');
+    const { unmount } = render(<InfoButton soul={captain} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+    const sheet = screen.getByRole('dialog', { name: 'Details · luna' });
+    expect(within(sheet).getByText('Release captain · codex', { selector: 'p' })).toBeTruthy();
+    unmount();
+    render(<InfoButton soul={luna} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+    expect(within(screen.getByRole('dialog', { name: 'Details · luna' })).getByText('codex', { selector: 'p' })).toBeTruthy();
+  });
+});

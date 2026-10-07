@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BridgeError, type SoulProfile, type SoulProfileFile } from '../bridge';
 import { derivedHue } from '../model/dudle';
 import { sampleCensus, sampleProfile, sampleProfileFiles } from '../model/fixtures';
+import type { CensusRow } from '../model/census';
 import { ProfileSourceContext, type ProfileSource } from '../useSoulProfile';
 import { CustomizeDialog, type SaveRevision } from './CustomizeDialog';
 
@@ -37,8 +38,11 @@ describe('CustomizeDialog (#64)', () => {
     const name = within(dialog).getByLabelText('Name') as HTMLInputElement;
     expect(name.value).toBe('Luna');
     expect(name.disabled).toBe(false);
+    // Editable since agent-bot-identity #535; Luna's census row declares none.
     const role = within(dialog).getByLabelText('Role') as HTMLInputElement;
-    expect(role.disabled).toBe(true);
+    expect(role.disabled).toBe(false);
+    expect(role.value).toBe('');
+    expect(role.maxLength).toBe(60);
     const description = within(dialog).getByLabelText('Description') as HTMLTextAreaElement;
     expect(description.value).toBe(sampleProfile.profile.description);
     expect(description.disabled).toBe(false);
@@ -347,5 +351,51 @@ describe('CustomizeDialog colour (#64)', () => {
     const [, request] = save.mock.calls[0];
     expect(request.edit).toEqual({ name: 'Nova', files: {} });
     expect(request.edit).not.toHaveProperty('appearance');
+  });
+
+  describe('role (agent-bot-identity #535)', () => {
+    const openRow = (soul: CensusRow, save: SaveRevision) => {
+      render(<ProfileSourceContext.Provider value={source()}><CustomizeDialog soul={soul} onClose={vi.fn()} save={save} /></ProfileSourceContext.Provider>);
+      return screen.getByRole('dialog');
+    };
+
+    it('starts at the census row\'s role and saves an edit as role, and nothing else', async () => {
+      const save = vi.fn<SaveRevision>(async () => ({ revision: REVISION }));
+      const dialog = openRow({ ...luna, role: 'Release captain' }, save);
+      await within(dialog).findByDisplayValue('Luna');
+      const role = within(dialog).getByLabelText('Role') as HTMLInputElement;
+      expect(role.value).toBe('Release captain');
+      const button = within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement;
+      fireEvent.change(role, { target: { value: 'Release captain ' } });
+      expect(button.disabled).toBe(true);
+      fireEvent.change(role, { target: { value: ' Reviewer ' } });
+      fireEvent.click(button);
+      expect(save).toHaveBeenCalledWith('agent_p', {
+        expectedRevision: '2026.10.1', reason: 'Edited in GeniusBar', edit: { role: 'Reviewer', files: {} },
+      });
+      await within(dialog).findByText('Saved as revision 4be1c0ffee5a.');
+      // The saved role stays shown before the next population read.
+      expect((within(dialog).getByLabelText('Role') as HTMLInputElement).value).toBe('Reviewer');
+      expect(button.disabled).toBe(true);
+    });
+
+    it('saves a cleared role as empty, which removes it', async () => {
+      const save = vi.fn<SaveRevision>(async () => ({ revision: REVISION }));
+      const dialog = openRow({ ...luna, role: 'Release captain' }, save);
+      await within(dialog).findByDisplayValue('Luna');
+      fireEvent.change(within(dialog).getByLabelText('Role'), { target: { value: '' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+      expect(save).toHaveBeenCalledWith('agent_p', expect.objectContaining({ edit: { role: '', files: {} } }));
+    });
+
+    it('leaves role out of a save that did not touch it', async () => {
+      const save = vi.fn<SaveRevision>(async () => ({ revision: REVISION }));
+      const dialog = openRow({ ...luna, role: 'Release captain' }, save);
+      await within(dialog).findByDisplayValue('Luna');
+      fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Nova' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+      const [, request] = save.mock.calls[0];
+      expect(request.edit).not.toHaveProperty('role');
+    });
   });
 });

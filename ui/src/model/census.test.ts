@@ -10,6 +10,9 @@ import {
   parentDisplayName,
   soulKey,
   withHues,
+  withRoles,
+  displayRole,
+  roleAndHarness,
   type CensusRow,
   type Presence,
   type SoulNode,
@@ -214,5 +217,42 @@ describe('withoutArchived (#196)', () => {
   it('hides nothing without a population read or without archived souls', () => {
     expect(withoutArchived(souls, null)).toBe(souls);
     expect(withoutArchived(souls, [{ agentId: 'agent_here', status: 'active' }])).toBe(souls);
+  });
+});
+
+describe('the declared role (#122, agent-bot-identity #535)', () => {
+  const a: CensusRow = { account: 'u', agentId: 'agent_a', name: 'a', harness: 'codex', parent: null, presence: 'joined', unacked: 0, lastWake: null };
+  const b: CensusRow = { ...a, agentId: 'agent_b', name: 'b', harness: null };
+
+  it('joins declared roles and role lines by agent ID and keeps the rest of each row', () => {
+    const out = withRoles([a, b], new Map([['agent_a', { role: 'Release captain', roleLine: 'Release captain' }]]));
+    expect(out[0]).toEqual({ ...a, role: 'Release captain', roleLine: 'Release captain' });
+    expect(out[1]).toBe(b);
+    // A role line alone (a lead without a declared role) joins too.
+    expect(withRoles([a], new Map([['agent_a', { roleLine: 'Lead, 2 subagents' }]]))[0]).toEqual({ ...a, roleLine: 'Lead, 2 subagents' });
+  });
+
+  it('keeps the same array when nothing changes, and drops a role no longer declared', () => {
+    const rows = [a, b];
+    expect(withRoles(rows, undefined)).toBe(rows);
+    expect(withRoles(rows, new Map())).toBe(rows);
+    const roled = withRoles(rows, new Map([['agent_b', { role: 'Reviewer' }]]));
+    expect(withRoles(roled, new Map([['agent_b', { role: 'Reviewer' }]]))).toBe(roled);
+    const dropped = withRoles(roled, new Map())[1];
+    expect(dropped).not.toHaveProperty('role');
+    expect(dropped).not.toHaveProperty('roleLine');
+  });
+
+  it('subtitles with the role, else the harness', () => {
+    expect(displayRole({ ...a, role: 'Release captain' })).toBe('Release captain');
+    expect(displayRole(a)).toBe('codex');
+    expect(displayRole({ ...b, role: '  ' })).toBe('unknown harness');
+    expect(displayRole({ ...b, role: null })).toBe('unknown harness');
+  });
+
+  it('puts the role ahead of the harness, and the harness alone without one', () => {
+    expect(roleAndHarness({ ...a, role: 'Release captain' })).toBe('Release captain · codex');
+    expect(roleAndHarness({ ...b, role: 'Reviewer' })).toBe('Reviewer · unknown harness');
+    expect(roleAndHarness(a)).toBe('codex');
   });
 });

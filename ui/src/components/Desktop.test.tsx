@@ -7,7 +7,7 @@ import { translate } from '../lib/i18n';
 import { layoutActions, useLayout } from '../state/layout';
 import { sampleProfile } from '../model/fixtures';
 import { ProfileSourceContext, type ProfileSource } from '../useSoulProfile';
-import { Desktop } from './Desktop';
+import { CompanionWindow, Desktop } from './Desktop';
 import { noStatus, soulStatus, statusText } from './DesktopStatus';
 import { HOVER_OPEN_MS } from './HoverCard';
 
@@ -210,5 +210,15 @@ describe('Desktop Customize… (#64)', () => {
     render(<Live />);
     fireEvent.contextMenu(avatar(/^luna,/));
     expect(within(screen.getByRole('menu', { name: 'luna' })).queryByRole('menuitem', { name: 'Customize…' })).toBeNull();
+  });
+});
+
+describe('CompanionWindow role (#122, agent-bot-identity #535)', () => {
+  it('shows role · harness in the title bar, and the harness alone without a role', () => {
+    const { unmount } = render(<CompanionWindow soul={{ ...luna, role: 'Release captain' }} paused onClose={() => {}}>body</CompanionWindow>);
+    expect(within(screen.getByRole('dialog', { name: 'luna' })).getByText('Release captain · codex')).toBeTruthy();
+    unmount();
+    render(<CompanionWindow soul={luna} paused onClose={() => {}}>body</CompanionWindow>);
+    expect(within(screen.getByRole('dialog', { name: 'luna' })).getByText('codex')).toBeTruthy();
   });
 });

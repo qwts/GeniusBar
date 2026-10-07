@@ -324,6 +324,13 @@ export interface SoulPopulation {
   brief?: string;
   /** The soul's declared look; absent when it declares none or the bundle predates it. */
   appearance?: SoulAppearance;
+  /**
+   * The soul's declared role (soul.json `role`, agent-bot-identity #535);
+   * absent when it declares none or the bundle predates it.
+   */
+  role?: string | null;
+  /** agent-bot's role line (the role, else "Lead" and the subagent count); absent from older bundles. */
+  roleLine?: string | null;
 }
 
 export function normalizeSoulPopulation(raw: unknown): SoulPopulation | null {
@@ -340,7 +347,20 @@ export function normalizeSoulPopulation(raw: unknown): SoulPopulation | null {
     ...(typeof raw.computerUse === 'boolean' ? { computerUse: raw.computerUse } : {}),
     ...(typeof raw.brief === 'string' && raw.brief.trim() !== '' ? { brief: raw.brief } : {}),
     ...withAppearance(raw.appearance),
+    ...withRole(raw),
   };
+}
+
+/**
+ * The declared role and agent-bot's role line (agent-bot-identity #535),
+ * each only when it is nonempty text, so rows from older bundles keep
+ * their shape.
+ */
+function withRole(raw: Record<string, unknown>): { role?: string; roleLine?: string } {
+  const text = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined);
+  const role = text(raw.role);
+  const roleLine = text(raw.roleLine);
+  return { ...(role ? { role } : {}), ...(roleLine ? { roleLine } : {}) };
 }
 
 function withAppearance(raw: unknown): { appearance?: SoulAppearance } {
@@ -618,6 +638,10 @@ export interface PopulationEntry {
   status?: string | null;
   /** The soul's declared look; absent when it declares none or the bundle predates it. */
   appearance?: SoulAppearance;
+  /** The soul's declared role (agent-bot-identity #535); absent when none or the bundle predates it. */
+  role?: string | null;
+  /** agent-bot's role line (the role, else "Lead" and the subagent count); absent from older bundles. */
+  roleLine?: string | null;
 }
 
 /**
@@ -632,7 +656,7 @@ export function normalizePopulationList(raw: unknown): PopulationEntry[] | null 
     && typeof r.comms === 'boolean'
     ? [{ agentId: r.agentId, comms: r.comms, managed: r.managed === true, paused: r.paused === true,
       ...(typeof r.computerUse === 'boolean' ? { computerUse: r.computerUse } : {}),
-      status: typeof r.status === 'string' ? r.status : null, ...withAppearance(r.appearance) }]
+      status: typeof r.status === 'string' ? r.status : null, ...withAppearance(r.appearance), ...withRole(r) }]
     : []));
 }
 
