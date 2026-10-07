@@ -5,7 +5,7 @@ description: Agent IDs, agent-bot doctor and GitHub App identities for souls. Us
 
 # Identities, doctor and GitHub Apps
 
-Describes **agent-bot 0.10.23**. Check `agent-bot --version`; if it
+Describes **agent-bot 0.10.33**. Check `agent-bot --version`; if it
 differs, follow `agent-bot --help`.
 
 ## Agent IDs
@@ -29,25 +29,31 @@ runtime and the person).
 agent-bot doctor --json                 # readiness schema JSON
 agent-bot doctor --machine-only --json  # skip this worktree
 agent-bot doctor --app SLUG --json      # also check one App
+agent-bot doctor --probe-inbox --json   # also probe the gh-app-hook inbox (one bounded network call, no bearer)
 ```
 
-`doctor` is read-only. It shows each gate, including whether the
-`github-identity` feature is on. Off is a choice, not a fault to work around.
+`doctor` is read-only and makes no network call unless `--probe-inbox` is
+given. It shows each gate, including whether the `github-identity` feature
+is on. Off is a choice, not a fault to work around.
 
 ## GitHub Apps
 
 A GitHub App is optional: souls message each other with none. An App is
 only for acting on GitHub (push, pull requests, `gh`).
 
-- What exists today: a soul declares its App by slug in `soul.json`
+- A soul declares its App by slug in `soul.json`
   (`credentials.github.app`), its key lives in that soul's own key store
   (credentials skill), and the daemon mints short-lived tokens for it.
-- Moving keys into soul stores is owner-only:
-  `agent-bot identity migrate-credentials --soul ID|NAME --dry-run --json`
-  shows the plan; the person runs it without `--dry-run`.
-- Creating and installing a new GitHub App from GeniusBar is being added. Until
-  it ships, tell the person the App must be created on GitHub by them, and
-  that installing it on repositories is their decision.
+- `agent-bot identity apps list --json` is a secret-free read: per App its
+  slug, bot login, `keyPresent`, `key: {fingerprint, updatedAt} | null`,
+  installations, harnesses, souls and last mint status.
+- The person's steps (their GitHub account and keys; each App operation
+  needs their approval): `identity app create --manifest
+  [--name NAME] [--org ORG] [--open]`, `identity app connect`,
+  `identity app rotate-key SLUG`, `identity app assign SLUG (--harness H|--soul
+  AGENT_ID)`, and `identity migrate-credentials` (`--dry-run --json` shows
+  the plan). Propose the command; never pass a key path yourself.
+- Installing an App on repositories is the person's decision on GitHub.
 
 Anything that creates, installs, moves or removes an App or identity needs
 the person's approval first.

@@ -5,8 +5,8 @@ description: How GeniusBar updates itself and restarts its broker and agent-bot 
 
 # Updates and restarts
 
-Describes GeniusBar bundling **agent-bot 0.10.23** and **agent-comms
-0.3.8**. Your knowledge is pinned to those; after an update, check
+Describes GeniusBar bundling **agent-bot 0.10.33** and **agent-comms
+0.3.13**. Your knowledge is pinned to those; after an update, check
 `agent-bot --version` and `agent-comms --version` and prefer `--help`.
 
 ## How GeniusBar updates
@@ -19,6 +19,10 @@ Describes GeniusBar bundling **agent-bot 0.10.23** and **agent-comms
   agent-comms) and the daemon (`app.geniusbar.agent-bot`, agent-bot). Your
   turn runs under that daemon, so an update interrupts it; unacknowledged
   messages are delivered again afterwards.
+- Each managed soul's home is rebuilt with the new agent-bot before its
+  next launch, so generated harness files follow the update; a conflicting
+  hand-edited generated file is reported on the daemon's stderr and the
+  launch proceeds.
 - agent-bot and agent-comms come inside the app. `agent-bot update` and
   `install` refresh a source checkout, not GeniusBar's copy; do not run them.
 - On test machines the operator uses a `gb-update.sh <version>` script
@@ -33,6 +37,7 @@ agent-comms --version
 agent-bot daemon status --json   # running, comms connection, last wake
 agent-comms whoami               # your join, through the broker
 agent-bot doctor --machine-only --json
+agent-bot doctor --probe-inbox --json   # adds one bounded, bearer-free probe of the gh-app-hook inbox
 ```
 
 `agent-comms health` and `agent-comms census` need the person's principal;
