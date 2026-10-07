@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Github } from 'lucide-react';
-import { useI18n } from '../lib/i18n';
+import { ChevronDown, Github } from 'lucide-react';
+import { useI18n, type Translate } from '../lib/i18n';
 import { displayName, type CensusRow } from '../model/census';
 import {
   ConnectForm, identityFailure, identityStatus, RotatedNotice, STATUS_TEXT, useIdentityAction, useIdentityApps,
@@ -8,6 +8,22 @@ import {
 } from './IdentityApps';
 
 const link = 'min-h-6 rounded border border-border px-2 text-[11px] hover:bg-accent disabled:opacity-50';
+
+/**
+ * Who uses an App: rostered companions by name, and the rest (archived
+ * souls, other machines' pins) only as a count. agent-bot's list names
+ * every soul ever assigned, which was a wall of IDs in the popup (#189).
+ */
+export function companionsText(souls: readonly string[], roster: readonly CensusRow[], t: Translate): string {
+  const named = souls.flatMap((agentId) => {
+    const soul = roster.find((s) => s.agentId === agentId);
+    return soul ? [displayName(soul)] : [];
+  });
+  const more = souls.length - named.length;
+  if (named.length === 0) return t('identity.companionsOff', { count: more });
+  const list = named.join(', ');
+  return more === 0 ? t('identity.companions', { list }) : t('identity.companionsMore', { list, count: more });
+}
 
 type Creating =
   | { phase: 'asking' }
@@ -91,7 +107,7 @@ function CreateApp({ pollMs }: { pollMs: number }) {
 }
 
 /** One App: its bot login, status, where it is installed, and who uses it. */
-function AppRow({ app, names }: { app: IdentityApp; names: (agentId: string) => string }) {
+function AppRow({ app, roster }: { app: IdentityApp; roster: readonly CensusRow[] }) {
   const { t } = useI18n();
   const { source } = useIdentityApps();
   const { busy, error, run } = useIdentityAction();
@@ -113,7 +129,7 @@ function AppRow({ app, names }: { app: IdentityApp; names: (agentId: string) => 
         <span className="text-[11px] text-muted-foreground">{t('identity.harnesses', { list: app.harnesses.join(', ') })}</span>
       )}
       {app.souls.length > 0 && (
-        <span className="text-[11px] text-muted-foreground">{t('identity.companions', { list: app.souls.map(names).join(', ') })}</span>
+        <span className="text-[11px] text-muted-foreground">{companionsText(app.souls, roster, t)}</span>
       )}
       <span className="mt-1 flex flex-wrap gap-1">
         {app.keyPresent && (
@@ -139,38 +155,47 @@ function AppRow({ app, names }: { app: IdentityApp; names: (agentId: string) => 
  * The menu's GitHub identity section (#67). There is no Lovable screen for
  * it yet: it follows the Sandboxing card's style and sits below it. The
  * add-on is shown read-only, because agent-bot has no command to switch
- * it; an empty list means it is off or holds no Apps.
+ * it; an empty list means it is off or holds no Apps. The section starts
+ * folded to one summary line, and its App list scrolls inside a bounded
+ * box, so a roster of twenty Apps never pushes the fleet out of the popup
+ * (#189).
  */
 export function IdentityAppsCard({ roster = [], pollMs = 2000 }: { roster?: readonly CensusRow[]; pollMs?: number }) {
   const { t } = useI18n();
   const { hidden, apps, reload } = useIdentityApps();
   const [connecting, setConnecting] = useState(false);
+  const [open, setOpen] = useState(false);
   useEffect(() => { reload(); }, [reload]);
   if (hidden || !apps) return null;
-  const names = (agentId: string) => {
-    const soul = roster.find((s) => s.agentId === agentId);
-    return soul ? displayName(soul) : agentId;
-  };
   const on = apps.length > 0;
+  const ready = apps.filter((app) => identityStatus(app) === 'ready').length;
   return (
     <section className="grid gap-2 border-t border-border p-3 text-xs" aria-label={t('identity.title')}>
       <div className="flex items-center gap-2">
         <Github className={`size-3.5 ${on ? 'text-success' : 'text-muted-foreground'}`} aria-hidden />
         <h3 className="m-0 flex-1 text-sm font-medium">{t('identity.title')}</h3>
         <input type="checkbox" role="switch" aria-label={t('identity.addOn')} checked={on} disabled readOnly />
+        <button type="button" aria-label={t(open ? 'identity.hide' : 'identity.show')} aria-expanded={open}
+          onClick={() => setOpen(!open)} className="rounded p-1 text-muted-foreground hover:text-foreground">
+          <ChevronDown className={`size-4 transition-transform ${open ? '' : '-rotate-90'}`} aria-hidden />
+        </button>
       </div>
-      <p className="m-0 text-muted-foreground">{t('identity.desc')}</p>
-      {!on && <p className="m-0 text-[11px] text-muted-foreground">{t('identity.addOnHint')}</p>}
-      {on && (
-        <ul className="m-0 grid list-none gap-1.5 p-0" aria-label={t('identity.apps')}>
-          {apps.map((app) => <AppRow key={app.slug} app={app} names={names} />)}
-        </ul>
-      )}
-      <CreateApp pollMs={pollMs} />
-      {connecting ? <ConnectForm onConnected={() => setConnecting(false)} /> : (
-        <div className="flex items-center gap-2">
-          <button type="button" className={link} onClick={() => setConnecting(true)}>{t('identity.connectExisting')}</button>
-        </div>
+      <p className="m-0 text-muted-foreground">{on && !open ? t('identity.summary', { count: apps.length, ready }) : t('identity.desc')}</p>
+      {open && (
+        <>
+          {!on && <p className="m-0 text-[11px] text-muted-foreground">{t('identity.addOnHint')}</p>}
+          {on && (
+            <ul className="m-0 grid max-h-64 list-none gap-1.5 overflow-y-auto p-0" aria-label={t('identity.apps')}>
+              {apps.map((app) => <AppRow key={app.slug} app={app} roster={roster} />)}
+            </ul>
+          )}
+          <CreateApp pollMs={pollMs} />
+          {connecting ? <ConnectForm onConnected={() => setConnecting(false)} /> : (
+            <div className="flex items-center gap-2">
+              <button type="button" className={link} onClick={() => setConnecting(true)}>{t('identity.connectExisting')}</button>
+            </div>
+          )}
+        </>
       )}
     </section>
   );

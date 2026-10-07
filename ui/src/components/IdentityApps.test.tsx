@@ -60,6 +60,8 @@ function fakeSource(initial: IdentityApp[], over: Partial<IdentityAppsSource> = 
 const withIdentities = (source: IdentityAppsSource | null, ui: ReactNode) =>
   render(<I18nProvider><IdentityAppsProvider source={source}>{ui}</IdentityAppsProvider></I18nProvider>);
 
+const expand = async () => fireEvent.click(await screen.findByRole('button', { name: 'Show GitHub Apps' }));
+
 const actsAs = async () => (await screen.findByText('Acts as', { selector: 'dt' })).nextElementSibling as HTMLElement;
 
 describe('Acts as row', () => {
@@ -129,19 +131,34 @@ describe('Acts as row', () => {
 });
 
 describe('IdentityAppsCard', () => {
+  it('starts folded to a summary line, so the Apps never crowd out the fleet (#189)', async () => {
+    withIdentities(fakeSource([app('luna-bot'), app('keyless', { keyPresent: false })]), <IdentityAppsCard roster={sampleCensus} />);
+    expect(await screen.findByText('2 Apps, 1 ready')).toBeTruthy();
+    expect(screen.queryByRole('list', { name: 'GitHub Apps' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Create a new App' })).toBeNull();
+    await expand();
+    expect(screen.getByRole('list', { name: 'GitHub Apps' })).toBeTruthy();
+    expect(screen.getByText(/Companions can act on GitHub/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Hide GitHub Apps' }));
+    expect(screen.queryByRole('list', { name: 'GitHub Apps' })).toBeNull();
+  });
+
   it('lists each App with its status, installations, harnesses and companions', async () => {
     withIdentities(fakeSource([
-      app('luna-bot', { souls: [luna.agentId], harnesses: ['codex'] }),
-      app('keyless', { keyPresent: false, installations: [] }),
+      app('luna-bot', { souls: [luna.agentId, 'agent_archived-1'], harnesses: ['codex'] }),
+      app('keyless', { keyPresent: false, installations: [], souls: ['agent_gone-1', 'agent_gone-2'] }),
       app('broken', { liveMint: { status: 'failed', code: 'mint-failed', checkedAt: null }, installations: [{ id: 2, account: 'me', repositorySelection: 'selected' }] }),
     ]), <IdentityAppsCard roster={sampleCensus} />);
+    await expand();
     const list = await screen.findByRole('list', { name: 'GitHub Apps' });
     const rows = within(list).getAllByRole('listitem');
     expect(rows[0].textContent).toContain('luna-bot[bot]');
     expect(rows[0].textContent).toContain('Ready');
     expect(rows[0].textContent).toContain('Installed on qwts (all repositories)');
     expect(rows[0].textContent).toContain('Harnesses: codex');
-    expect(rows[0].textContent).toContain('Companions: luna');
+    expect(rows[0].textContent).toContain('Companions: luna and 1 more');
+    expect(rows[0].textContent).not.toContain('agent_archived-1');
+    expect(rows[1].textContent).toContain('Companions: 2 not on the desk');
     expect(rows[1].textContent).toContain('Key missing');
     expect(rows[1].textContent).toContain('No installation known yet');
     expect(within(rows[1]).queryByRole('button', { name: 'Rotate key…' })).toBeNull();
@@ -155,12 +172,14 @@ describe('IdentityAppsCard', () => {
     const toggle = await screen.findByRole('switch', { name: 'github-identity add-on' }) as HTMLInputElement;
     expect(toggle.checked).toBe(false);
     expect(toggle.disabled).toBe(true);
+    await expand();
     expect(screen.getByText(/"features": \{"github-identity": true\}/)).toBeTruthy();
   });
 
   it('creates an App: opens the local page, waits for GitHub, then offers the install page', async () => {
     const source = fakeSource([]);
     withIdentities(source, <IdentityAppsCard pollMs={1} />);
+    await expand();
     fireEvent.click(await screen.findByRole('button', { name: 'Create a new App' }));
     expect(await screen.findByText('Waiting for GitHub…')).toBeTruthy();
     expect(source.open).toHaveBeenCalledWith('http://127.0.0.1:5123/?state=ab');
@@ -175,6 +194,7 @@ describe('IdentityAppsCard', () => {
       create: vi.fn(async () => { throw new BridgeError('identity-app-disabled', 'Enable the github-identity add-on before managing Apps.'); }),
     });
     withIdentities(source, <IdentityAppsCard />);
+    await expand();
     fireEvent.click(await screen.findByRole('button', { name: 'Create a new App' }));
     expect((await screen.findByRole('alert')).textContent).toContain('The github-identity add-on is off.');
   });
@@ -182,6 +202,7 @@ describe('IdentityAppsCard', () => {
   it('connects an existing App by ID and key file', async () => {
     const source = fakeSource([]);
     withIdentities(source, <IdentityAppsCard />);
+    await expand();
     fireEvent.click(await screen.findByRole('button', { name: 'Connect an existing App' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'App ID' }), { target: { value: '42' } });
     fireEvent.click(screen.getByRole('button', { name: 'Choose key file…' }));
