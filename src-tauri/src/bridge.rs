@@ -3750,11 +3750,20 @@ impl RevisionCopy {
 
     fn under(parent: &std::path::Path) -> Result<Self, BridgeError> {
         use std::os::unix::fs::DirBuilderExt;
+        // The clock alone is not unique: two edits in one process within the
+        // clock's resolution (the test suite on CI) named the same directory
+        // and the second failed with EEXIST. A per-process counter makes
+        // every name distinct.
+        static SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or_default();
-        let dir = parent.join(format!("geniusbar-revision-{}-{nanos}", std::process::id()));
+        let serial = SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = parent.join(format!(
+            "geniusbar-revision-{}-{nanos}-{serial}",
+            std::process::id()
+        ));
         std::fs::DirBuilder::new()
             .mode(0o700)
             .create(&dir)
