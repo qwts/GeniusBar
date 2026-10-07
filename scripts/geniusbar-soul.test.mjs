@@ -29,7 +29,7 @@ test('the GeniusBar soul has the same manifest shape as Starter', () => {
 });
 
 test('the GeniusBar soul carries every skill its brief names', () => {
-  assert.deepEqual(skills().sort(), ['census', 'credentials', 'fleet', 'identities', 'sop', 'soul-packages', 'update-and-restart']);
+  assert.deepEqual(skills().sort(), ['census', 'credentials', 'fleet', 'fleet-configuration', 'identities', 'sop', 'soul-packages', 'update-and-restart']);
   const brief = readFileSync(path.join(GENIUSBAR, 'AGENTS.md'), 'utf8');
   for (const name of skills()) assert.match(brief, new RegExp(`skills/${name}\\b`), `AGENTS.md names ${name}`);
 });
@@ -41,7 +41,7 @@ test('every GeniusBar skill has SKILL.md with a title and pinned versions', () =
     const text = readFileSync(file, 'utf8');
     assert.match(text, new RegExp(`^---\\nname: ${name}\\n`), `${name} front matter names it`);
     assert.match(text, /^# \S.*$/m, `${name} has a title`);
-    assert.match(text, /agent-bot 0\.10\.23|agent-comms 0\.3\.8/, `${name} states the version it describes`);
+    assert.match(text, /agent-bot 0\.10\.33|agent-comms 0\.3\.13/, `${name} states the version it describes`);
   }
 });
 

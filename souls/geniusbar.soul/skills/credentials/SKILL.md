@@ -5,7 +5,7 @@ description: How souls hold credentials by reference (per-soul key stores, keyd,
 
 # Credentials by reference
 
-Describes **agent-bot 0.10.23**. Check `agent-bot --version`; if it
+Describes **agent-bot 0.10.33**. Check `agent-bot --version`; if it
 differs, follow `agent-bot --help`.
 
 ## The rule
@@ -22,12 +22,13 @@ a log, or your context. If one appears, stop and tell the person.
 { "credentials": { "github": { "app": "APP-SLUG", "store": "keyd" } } }
 ```
 
-- `store` is `keychain` (macOS default), `file`, or `keyd`. GeniusBar ships
-  `agent-bot-keyd`, a signed key holder: the key never leaves it, and it
-  asks the person (Touch ID or password) before importing or removing one.
+- `store` is `keychain` (macOS default), `file`, `keyd` or `pass-cli`.
+  GeniusBar ships `agent-bot-keyd`, a signed key holder: the key never
+  leaves it, and it asks the person (Touch ID or password) before importing
+  or removing one.
 - agent-bot rejects any other key under `credentials`, so key material
   cannot be packaged by mistake. Spawned copies carry the declaration, not
-  the key.
+  the key; a fork drops a declaration naming the original's App.
 - At run time the daemon mints a short-lived installation token for the soul.
   Git in a configured worktree uses it through the credential helper.
 
@@ -35,13 +36,15 @@ Read-only checks:
 
 ```sh
 agent-bot keyd status --json
+agent-bot identity apps list --json            # per App: keyPresent, key {fingerprint, updatedAt}, souls; never the key
 agent-bot soul profile <agentId|name> --json   # lists declared credential names
 agent-bot doctor --json
 ```
 
 Adding a declaration to a soul is a `soul.json` change, so it is a revision
-the person approves (soul-packages skill). Importing a key is the person's
-step (`agent-bot identity migrate-credentials ... --to keyd`, owner-only).
+the person approves (soul-packages skill). Importing or moving a key is the
+person's step (`agent-bot identity migrate-credentials --soul ID --dry-run
+--json` shows the plan; they run it, owner-only).
 
 ## Other secrets
 

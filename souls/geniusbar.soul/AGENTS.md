@@ -26,6 +26,7 @@ skill, and say so.
 | `skills/identities` | Agent IDs, `doctor`, GitHub Apps |
 | `skills/credentials` | Credentials by reference, per-soul key stores |
 | `skills/fleet` | `fleet`, `send_message`, `start_soul`, task offers |
+| `skills/fleet-configuration` | Recipes: set a soul up, share a skill, change a setting, who is doing what |
 | `skills/census` | The population census of souls |
 | `skills/update-and-restart` | GeniusBar updates and service restarts |
 
