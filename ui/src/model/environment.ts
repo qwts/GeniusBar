@@ -3,7 +3,7 @@
 // rows and buttons, and the install flow's step bookkeeping. Pure: every
 // row traces to a descriptor field, nothing is read from the filesystem,
 // and every button is gated on `engine.capabilities`, never a version.
-import { engineCan, type RuntimeInstall, type SoulCleanRow, type SoulEnvironment, type SoulEnvironmentProblem, type SoulRetention } from '../bridge';
+import { engineCan, type RuntimeInstall, type SoulCleanRow, type SoulEnvironment, type SoulEnvironmentImport, type SoulEnvironmentProblem, type SoulLifeComponent, type SoulLifeManifest, type SoulLifeWorkspace, type SoulRetention } from '../bridge';
 
 /**
  * The five states the handoff keeps distinct. `offline`: the engine did not
@@ -276,6 +276,10 @@ export interface EnvironmentActions {
   clean: boolean;
   /** Whether "Complete migration" is offered (`migrate-complete` and a step still to finish). */
   complete: boolean;
+  /** Whether "Export life…" is live (`env-export`): the engine plans and writes the archive, the app shows. */
+  export: boolean;
+  /** Whether "Import life…" is live (`env-import`): the engine verifies and restores, the app shows. */
+  import: boolean;
 }
 
 const listed = (problems: SoulEnvironmentProblem[], match: (p: SoulEnvironmentProblem) => boolean) => problems.some((p) => p.action !== null && match(p));
@@ -292,7 +296,7 @@ export function environmentActions(env: SoulEnvironment): EnvironmentActions {
   const migrateSpace = engineCan(env, 'memory') && listed(env.readiness.problems, (p) => p.code === 'memory-not-contained');
   const clean = engineCan(env, 'env-clean');
   const complete = engineCan(env, 'migrate-complete') && pendingMigrationSteps(env).length > 0;
-  return { install, adopt, migrateSpace, clean, complete };
+  return { install, adopt, migrateSpace, clean, complete, export: engineCan(env, 'env-export'), import: engineCan(env, 'env-import') };
 }
 
 /**
@@ -470,4 +474,87 @@ export function installOutcome(result: RuntimeInstall, runtime: string): { outco
   if (row?.status === 'installed') return { outcome: 'completed', message: null };
   if (row?.lastError) return { outcome: 'failed', message: row.lastError.message };
   return { outcome: 'unknown', message: null };
+}
+
+/** Files and bytes under one classification, as the manifest's components or the import's `byClassification` sum them. */
+export interface ClassificationRow {
+  classification: string;
+  files: number;
+  bytes: number;
+}
+
+/** The manifest's components summed per classification (`pointer` rows count as files too: the pointer file travels), in the manifest's order. */
+export function manifestClassifications(manifest: SoulLifeManifest): ClassificationRow[] {
+  const rows = new Map<string, ClassificationRow>();
+  for (const c of manifest.components) {
+    if (c.kind === 'dir' || !c.entry) continue;
+    const classification = c.classification ?? 'unclassified';
+    let row = rows.get(classification);
+    if (!row) { row = { classification, files: 0, bytes: 0 }; rows.set(classification, row); }
+    row.files += 1;
+    row.bytes += c.bytes ?? 0;
+  }
+  return [...rows.values()];
+}
+
+/** The import's `byClassification` as rows, in the engine's order. */
+export function classificationRows(by: Record<string, { files: number; bytes: number }>): ClassificationRow[] {
+  return Object.entries(by).map(([classification, row]) => ({ classification, files: row.files, bytes: row.bytes }));
+}
+
+/** The root's pointer rows: links the export records and nobody follows. */
+export function manifestPointers(manifest: SoulLifeManifest): SoulLifeComponent[] {
+  return manifest.components.filter((c) => c.kind === 'pointer' && c.area === 'root');
+}
+
+/** The workspaces that travel as pointers (a linked repository stays where it is). */
+export function linkedWorkspaces(workspaces: readonly SoulLifeWorkspace[]): SoulLifeWorkspace[] {
+  return workspaces.filter((w) => w.location === 'linked');
+}
+
+/** What an export plan amounts to, for the dialog's summary line: the engine's totals, nothing recounted. */
+export interface ExportSummary {
+  files: number;
+  bytes: number;
+  excluded: number;
+  linked: number;
+  pointers: number;
+  journalEntries: number;
+}
+
+export function exportSummary(manifest: SoulLifeManifest): ExportSummary {
+  return {
+    files: manifest.totals.files ?? 0,
+    bytes: manifest.totals.bytes ?? 0,
+    excluded: manifest.excluded.length,
+    linked: linkedWorkspaces(manifest.workspaces).length,
+    pointers: manifestPointers(manifest).length,
+    journalEntries: manifest.journal.entries ?? 0,
+  };
+}
+
+/**
+ * The identity choices an import offers, from the engine's answer: a plan
+ * that settled (`keep`, `replace` or `fork`) offers what it decided; an
+ * `import-id-active` refusal offers replace or fork; `import-id-retired`
+ * fork only; any other refusal nothing (the archive itself is the problem).
+ */
+export type ImportChoice = 'replace' | 'fork';
+
+export function importChoices(plan: SoulEnvironmentImport | null, error: EngineRefusal | null): ImportChoice[] {
+  if (plan) {
+    const { decision, existing } = plan.identity;
+    if (decision === 'replace') return ['replace', 'fork'];
+    if (decision === 'fork' && existing) return existing.status === 'retired' ? ['fork'] : ['replace', 'fork'];
+    return [];
+  }
+  if (error?.code === 'import-id-active') return ['replace', 'fork'];
+  if (error?.code === 'import-id-retired') return ['fork'];
+  return [];
+}
+
+/** A file name the soul's handle makes, for the export's default destination. */
+export function defaultExportPath(name: string | null, agentId: string): string {
+  const base = (name ?? agentId).replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || agentId;
+  return `~/Desktop/${base}.soul-life.tar.gz`;
 }

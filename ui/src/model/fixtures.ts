@@ -1,6 +1,6 @@
 // The fixed fake census and health from R1's snapshot test, for tests and
 // for previewing the popup before the bridge (#7) supplies real rows.
-import type { PreparedRevision, RemovalPlan, RemovalPlanEntry, RemovalScope, SoulColdWake, SoulMode, SoulModel, SoulPopulation, SoulProfile, SoulTemplateList, SoulEnvironment } from '../bridge';
+import type { PreparedRevision, RemovalPlan, RemovalPlanEntry, RemovalScope, SoulColdWake, SoulMode, SoulModel, SoulPopulation, SoulProfile, SoulTemplateList, SoulEnvironment, SoulEnvironmentExport, SoulEnvironmentImport } from '../bridge';
 import type { SandboxStatus } from '../components/Sandbox';
 import type { AuditRecord } from './audit';
 import type { CensusRow } from './census';
@@ -322,7 +322,7 @@ const lunaRoot = '/Users/user/Souls/Luna.soul';
 
 /**
  * agent-bot `soul env --json` descriptors for the Environment section (#268;
- * preview and tests). luna's comes from the bundled 0.10.52 engine with
+ * preview and tests). luna's comes from the bundled 0.10.55 engine with
  * every capability: one declared runtime missing (node), one partial-read
  * error (the generated output could not be checked), a pending migration
  * (its Agent Space is a link outside the soul), codex's sign-in still on
@@ -335,7 +335,7 @@ const lunaRoot = '/Users/user/Souls/Luna.soul';
 export const sampleEnvironments: Readonly<Record<string, SoulEnvironment>> = {
   agent_p: {
     schemaVersion: 1,
-    engine: { version: '0.10.54', contractVersion: 1, capabilities: ['env', 'revision-prepare', 'runtimes', 'providers', 'tool-homes', 'memory', 'history', 'migrate-complete', 'env-clean'] },
+    engine: { version: '0.10.55', contractVersion: 1, capabilities: ['env', 'revision-prepare', 'runtimes', 'providers', 'tool-homes', 'memory', 'history', 'migrate-complete', 'env-clean', 'env-export', 'env-import'] },
     identity: { agentId: 'agent_p', name: 'luna', displayName: 'Luna', status: 'active', harness: 'codex', revision: '2026.10.1', parentRevision: null, template: false, formatVersion: 2 },
     root: { soulDir: lunaRoot, soulsRoot: '/Users/user/Souls', source: 'environment', registered: true, marker: 'ok', copies: [], device: 16777229 },
     components: [
@@ -425,6 +425,71 @@ export const sampleEnvironments: Readonly<Record<string, SoulEnvironment>> = {
  * default account `geniusbar-agent` ready, luna sandboxed on it, agent_c
  * running as the owner, and no SOP pack; the preview's scenarios vary it.
  */
+/**
+ * agent-bot 0.10.55's `soul env export agent_p --plan --json` for luna
+ * (agent-bot-identity #583 slice 7), shortened: the definition, the home,
+ * codex's sessions, the space and the runs travel; the credentials, the
+ * sign-in file, the harness install and the runtime cache stay; the
+ * `site` workspace is linked and rides as a pointer with its patch and
+ * two untracked files; the Agent Space is still linked, read through its
+ * link. Counts and hashes only, never a file's contents.
+ */
+export const sampleLifeExport: SoulEnvironmentExport = {
+  agentId: 'agent_p', soulDir: lunaRoot, applied: false, decision: 'planned', file: null,
+  manifest: {
+    agentId: 'agent_p', name: 'luna', displayName: 'Luna', exportedAt: '2026-10-08T10:00:00.000Z', engineVersion: '0.10.55', root: lunaRoot,
+    memory: { location: 'linked', target: '/Users/user/space/luna' },
+    workspaces: [
+      { name: 'main', location: 'inside', target: null, head: null, branch: 'main', remote: null, patch: false, untracked: 0, note: null },
+      { name: 'site', location: 'linked', target: '/Users/user/code/site', head: '4f2c9a1b7e3d5c6a', branch: 'feature/landing', remote: 'git@github.com:user/site.git', patch: true, untracked: 2, note: null },
+    ],
+    journal: { entries: 3 },
+    components: [
+      { area: 'root', entry: 'life/soul.json', relative: 'soul.json', classification: 'definition', retention: 'durable', kind: 'file', bytes: 1_204, sha256: '3b1f', workspace: null, target: null },
+      { area: 'root', entry: 'life/AGENTS.md', relative: 'AGENTS.md', classification: 'definition', retention: 'durable', kind: 'file', bytes: 2_880, sha256: '9c0e', workspace: null, target: null },
+      { area: 'root', entry: 'life/skills/triage/SKILL.md', relative: 'skills/triage/SKILL.md', classification: 'definition', retention: 'durable', kind: 'file', bytes: 1_536, sha256: 'a7d2', workspace: null, target: null },
+      { area: 'root', entry: 'life/workflows/release.toml', relative: 'workflows/release.toml', classification: 'definition', retention: 'durable', kind: 'file', bytes: 640, sha256: '11aa', workspace: null, target: null },
+      { area: 'root', entry: 'life/.soul-state/home/.gitconfig', relative: '.soul-state/home/.gitconfig', classification: 'private-home', retention: 'durable', kind: 'file', bytes: 212, sha256: 'c4c4', workspace: null, target: null },
+      { area: 'root', entry: 'life/.soul-state/home/.git/HEAD', relative: '.soul-state/home/.git/HEAD', classification: 'private-home', retention: 'durable', kind: 'file', bytes: 23, sha256: 'd0d0', workspace: null, target: null },
+      { area: 'root', entry: 'life/.soul-state/tools/codex/sessions/2026-10-07.jsonl', relative: '.soul-state/tools/codex/sessions/2026-10-07.jsonl', classification: 'private-home', retention: 'durable', kind: 'file', bytes: 48_112, sha256: 'e5e5', workspace: null, target: null },
+      { area: 'root', entry: 'life/.soul-state/space/space.json', relative: '.soul-state/space/space.json', classification: 'memory', retention: 'durable', kind: 'file', bytes: 96, sha256: 'f6f6', workspace: null, target: null },
+      { area: 'root', entry: 'life/.soul-state/space/notes/2026-10-07.md', relative: '.soul-state/space/notes/2026-10-07.md', classification: 'memory', retention: 'durable', kind: 'file', bytes: 7_424, sha256: '0707', workspace: null, target: null },
+      { area: 'root', entry: 'life/.soul-state/runs/turns.jsonl', relative: '.soul-state/runs/turns.jsonl', classification: 'history', retention: 'durable', kind: 'file', bytes: 131_072, sha256: '1818', workspace: null, target: null },
+      { area: 'root', entry: 'life/.soul-state/migration.json', relative: '.soul-state/migration.json', classification: 'private-home', retention: 'durable', kind: 'file', bytes: 388, sha256: '2929', workspace: null, target: null },
+      { area: 'root', entry: 'life/worktrees/main/README.md', relative: 'worktrees/main/README.md', classification: 'workspace', retention: 'durable', kind: 'file', bytes: 1_010, sha256: '3a3a', workspace: 'main', target: null },
+      { area: 'workspace', entry: 'workspaces/site/pointer.json', relative: 'worktrees/site', classification: 'workspace', retention: 'durable', kind: 'pointer', bytes: 214, sha256: '4b4b', workspace: 'site', target: '/Users/user/code/site' },
+      { area: 'workspace', entry: 'workspaces/site/changes.patch', relative: 'worktrees/site', classification: 'workspace', retention: 'durable', kind: 'patch', bytes: 3_302, sha256: '5c5c', workspace: 'site', target: null },
+      { area: 'workspace', entry: 'workspaces/site/untracked/notes.txt', relative: 'worktrees/site/notes.txt', classification: 'workspace', retention: 'durable', kind: 'file', bytes: 120, sha256: '6d6d', workspace: 'site', target: null },
+      { area: 'workspace', entry: 'workspaces/site/untracked/draft.md', relative: 'worktrees/site/draft.md', classification: 'workspace', retention: 'durable', kind: 'file', bytes: 410, sha256: '7e7e', workspace: 'site', target: null },
+      { area: 'journal', entry: 'journal/events.jsonl', relative: 'journal/events.jsonl', classification: 'history', retention: 'durable', kind: 'file', bytes: 2_048, sha256: '8f8f', workspace: null, target: null },
+      { area: 'root', entry: null, relative: '.soul-state/space', classification: 'memory', retention: 'durable', kind: 'pointer', bytes: 0, sha256: null, workspace: null, target: '/Users/user/space/luna' },
+    ],
+    excluded: [
+      { relative: '.soul-state/credentials', classification: 'private-home', reason: 'credentials never travel: GitHub App keys and file-store secrets stay on this Mac' },
+      { relative: '.soul-state/tools/codex/auth.json', classification: 'private-home', reason: 'a sign-in file never travels; sign in again after the import' },
+      { relative: '.soul-state/home/node_modules', classification: 'private-home', reason: 'the harness install; the next launch installs it again' },
+      { relative: '.soul-state/runtimes', classification: 'runtime', reason: 'reconstructible: the next launch installs the declared runtimes again' },
+      { relative: '.codex', classification: 'generated', reason: 'generated output; the next build regenerates it' },
+    ],
+    totals: { files: 17, bytes: 200_209 },
+  },
+};
+
+/**
+ * `soul env import <archive> --plan --json` for that export on a Mac that
+ * does not know the ID: a moved life, kept under its ID, restored to the
+ * souls root, the linked workspace brought back as files to link again.
+ */
+export const sampleLifeImport: SoulEnvironmentImport = {
+  archive: '/Users/user/Desktop/luna.soul-life.tar.gz', applied: false, decision: 'planned',
+  identity: { decision: 'keep', agentId: 'agent_p', importedFrom: 'agent_p', existing: null },
+  soulDir: '/Users/user/Souls/luna.soul', replaced: null, name: 'luna', displayName: 'Luna', journal: null,
+  restored: { files: 17, bytes: 200_209, byClassification: { definition: { files: 4, bytes: 6_260 }, 'private-home': { files: 4, bytes: 48_735 }, memory: { files: 2, bytes: 7_520 }, history: { files: 2, bytes: 133_120 }, workspace: { files: 5, bytes: 5_056 } } },
+  pointers: [{ relative: '.soul-state/space', target: '/Users/user/space/luna' }],
+  workspaces: [{ name: 'site', location: 'linked', target: '/Users/user/code/site', head: '4f2c9a1b7e3d5c6a', branch: 'feature/landing', remote: 'git@github.com:user/site.git', patch: true, untracked: 2, note: null, imported: '.soul-state/imports/site' }],
+  migration: 'life-import',
+};
+
 export const sampleSandbox: SandboxStatus = {
   enabled: true,
   provider: 'standard_macos_account',

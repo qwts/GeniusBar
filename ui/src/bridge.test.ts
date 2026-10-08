@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BridgeError, call, openDesktop, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, exportAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRemovalPlan, normalizeRemovalEffects, removalPlan, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, normalizeAppearance, savedBrief, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported, normalizeSoulComputerUse, soulComputerUse, soulComputerUseSupported, liveComputerUse, listSoulTemplates, normalizeSoulTemplates, normalizeSoulProfile, soulProfile, soulProfileFile, popupVisible, normalizeSoulEnvironment, soulEnvironment, engineCan, normalizePreparedRevision, prepareRevision, discardRevision, editableInStaging, normalizeRuntimeInstall, installSoulRuntime, normalizeEnvironmentMigration, migrateSoulEnvironment, normalizeSoulEnvironmentClean, soulEnvClean } from './bridge';
+import { BridgeError, call, openDesktop, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, exportAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRemovalPlan, normalizeRemovalEffects, removalPlan, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, normalizeAppearance, savedBrief, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported, normalizeSoulComputerUse, soulComputerUse, soulComputerUseSupported, liveComputerUse, listSoulTemplates, normalizeSoulTemplates, normalizeSoulProfile, soulProfile, soulProfileFile, popupVisible, normalizeSoulEnvironment, soulEnvironment, engineCan, normalizePreparedRevision, prepareRevision, discardRevision, editableInStaging, normalizeRuntimeInstall, installSoulRuntime, normalizeEnvironmentMigration, migrateSoulEnvironment, normalizeSoulEnvironmentClean, soulEnvClean, normalizeSoulEnvironmentExport, soulEnvExport, normalizeSoulEnvironmentImport, soulEnvImport } from './bridge';
 
 describe('bridge', () => {
   it('invokes the shell command with the method and params', async () => {
@@ -1048,5 +1048,104 @@ describe('soul env clean (#268, agent-bot-identity #583 slice 6)', () => {
     const old = (async () => { throw { code: 'soul-env-clean-unsupported', message: 'this agent-bot cannot clean a soul environment' }; }) as never;
     await expect(soulEnvClean('agent_p', { plan: true }, old)).rejects.toMatchObject({ code: 'soul-env-clean-unsupported' });
     await expect(soulEnvClean('agent_p', { plan: true })).rejects.toMatchObject({ code: 'soul-env-clean-unavailable' });
+  });
+});
+
+describe('soul env export and import (#268, agent-bot-identity #583 slice 7)', () => {
+  const component = { area: 'root', entry: 'life/soul.json', relative: 'soul.json', classification: 'definition', retention: 'durable', kind: 'file', bytes: 512, sha256: '00', mode: 420 };
+  const pointer = { area: 'workspace', entry: 'workspaces/site/pointer.json', relative: 'worktrees/site', classification: 'workspace', retention: 'durable', kind: 'pointer', bytes: 180, sha256: '01', mode: 384, workspace: 'site', target: '/Users/me/code/site' };
+  const manifest = {
+    schemaVersion: 1, agentId: 'agent_p', name: 'luna', displayName: 'Luna', exportedAt: '2026-10-08T10:00:00.000Z', engineVersion: '0.10.55', root: '/s',
+    identity: { harness: 'codex' }, memory: { location: 'inside', target: null },
+    workspaces: [{ name: 'site', location: 'linked', target: '/Users/me/code/site', head: 'abc123', branch: 'main', remote: 'git@github.com:me/site.git', patch: true, untracked: 2, note: null }],
+    journal: { entries: 3 }, components: [component, pointer], excluded: [{ relative: '.soul-state/credentials', classification: 'private-home', reason: 'credentials never travel' }], totals: { files: 2, bytes: 692 },
+  };
+  const plan = { schemaVersion: 1, agentId: 'agent_p', soulDir: '/s', applied: false, decision: 'planned', file: null, manifest };
+
+  it('normalizes the export plan: the manifest with its rows, unknown rows dropped, unknown fields ignored', () => {
+    const planned = normalizeSoulEnvironmentExport(plan);
+    expect(planned).toMatchObject({ agentId: 'agent_p', soulDir: '/s', applied: false, decision: 'planned', file: null });
+    expect(planned?.manifest.totals).toEqual({ files: 2, bytes: 692 });
+    expect(planned?.manifest.components.map((c) => [c.relative, c.kind, c.target])).toEqual([['soul.json', 'file', null], ['worktrees/site', 'pointer', '/Users/me/code/site']]);
+    expect(planned?.manifest.excluded).toEqual([{ relative: '.soul-state/credentials', classification: 'private-home', reason: 'credentials never travel' }]);
+    expect(planned?.manifest.workspaces[0]).toMatchObject({ name: 'site', location: 'linked', patch: true, untracked: 2 });
+    expect(planned?.manifest.journal.entries).toBe(3);
+    const sparse = normalizeSoulEnvironmentExport({ ...plan, applied: true, decision: 'exported', file: '/x.tgz', manifest: { components: [component, { area: 'root' }, 'x'], workspaces: [{ location: 'linked' }], extra: true } });
+    expect(sparse).toMatchObject({ applied: true, decision: 'exported', file: '/x.tgz' });
+    expect(sparse?.manifest.components.length).toBe(1);
+    expect(sparse?.manifest.workspaces).toEqual([]);
+    expect(sparse?.manifest.excluded).toEqual([]);
+    expect(sparse?.manifest.totals).toEqual({ files: null, bytes: null });
+    // Not an export report: a clean, a descriptor, nothing.
+    expect(normalizeSoulEnvironmentExport({ agentId: 'agent_p', applied: false, decision: 'planned', removable: [] })).toBeNull();
+    expect(normalizeSoulEnvironmentExport(null)).toBeNull();
+  });
+
+  it('plans and writes through the bridge, keeping the engine refusal and its action', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); return plan; }) as never;
+    await expect(soulEnvExport('agent_p', { plan: true }, fake)).resolves.toMatchObject({ applied: false, decision: 'planned' });
+    await soulEnvExport('agent_p', { plan: false, to: '~/Desktop/luna.soul-life.tar.gz' }, fake);
+    expect(calls).toEqual([
+      ['soul_env_export', { agent: 'agent_p', to: null, plan: true }],
+      ['soul_env_export', { agent: 'agent_p', to: '~/Desktop/luna.soul-life.tar.gz', plan: false }],
+    ]);
+    const exists = (async () => { throw { code: 'export-target-exists', message: '/x.tgz already exists; choose another path', action: 'pick a file that does not exist yet' }; }) as never;
+    await expect(soulEnvExport('agent_p', { to: '/x.tgz' }, exists)).rejects.toMatchObject({ code: 'export-target-exists', action: 'pick a file that does not exist yet' });
+    const silent = (async () => ({ agentId: 'agent_p' })) as never;
+    await expect(soulEnvExport('agent_p', { plan: true }, silent)).rejects.toMatchObject({ code: 'soul-env-export-failed' });
+    const old = (async () => { throw { code: 'soul-env-export-unsupported', message: "this agent-bot cannot export a soul's life" }; }) as never;
+    await expect(soulEnvExport('agent_p', { plan: true }, old)).rejects.toMatchObject({ code: 'soul-env-export-unsupported' });
+    await expect(soulEnvExport('agent_p', { plan: true })).rejects.toMatchObject({ code: 'soul-env-export-unavailable' });
+  });
+
+  const imported = {
+    schemaVersion: 1, archive: '/a.tgz', applied: false, decision: 'planned',
+    identity: { decision: 'keep', agentId: 'agent_p', importedFrom: 'agent_p', existing: null },
+    soulDir: '/Users/me/Souls/luna.soul', replaced: null, name: 'luna', displayName: 'Luna', journal: null,
+    restored: { files: 2, bytes: 692, byClassification: { definition: { files: 1, bytes: 512 }, workspace: { files: 1, bytes: 180 } } },
+    pointers: [{ relative: '.soul-state/space', target: '/Users/me/space/luna' }],
+    workspaces: [{ name: 'site', location: 'linked', target: '/Users/me/code/site', head: 'abc123', branch: 'main', remote: null, patch: true, untracked: 2, note: null, imported: '.soul-state/imports/site' }],
+    migration: 'life-import',
+  };
+
+  it('normalizes the import plan and report: identity, destination, what is restored, pointers and workspaces', () => {
+    const planned = normalizeSoulEnvironmentImport(imported);
+    expect(planned).toMatchObject({ archive: '/a.tgz', applied: false, decision: 'planned', soulDir: '/Users/me/Souls/luna.soul', replaced: null, journal: null, migration: 'life-import' });
+    expect(planned?.identity).toEqual({ decision: 'keep', agentId: 'agent_p', importedFrom: 'agent_p', existing: null });
+    expect(planned?.restored).toEqual({ files: 2, bytes: 692, byClassification: { definition: { files: 1, bytes: 512 }, workspace: { files: 1, bytes: 180 } } });
+    expect(planned?.pointers).toEqual([{ relative: '.soul-state/space', target: '/Users/me/space/luna' }]);
+    expect(planned?.workspaces[0]).toMatchObject({ name: 'site', imported: '.soul-state/imports/site', patch: true, untracked: 2 });
+    const replaced = normalizeSoulEnvironmentImport({ ...imported, applied: true, decision: 'replaced', identity: { decision: 'replace', agentId: 'agent_p', importedFrom: 'agent_p', existing: { status: 'active', soulDir: '/s' } }, replaced: '/s.replaced-2026', journal: 'kept-local', pointers: [{ target: 'no-relative' }, 'x'], workspaces: [{ location: 'linked' }], restored: { files: 2, bytes: 692, byClassification: { definition: { files: 'x' } } } });
+    expect(replaced).toMatchObject({ decision: 'replaced', replaced: '/s.replaced-2026', journal: 'kept-local' });
+    expect(replaced?.identity.existing).toEqual({ status: 'active', soulDir: '/s' });
+    expect(replaced?.pointers).toEqual([]);
+    expect(replaced?.workspaces).toEqual([]);
+    expect(replaced?.restored.byClassification).toEqual({ definition: { files: 0, bytes: 0 } });
+    const fork = normalizeSoulEnvironmentImport({ ...imported, identity: { decision: 'fork', agentId: null, importedFrom: 'agent_p', existing: { status: 'retired', soulDir: null } } });
+    expect(fork?.identity).toEqual({ decision: 'fork', agentId: null, importedFrom: 'agent_p', existing: { status: 'retired', soulDir: null } });
+    expect(normalizeSoulEnvironmentImport(plan)).toBeNull();
+    expect(normalizeSoulEnvironmentImport({ archive: '/a.tgz', applied: false, decision: 'planned' })).toBeNull();
+    expect(normalizeSoulEnvironmentImport(null)).toBeNull();
+  });
+
+  it('plans and applies through the bridge with one identity decision, keeping the engine refusal and its action', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); return imported; }) as never;
+    await expect(soulEnvImport('/a.tgz', { plan: true }, fake)).resolves.toMatchObject({ applied: false, decision: 'planned' });
+    await soulEnvImport('/a.tgz', { plan: true, identity: 'replace' }, fake);
+    await soulEnvImport('/a.tgz', { plan: false, identity: 'fork', name: 'Luna II' }, fake);
+    expect(calls).toEqual([
+      ['soul_env_import', { archive: '/a.tgz', fork: false, replace: false, name: null, plan: true }],
+      ['soul_env_import', { archive: '/a.tgz', fork: false, replace: true, name: null, plan: true }],
+      ['soul_env_import', { archive: '/a.tgz', fork: true, replace: false, name: 'Luna II', plan: false }],
+    ]);
+    const active = (async () => { throw { code: 'import-id-active', message: 'agent_p is an active soul here (/s)', action: 'add --replace to overwrite its life, or --fork to import as a new soul' }; }) as never;
+    await expect(soulEnvImport('/a.tgz', { plan: true }, active)).rejects.toMatchObject({ code: 'import-id-active', action: 'add --replace to overwrite its life, or --fork to import as a new soul' });
+    const silent = (async () => ({ archive: '/a.tgz' })) as never;
+    await expect(soulEnvImport('/a.tgz', { plan: true }, silent)).rejects.toMatchObject({ code: 'soul-env-import-failed' });
+    const old = (async () => { throw { code: 'soul-env-import-unsupported', message: "this agent-bot cannot import a soul's life" }; }) as never;
+    await expect(soulEnvImport('/a.tgz', { plan: true }, old)).rejects.toMatchObject({ code: 'soul-env-import-unsupported' });
+    await expect(soulEnvImport('/a.tgz', { plan: true })).rejects.toMatchObject({ code: 'soul-env-import-unavailable' });
   });
 });
