@@ -3,7 +3,7 @@
 // rows and buttons, and the install flow's step bookkeeping. Pure: every
 // row traces to a descriptor field, nothing is read from the filesystem,
 // and every button is gated on `engine.capabilities`, never a version.
-import { engineCan, type RuntimeInstall, type SoulCleanRow, type SoulEnvironment, type SoulEnvironmentImport, type SoulEnvironmentProblem, type SoulLifeComponent, type SoulLifeManifest, type SoulLifeWorkspace, type SoulRetention } from '../bridge';
+import { engineCan, type RuntimeInstall, type SoulCleanRow, type SoulEnvHistory, type SoulEnvironment, type SoulEnvironmentImport, type SoulEnvironmentProblem, type SoulHistoryRun, type SoulLifeComponent, type SoulLifeManifest, type SoulLifeWorkspace, type SoulRetention } from '../bridge';
 
 /**
  * The five states the handoff keeps distinct. `offline`: the engine did not
@@ -255,6 +255,67 @@ export function historySummary(env: SoulEnvironment): HistorySummary | null {
     return what ? [{ what, present: row?.present === true }] : [];
   }) : [];
   return { mirrored: typeof history.mirrored === 'boolean' ? history.mirrored : null, turns: num(history.turns), revisions: num(history.revisions), external };
+}
+
+/**
+ * Continuity for the Memory tab from a read that may have failed: the
+ * descriptor's when there is one; an engine without `soul env` cannot
+ * restore anything (unsupported); any other failure is unavailable, and
+ * says nothing of loss.
+ */
+export function continuityOfRead(read: EnvironmentRead): Continuity {
+  if (read.env) return memoryContinuity(read.env);
+  return read.error?.code === 'soul-env-unsupported' ? 'unsupported' : 'unavailable';
+}
+
+/** Where the soul's memory lives, as the memory component reports it; null when the descriptor lists no memory. */
+export interface MemoryLocation {
+  /** `inside` the soul folder, `linked` to a path outside it, or null when the engine does not say. */
+  location: 'inside' | 'linked' | null;
+  path: string | null;
+}
+
+export function memoryLocation(env: SoulEnvironment): MemoryLocation | null {
+  const memory = env.components.find((c) => c.id === 'memory');
+  if (!memory) return null;
+  const location = memory.location === 'inside' || memory.location === 'linked' ? memory.location : null;
+  const linked = str(memory.target) ?? str(memory.spacePath);
+  const inside = memory.path ? (env.root.soulDir ? `${env.root.soulDir}/${memory.path}` : memory.path) : null;
+  return { location, path: location === 'linked' ? linked ?? inside : inside ?? linked };
+}
+
+const startOf = (run: SoulHistoryRun): number => {
+  const at = Date.parse(run.startedAt ?? '');
+  return Number.isFinite(at) ? at : Number.NEGATIVE_INFINITY;
+};
+
+/** The listed runs newest first, whatever order the engine printed them in. */
+export function historyRuns(history: SoulEnvHistory): SoulHistoryRun[] {
+  return [...history.turns.records].sort((a, b) => startOf(b) - startOf(a));
+}
+
+/** A run's length in whole seconds from the engine's two times; null until it ended, or when either is not a time. */
+export function runSeconds(run: SoulHistoryRun): number | null {
+  const started = Date.parse(run.startedAt ?? '');
+  const ended = Date.parse(run.endedAt ?? '');
+  if (!Number.isFinite(started) || !Number.isFinite(ended) || ended < started) return null;
+  return Math.round((ended - started) / 1000);
+}
+
+/** `12 s`, `4 min`, `1 h 05 min`: compact and locale-neutral. */
+export function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds} s`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours} h ${String(minutes % 60).padStart(2, '0')} min`;
+}
+
+/** The outcomes the tab tones; anything else is shown as the engine said it. */
+export type RunOutcome = 'ok' | 'failed' | 'cancelled' | 'other';
+
+export function runOutcome(outcome: string | null): RunOutcome {
+  return outcome === 'ok' || outcome === 'failed' || outcome === 'cancelled' ? outcome : 'other';
 }
 
 /** Readiness codes whose listed action is the engine's `soul runtimes install` (stable, appended never renamed). */

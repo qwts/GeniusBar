@@ -2190,3 +2190,92 @@ export async function soulEnvImport(archive: string, { plan = false, identity = 
   if (!result) throw new BridgeError('soul-env-import-failed', 'agent-bot did not report the import');
   return result;
 }
+
+/** One run the soul's history mirror holds (#268, `soul env history`): facts only, never a transcript. */
+export interface SoulHistoryRun {
+  id: string;
+  /** `turn`, `wake`, `task`, `launch`, `session`, as the engine classifies it. */
+  kind: string;
+  startedAt: string | null;
+  endedAt: string | null;
+  harness: string | null;
+  /** `ok`, `failed`, `cancelled`, as the engine recorded it; null while it has not. */
+  outcome: string | null;
+}
+
+/** One revision of the soul's definition, from its journal. */
+export interface SoulHistoryRevision {
+  id: string;
+  parent: string | null;
+  reason: string | null;
+  at: string | null;
+}
+
+/** A page of history records: the engine's counts, with the newest `limit` records listed. */
+export interface SoulHistoryPage<T> {
+  total: number;
+  listed: number;
+  limit: number | null;
+  skipped: number;
+  truncated: boolean;
+  records: T[];
+}
+
+/**
+ * The soul's past runs and revisions (#268; agent-bot `soul env history
+ * <agentId> --json [--limit N]`, behind the `env-history` capability):
+ * what the history mirror in the soul holds, read-only. Facts only: a
+ * record carries a kind, times, the harness and the outcome; no message
+ * counts, no titles, no transcript.
+ */
+export interface SoulEnvHistory {
+  agentId: string;
+  soulDir: string | null;
+  mirror: string | null;
+  mirrored: boolean | null;
+  turns: SoulHistoryPage<SoulHistoryRun>;
+  revisions: SoulHistoryPage<SoulHistoryRevision>;
+}
+
+function historyPage<T>(raw: unknown, row: (record: Record<string, unknown>) => T | null): SoulHistoryPage<T> {
+  const page = record(raw);
+  const list = records(page.records).flatMap((r) => { const entry = row(r); return entry ? [entry] : []; });
+  return { total: count(page.total) ?? list.length, listed: count(page.listed) ?? list.length, limit: count(page.limit), skipped: count(page.skipped) ?? 0, truncated: page.truncated === true, records: list };
+}
+
+/** The history with its shape checked; null when the answer is not a schema-1 history. */
+export function normalizeSoulEnvHistory(raw: unknown): SoulEnvHistory | null {
+  if (!isRecord(raw) || raw.schemaVersion !== 1 || typeof raw.agentId !== 'string' || !isRecord(raw.turns)) return null;
+  return {
+    agentId: raw.agentId,
+    soulDir: text(raw.soulDir),
+    mirror: text(raw.mirror),
+    mirrored: typeof raw.mirrored === 'boolean' ? raw.mirrored : null,
+    turns: historyPage(raw.turns, (r) => {
+      const id = text(r.id);
+      return id ? { id, kind: text(r.kind) ?? 'turn', startedAt: text(r.startedAt), endedAt: text(r.endedAt), harness: text(r.harness), outcome: text(r.outcome) } : null;
+    }),
+    revisions: historyPage(raw.revisions, (r) => {
+      const id = text(r.id);
+      return id ? { id, parent: text(r.parent), reason: text(r.reason), at: text(r.at) } : null;
+    }),
+  };
+}
+
+/**
+ * The soul's past runs from agent-bot `soul env history`. Rejects with a
+ * BridgeError; `soul-env-history-unsupported` is a bundle without the verb
+ * (the tab gates on the `env-history` capability before asking).
+ */
+export async function soulEnvHistory(agentId: string, limit: number | null = null, invokeImpl: typeof invoke = invoke): Promise<SoulEnvHistory> {
+  if (!inApp() && invokeImpl === invoke) throw new BridgeError('soul-env-history-unavailable', 'not in the app');
+  let raw: unknown;
+  try {
+    raw = await invokeImpl<unknown>('soul_env_history', { agent: agentId, limit });
+  } catch (error) {
+    throw failureAs(error, 'soul-env-history-failed');
+  }
+  const result = normalizeSoulEnvHistory(raw);
+  if (!result) throw new BridgeError('soul-env-history-failed', 'agent-bot gave no soul history');
+  return result;
+}

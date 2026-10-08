@@ -26,6 +26,7 @@ import { liveState, presenceText, SoulDudle } from './FleetList';
 import { useStop, type Stopper } from './FloatingDudle';
 import type { DudleState } from './Dudle';
 import { LaunchForm } from './LaunchForm';
+import { MemoryPanel } from './MemoryPanel';
 import { ModelSelect } from './ModelField';
 import { ActsAs, GitHubAppRow, useIdentityApps } from './IdentityApps';
 import { useSandbox } from './Sandbox';
@@ -56,7 +57,7 @@ export interface LaunchProps {
   defaultHarness?: string | null;
 }
 
-export type SessionTab = 'chat' | 'tree' | 'details' | 'audit';
+export type SessionTab = 'chat' | 'tree' | 'memory' | 'audit' | 'details';
 type Tab = SessionTab;
 
 interface CompanionSessionProps {
@@ -118,14 +119,14 @@ export function SessionStop({ soul, computerUse, stopper }: { soul: CensusRow; c
 
 /**
  * One companion's session (R6): a header, then Chat, its team's delegation
- * tree, its audit log, and the read-only details with Launch, in the
- * design's order. Without chat it opens on the details.
+ * tree, its memory (#268), its audit log, and the read-only details with
+ * Launch, in the design's order. Without chat it opens on the details.
  */
 export function CompanionSession({ soul, forest, roster, paused = false, chat, launch, onOpen, onClose, showBack = false, onPopOut, metricsRefresh = 0, initialTab, awaiting, busy, computerUse, stopper }: CompanionSessionProps) {
   const { t } = useI18n();
   const ids = useId();
   const back = useRef<HTMLButtonElement>(null);
-  const tabs: Tab[] = chat ? ['chat', 'tree', 'audit', 'details'] : ['tree', 'audit', 'details'];
+  const tabs: Tab[] = chat ? ['chat', 'tree', 'memory', 'audit', 'details'] : ['tree', 'memory', 'audit', 'details'];
   const first: Tab = chat ? 'chat' : 'details';
   const [tab, setTab] = useState<Tab>(initialTab && tabs.includes(initialTab) ? initialTab : first);
   const active = tabs.includes(tab) ? tab : first;
@@ -201,6 +202,7 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
           <ChatTab key={soulKey(soul)} soul={soul} chat={chat} paused={paused} refresh={metricsRefresh} />
         )}
         {active === 'tree' && <DelegationTree forest={forest} focus={soulKey(soul)} paused={paused} onOpen={onOpen} awaiting={awaiting} busy={busy} />}
+        {active === 'memory' && <MemoryPanel soul={soul} refresh={metricsRefresh} />}
         {active === 'details' && <CompanionDetails soul={soul} roster={roster} launch={launch} metricsRefresh={metricsRefresh} awaiting={awaiting} busy={busy} />}
         {active === 'audit' && <AuditLog agentId={soul.agentId} roster={roster} />}
       </div>

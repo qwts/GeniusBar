@@ -33,9 +33,12 @@ describe('parseSurface (#223)', () => {
   });
 
   it('maps the URL\'s tab names to the session\'s and back', () => {
-    expect(['chat', 'delegation', 'audit', 'details', 'tree', 'x', null].map(sessionTabOf))
-      .toEqual(['chat', 'tree', 'audit', 'details', 'tree', null, null]);
+    expect(['chat', 'delegation', 'memory', 'audit', 'details', 'tree', 'x', null].map(sessionTabOf))
+      .toEqual(['chat', 'tree', 'memory', 'audit', 'details', 'tree', null, null]);
     expect(queryTabOf('tree')).toBe('delegation');
     expect(queryTabOf('chat')).toBe('chat');
+    // The Memory tab (#268) pops out and opens by its own name.
+    expect(queryTabOf('memory')).toBe('memory');
+    expect(parseSurface('?surface=session&soul=user%2Fagent_p&tab=memory').tab).toBe('memory');
   });
 });
