@@ -11,7 +11,10 @@ mod updates;
 mod windows;
 
 use std::{
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
     time::{Duration, Instant},
 };
 
@@ -209,6 +212,47 @@ impl Dismissed {
     }
 }
 
+/// "Close GeniusBar when clicking outside it" (#265): whether the popup
+/// hides when it loses focus, as a menu does. Off until the popup's page
+/// sends the stored choice, so a drag from Finder reaches the popup.
+#[derive(Default)]
+pub struct PopupAutohide(AtomicBool);
+
+impl PopupAutohide {
+    fn get(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
+}
+
+/// The popup's page sends the stored choice as it starts and as it changes.
+#[tauri::command]
+fn set_popup_autohide(app: tauri::AppHandle, on: bool) {
+    app.state::<PopupAutohide>().0.store(on, Ordering::Relaxed);
+    windows::log_line(
+        &app,
+        &format!("popup autohide {}", if on { "on" } else { "off" }),
+    );
+}
+
+/// Whether losing focus hides the popup: only when asked to, and only a
+/// showing popup (a hidden one has nothing to do, and must not note a
+/// dismissal that the next tray click would then swallow).
+pub fn hides_on_blur(autohide: bool, visible: bool) -> bool {
+    autohide && visible
+}
+
+/// The popup's smallest size (tauri.conf.json's minWidth / minHeight).
+const POPUP_MIN: (f64, f64) = (320.0, 320.0);
+
+/// The popup's size for this launch (#264): the one it was last resized to,
+/// else the design's from tauri.conf.json.
+fn popup_size(remembered: Option<windows::Frame>, configured: (f64, f64)) -> (f64, f64) {
+    match remembered {
+        Some(frame) => (frame.width.max(POPUP_MIN.0), frame.height.max(POPUP_MIN.1)),
+        None => configured,
+    }
+}
+
 fn toggle_popup(window: &WebviewWindow) {
     let dismissed = window.state::<Dismissed>();
     if dismissed.just_dismissed(Instant::now()) {
@@ -334,15 +378,28 @@ fn install_tray(app: &mut App, window: &WebviewWindow) -> tauri::Result<()> {
         })
         .build(app)?;
     updates::check_at_startup(app.handle());
-    // A popup closes when the user clicks elsewhere, like a menu.
+    // The popup keeps the size it was last resized to (#264).
+    let remembered = app.state::<windows::Frames>().get("main");
+    if let Some((width, height)) = remembered.map(|frame| popup_size(Some(frame), (0.0, 0.0))) {
+        let _ = window.set_size(tauri::LogicalSize::new(width, height));
+    }
+    // A popup closes when the user clicks elsewhere, like a menu, once
+    // asked to (#265); by default it stays until the tray icon is clicked.
     let popup = window.clone();
-    window.on_window_event(move |event| {
-        if let WindowEvent::Focused(false) = event {
-            if popup.is_visible().unwrap_or(false) {
+    window.on_window_event(move |event| match event {
+        WindowEvent::Focused(false) => {
+            let visible = popup.is_visible().unwrap_or(false);
+            if hides_on_blur(popup.state::<PopupAutohide>().get(), visible) {
                 popup.state::<Dismissed>().record(Instant::now());
+                let _ = popup.hide();
             }
-            let _ = popup.hide();
         }
+        WindowEvent::Resized(_) => {
+            if let Some(frame) = windows::frame_of(&popup) {
+                popup.state::<windows::Frames>().record("main", frame);
+            }
+        }
+        _ => {}
     });
     Ok(())
 }
@@ -381,6 +438,8 @@ pub fn run() {
         .manage(bridge::PreparedRevisions::default())
         .manage(soul_package::PendingSoulPackages::default())
         .manage(Dismissed::default())
+        .manage(PopupAutohide::default())
+        .manage(windows::Frames::default())
         .manage(updates::Updates::default())
         .manage(windows::Documents::default())
         // A copy: the closure below matches on the original.
@@ -389,6 +448,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_mode,
             open_desktop,
+            set_popup_autohide,
             windows::open_surface,
             windows::sync_team_windows,
             windows::sync_perimeter,
@@ -466,6 +526,7 @@ pub fn run() {
                 bridge::IdentityJobs::reattach(app.handle());
             }
             updates::init(app.handle())?;
+            windows::load_frames(app.handle());
             let window = app
                 .get_webview_window("main")
                 .expect("tauri.conf.json defines the main window");
@@ -509,6 +570,7 @@ pub fn run() {
                 api.prevent_exit();
             }
             if let RunEvent::Exit = event {
+                windows::save_frames(app);
                 bridge::stop(app);
             }
         });
@@ -552,6 +614,33 @@ mod tests {
         assert!(!dismissed.just_dismissed(hidden + Duration::from_millis(60)));
         dismissed.record(hidden);
         assert!(!dismissed.just_dismissed(hidden + DISMISS_GRACE));
+    }
+
+    #[test]
+    fn the_popup_hides_on_blur_only_when_asked_and_showing() {
+        assert!(!hides_on_blur(false, true));
+        assert!(!hides_on_blur(false, false));
+        assert!(hides_on_blur(true, true));
+        assert!(!hides_on_blur(true, false));
+        assert!(!PopupAutohide::default().get());
+    }
+
+    #[test]
+    fn the_popup_keeps_its_last_size_within_its_minimum() {
+        let frame = |width, height| {
+            Some(windows::Frame {
+                x: 0.0,
+                y: 0.0,
+                width,
+                height,
+            })
+        };
+        assert_eq!(popup_size(None, (384.0, 560.0)), (384.0, 560.0));
+        assert_eq!(
+            popup_size(frame(420.0, 700.0), (384.0, 560.0)),
+            (420.0, 700.0)
+        );
+        assert_eq!(popup_size(frame(100.0, 100.0), (384.0, 560.0)), POPUP_MIN);
     }
 
     #[test]

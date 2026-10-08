@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, Cpu, Info, LogIn, MousePointer2, OctagonX, Palette, Radio, ShieldCheck, X, Zap } from 'lucide-react';
+import { AppWindow, ArrowLeft, Cpu, ExternalLink, Info, LogIn, MousePointer2, OctagonX, Palette, Radio, ShieldCheck, X, Zap } from 'lucide-react';
 import { computerUseSupported, runtimeMetrics, setSoulComms, soulComms, type ComputerUseSwitch, type RuntimeMetrics, type RuntimeObservation, type SoulColdWake, type SoulComms, type SoulMode, type SoulModel, type SoulPopulation } from '../bridge';
 import {
   availabilityNote,
@@ -31,6 +31,8 @@ import { useSandbox } from './Sandbox';
 import { runsAsText, SandboxChip } from './SandboxChip';
 import { SoulNotices, SoulSourceContext, useSoulMode, useSoulModel, useSoulPopulation } from './SoulNotices';
 import { SurfaceOpenerContext } from '../surfaces/opener';
+import { preferenceActions, usePreferences, windowChoiceOf, type WindowChoice } from '../state/preferences';
+import { Select } from './Select';
 
 /** The conversation with this soul, when chat is available (#17). */
 export interface SoulChat {
@@ -68,6 +70,8 @@ interface CompanionSessionProps {
   onClose: () => void;
   /** The popup's back button; a desktop window has its own close button. */
   showBack?: boolean;
+  /** The popup's pop-out (#264): the session, on its current tab, in its own window. Absent without native windows. */
+  onPopOut?: (tab: SessionTab) => void;
   metricsRefresh?: number;
   /** The tab it opens on, when it has that tab (the floating Dudle's quick menu). */
   initialTab?: SessionTab;
@@ -114,7 +118,7 @@ export function SessionStop({ soul, computerUse, stopper }: { soul: CensusRow; c
  * tree, its audit log, and the read-only details with Launch, in the
  * design's order. Without chat it opens on the details.
  */
-export function CompanionSession({ soul, forest, roster, paused = false, chat, launch, onOpen, onClose, showBack = false, metricsRefresh = 0, initialTab, awaiting, busy, computerUse, stopper }: CompanionSessionProps) {
+export function CompanionSession({ soul, forest, roster, paused = false, chat, launch, onOpen, onClose, showBack = false, onPopOut, metricsRefresh = 0, initialTab, awaiting, busy, computerUse, stopper }: CompanionSessionProps) {
   const { t } = useI18n();
   const ids = useId();
   const back = useRef<HTMLButtonElement>(null);
@@ -153,7 +157,14 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
       {/* Stop while this soul drives the screen (#122), then the design's segmented tabs at the header's right. */}
       <SessionStop soul={soul} computerUse={computerUse} stopper={stopper} />
       {showBack && <SandboxChip soul={soul} />}
-      {showBack && <InfoButton soul={soul} state={state} />}
+      {showBack && <InfoButton soul={soul} state={state} inPopup />}
+      {/* The pop-out (#264): no Lovable control for it; the ⓘ button's look. */}
+      {onPopOut && (
+        <button type="button" onClick={() => onPopOut(active)} aria-label={t('popOut')} title={t('popOut')}
+          className="rounded p-1 text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring hover:text-foreground">
+          <ExternalLink className="size-3.5" aria-hidden />
+        </button>
+      )}
       <div role="tablist" aria-label={name} className="ml-auto flex h-9 items-center gap-0.5 rounded-lg bg-muted p-1"
         onKeyDown={(e) => {
           // As Radix Tabs: Left / Right wrap, Home / End jump to the ends.
@@ -747,16 +758,54 @@ export function SoulFactRows({ soul, refresh = 0 }: { soul: CensusRow; refresh?:
 }
 
 /**
+ * Where this companion opens from the GeniusBar popup (#264): inside it, in
+ * its own window, or as the app's "Open conversations in their own window"
+ * says (the default). A per-viewer preference, kept with the others; no
+ * Lovable design, so it takes the model row's layout and select.
+ */
+export function WindowRow({ soul }: { soul: CensusRow }) {
+  const { t } = useI18n();
+  const prefs = usePreferences();
+  const key = soulKey(soul);
+  const choice = windowChoiceOf(prefs, key);
+  const app = prefs.ownWindows ? t('window.own') : t('window.popup');
+  return (
+    <div className="flex items-start gap-3 p-3">
+      <AppWindow className="mt-0.5 size-4 text-muted-foreground" aria-hidden />
+      <span className="grid min-w-0 flex-1 gap-1">
+        <label className="grid gap-1">
+          <span className="block text-sm font-medium">{t('window.label')}</span>
+          <Select wrapperClassName="w-full" value={choice} className="h-8 pl-2 font-sans text-xs"
+            aria-label={t('window.labelFor', { name: displayName(soul) })}
+            onChange={(e) => preferenceActions.setWindowFor(key, e.target.value as WindowChoice)}>
+            <option value="inherit">{t('window.inherit', { value: app })}</option>
+            <option value="popup">{t('window.popup')}</option>
+            <option value="window">{t('window.own')}</option>
+          </Select>
+        </label>
+        <span className="block text-xs text-muted-foreground">{t('window.hint')}</span>
+      </span>
+    </div>
+  );
+}
+
+/**
  * ⓘ and the Details sheet (Lovable 19.29.22): the soul's actionable rows.
  * Wake on new messages, Agent comms, execution mode, computer use, model
  * (#128), harness sign-in and the GitHub App (key, Rotate / Connect), each once
  * agent-bot reports it; then Customize… (#64), once agent-bot answers
  * `soul profile` for the soul (asked each time the sheet opens).
  */
-export function InfoButton({ soul, state }: {
+export function InfoButton({ soul, state, inPopup = false }: {
   soul: CensusRow;
   /** The live face for Customize…'s title Dudle (the design's `state={c.presence}`). */
   state?: DudleState;
+  /**
+   * The tray popup's own session (#264): Customize… opens its window only
+   * when "Open conversations in their own window" is on, else the dialog
+   * here; and the sheet offers where this companion opens.
+   */
+  inPopup?: boolean;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -766,7 +815,9 @@ export function InfoButton({ soul, state }: {
   const titleId = useId();
   useEffect(() => { if (open) close.current?.focus(); }, [open]);
   const { supported: customizable } = useSoulProfile(soul.agentId, open);
-  const openSurface = useContext(SurfaceOpenerContext);
+  const opener = useContext(SurfaceOpenerContext);
+  const { ownWindows } = usePreferences();
+  const openSurface = inPopup && !ownWindows ? null : opener;
   const name = displayName(soul);
   return (
     <>
@@ -800,6 +851,7 @@ export function InfoButton({ soul, state }: {
               <ComputerUseRow soul={soul} />
               <ModelRow soul={soul} />
               <SoulFactRows soul={soul} />
+              {(inPopup || opener) && <WindowRow soul={soul} />}
             </div>
             {customizable && (
               <div className="flex justify-end">

@@ -4,9 +4,10 @@ import { App, type NativeSurfaces } from './App';
 import type { SurfaceRequest } from './bridge';
 import { sampleCensus, sampleConnection } from './model/fixtures';
 import { LAYOUT_KEY, layoutActions } from './state/layout';
+import { PREFERENCES_KEY, preferenceActions } from './state/preferences';
 import type { LaunchApi } from './useLaunch';
 
-afterEach(() => { cleanup(); vi.useRealTimers(); globalThis.localStorage?.clear(); layoutActions.forget(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); globalThis.localStorage?.clear(); layoutActions.forget(); preferenceActions.forget(); });
 
 function fakeSurfaces(opens = true) {
   const opened: SurfaceRequest[] = [];
@@ -15,15 +16,23 @@ function fakeSurfaces(opens = true) {
     hide: vi.fn(async () => {}),
     sync: vi.fn(async () => true),
     perimeter: vi.fn(async () => true),
+    autohide: vi.fn(async () => {}),
   };
   return { opened, surfaces };
+}
+
+/** The footer ⋯ menu's switch by name, opened fresh. */
+function menuSwitch(name: string) {
+  fireEvent.click(screen.getByRole('button', { name: 'More' }));
+  return screen.getByRole('menuitemcheckbox', { name });
 }
 
 const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
 const connected = { ...sampleConnection, lastRefresh: new Date(0) };
 
 describe('the popup\'s native windows (#223)', () => {
-  it('opens a companion\'s session in its own window and hides the popup', async () => {
+  it('opens a companion\'s session in its own window and hides the popup, once asked to (#264)', async () => {
+    preferenceActions.setOwnWindows(true);
     const { opened, surfaces } = fakeSurfaces();
     render(<App census={sampleCensus} connection={connected} surfaces={surfaces} />);
     fireEvent.click(screen.getByRole('button', { name: /^agent_c,/ }));
@@ -34,6 +43,7 @@ describe('the popup\'s native windows (#223)', () => {
   });
 
   it('falls back to the in-popup session when the window cannot open', async () => {
+    preferenceActions.setOwnWindows(true);
     const { surfaces } = fakeSurfaces(false);
     render(<App census={sampleCensus} connection={connected} surfaces={surfaces} />);
     fireEvent.click(screen.getByRole('button', { name: /^agent_c,/ }));
@@ -41,7 +51,8 @@ describe('the popup\'s native windows (#223)', () => {
     expect(surfaces.hide).not.toHaveBeenCalled();
   });
 
-  it('opens the audit log and the launch dialog in windows, else in the popup', async () => {
+  it('opens the audit log and the launch dialog in windows once asked to, else in the popup', async () => {
+    preferenceActions.setOwnWindows(true);
     const { opened, surfaces } = fakeSurfaces();
     render(<App census={sampleCensus} connection={connected} surfaces={surfaces} launcher={launcher} />);
     fireEvent.click(screen.getByRole('button', { name: 'Audit log' }));
@@ -113,5 +124,125 @@ describe('the popup\'s native windows (#223)', () => {
     expect(screen.queryByRole('menuitemcheckbox', { name: 'Companions on the desktop' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /^agent_c,/ }));
     expect(screen.getByRole('region', { name: 'agent_c, agent_c' })).toBeTruthy();
+  });
+});
+
+describe('in-parent by default, pop-out by choice (#264)', () => {
+  it('shows a companion\'s session inside the popup, with a pop-out to its own window on the same tab', async () => {
+    const { opened, surfaces } = fakeSurfaces();
+    render(<App census={sampleCensus} connection={connected} surfaces={surfaces} />);
+    fireEvent.click(screen.getByRole('button', { name: /^agent_c,/ }));
+    const session = screen.getByRole('region', { name: 'agent_c, agent_c' });
+    expect(opened).toEqual([]);
+    expect(surfaces.hide).not.toHaveBeenCalled();
+    // The in-popup session keeps its back button, sandbox pill and ⓘ (Lovable), plus the pop-out.
+    expect(screen.getByRole('button', { name: 'Back to fleet' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Audit log' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open in its own window' }));
+    await waitFor(() => expect(surfaces.hide).toHaveBeenCalled());
+    expect(opened).toEqual([{ surface: 'session', soul: 'user/agent_c', tab: 'audit' }]);
+    // The popup goes back to the fleet behind the window.
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'agent_c, agent_c' })).toBeNull());
+    expect(screen.getByRole('region', { name: 'Fleet' })).toBeTruthy();
+    expect(session.isConnected).toBe(false);
+  });
+
+  it('keeps the session in the popup when the pop-out window cannot open', async () => {
+    const { surfaces } = fakeSurfaces(false);
+    render(<App census={sampleCensus} connection={connected} surfaces={surfaces} />);
+    fireEvent.click(screen.getByRole('button', { name: /^agent_c,/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open in its own window' }));
+    await waitFor(() => expect(surfaces.open).toHaveBeenCalled());
+    expect(screen.getByRole('region', { name: 'agent_c, agent_c' })).toBeTruthy();
+  });
+
+  it('the ⋯ switch "Open conversations in their own window" is off, stored, and opens windows when on', async () => {
+    const { opened, surfaces } = fakeSurfaces();
+    render(<App census={sampleCensus} connection={connected} surfaces={surfaces} launcher={launcher} />);
+    const item = menuSwitch('Open conversations in their own window');
+    expect(item.getAttribute('aria-checked')).toBe('false');
+    fireEvent.click(item);
+    expect(JSON.parse(localStorage.getItem(PREFERENCES_KEY)!).ownWindows).toBe(true);
+    expect(menuSwitch('Open conversations in their own window').getAttribute('aria-checked')).toBe('true');
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+    fireEvent.click(screen.getByRole('button', { name: /^agent_c,/ }));
+    await waitFor(() => expect(opened).toEqual([{ surface: 'session', soul: 'user/agent_c' }]));
+    expect(screen.queryByRole('region', { name: 'agent_c, agent_c' })).toBeNull();
+  });
+
+  it('lets one companion choose for itself, over the app\'s setting', async () => {
+    preferenceActions.setWindowFor('user/agent_c', 'window');
+    const { opened, surfaces } = fakeSurfaces();
+    const { unmount } = render(<App census={sampleCensus} connection={connected} surfaces={surfaces} />);
+    fireEvent.click(screen.getByRole('button', { name: /^agent_c,/ }));
+    await waitFor(() => expect(opened).toEqual([{ surface: 'session', soul: 'user/agent_c' }]));
+    // Another companion still opens in the popup.
+    fireEvent.click(screen.getByRole('button', { name: /^luna,/ }));
+    expect(screen.getByRole('region', { name: /^luna,/ })).toBeTruthy();
+    expect(opened).toHaveLength(1);
+    unmount();
+    // With the app on, a companion kept inside stays inside.
+    preferenceActions.setOwnWindows(true);
+    preferenceActions.setWindowFor('user/agent_c', 'popup');
+    render(<App census={sampleCensus} connection={connected} surfaces={surfaces} />);
+    fireEvent.click(screen.getByRole('button', { name: /^agent_c,/ }));
+    expect(screen.getByRole('region', { name: 'agent_c, agent_c' })).toBeTruthy();
+    expect(opened).toHaveLength(1);
+  });
+
+  it('offers the companion\'s choice in its ⓘ details, following the app\'s by default', () => {
+    const { surfaces } = fakeSurfaces();
+    render(<App census={sampleCensus} connection={connected} surfaces={surfaces} />);
+    fireEvent.click(screen.getByRole('button', { name: /^agent_c,/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+    const select = screen.getByRole('combobox', { name: 'Where agent_c opens from GeniusBar' }) as HTMLSelectElement;
+    expect(select.value).toBe('inherit');
+    expect(select.options[0].text).toBe('Follow app setting (In GeniusBar)');
+    fireEvent.change(select, { target: { value: 'window' } });
+    expect(JSON.parse(localStorage.getItem(PREFERENCES_KEY)!).windowFor).toEqual({ 'user/agent_c': 'window' });
+    fireEvent.change(select, { target: { value: 'inherit' } });
+    expect(JSON.parse(localStorage.getItem(PREFERENCES_KEY)!).windowFor).toEqual({});
+  });
+
+  it('keeps the audit log\'s panel in the popup, with a pop-out to its window', async () => {
+    const { opened, surfaces } = fakeSurfaces();
+    render(<App census={sampleCensus} connection={connected} surfaces={surfaces} launcher={launcher} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Audit log' }));
+    const panel = screen.getByRole('region', { name: 'Audit log' });
+    fireEvent.click(screen.getByRole('button', { name: 'Launch companion' }));
+    expect(screen.getByRole('dialog', { name: 'Launch a new companion' })).toBeTruthy();
+    expect(opened).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Open in its own window' }));
+    await waitFor(() => expect(opened).toEqual([{ surface: 'audit' }]));
+    await waitFor(() => expect(panel.isConnected).toBe(false));
+  });
+});
+
+describe('closing on a click outside is a choice (#265)', () => {
+  it('tells the shell the popup stays open, and to hide once the ⋯ switch is on', async () => {
+    const { surfaces } = fakeSurfaces();
+    render(<App census={sampleCensus} connection={connected} surfaces={surfaces} />);
+    await waitFor(() => expect(surfaces.autohide).toHaveBeenCalledWith(false));
+    const item = menuSwitch('Close GeniusBar when clicking outside it');
+    expect(item.getAttribute('aria-checked')).toBe('false');
+    fireEvent.click(item);
+    expect(JSON.parse(localStorage.getItem(PREFERENCES_KEY)!).closeOnClickOut).toBe(true);
+    await waitFor(() => expect(surfaces.autohide).toHaveBeenLastCalledWith(true));
+    expect(menuSwitch('Close GeniusBar when clicking outside it').getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('sends the stored choice as the popup starts', async () => {
+    preferenceActions.setCloseOnClickOut(true);
+    const { surfaces } = fakeSurfaces();
+    render(<App census={sampleCensus} connection={connected} surfaces={surfaces} />);
+    await waitFor(() => expect(surfaces.autohide).toHaveBeenCalledWith(true));
+    expect(surfaces.autohide).toHaveBeenCalledTimes(1);
+  });
+
+  it('has nothing to say outside the app', () => {
+    render(<App census={sampleCensus} connection={connected} onRefresh={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    expect(screen.queryByRole('menuitemcheckbox', { name: 'Close GeniusBar when clicking outside it' })).toBeNull();
+    expect(screen.queryByRole('menuitemcheckbox', { name: 'Open conversations in their own window' })).toBeNull();
   });
 });

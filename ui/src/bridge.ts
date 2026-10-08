@@ -691,6 +691,18 @@ export async function syncPerimeter(on: boolean, invokeImpl: typeof invoke = inv
 }
 
 /**
+ * "Close GeniusBar when clicking outside it" (#265): tells the shell whether
+ * the tray popup hides when it loses focus. The shell starts with it off,
+ * so the popup stays while a drag comes over from Finder; the popup sends
+ * the stored choice as it starts and whenever it changes. Nothing outside
+ * the app; an older shell without the command is left as it is.
+ */
+export async function setPopupAutohide(on: boolean, invokeImpl: typeof invoke = invoke): Promise<void> {
+  if (!inApp() && invokeImpl === invoke) return;
+  await invokeImpl('set_popup_autohide', { on }).catch(() => {});
+}
+
+/**
  * What a native surface does with its own window (#223), in logical points.
  * The pages take it as a prop, so tests and the preview pass a fake.
  */

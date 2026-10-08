@@ -38,6 +38,24 @@ of the app. **Remove services…** in the popup footer unloads and deletes
 both. Services from another install, such as Homebrew's, are never changed,
 except by the migration below.
 
+### Windows: inside the popup by default, pop-outs by choice
+
+A companion's session, the audit log, Customize and Launch open inside the
+GeniusBar popup, as the Lovable design shows them (#264). Each view has a
+pop-out (an arrow button in its header) that moves it to a native window of
+its own (#223); the footer **⋯** menu's **Open conversations in their own
+window** makes that the default, and a companion's ⓘ details row **Opens
+in** chooses for that companion alone (follow the app, in GeniusBar, or its
+own window). Team cards stay native windows on the desktop (**Companions on
+the desktop**, same menu). Every pop-out window is resizable and comes back
+at its last size and place (per companion for sessions), kept in
+`windows.json` in the app's config folder; the popup keeps the size it was
+last resized to. The popup stays open when you click elsewhere, so a `.soul`
+package or a file can be dragged onto it from Finder (#265); **Close
+GeniusBar when clicking outside it** in the ⋯ menu brings back the menu-like
+hide. These are per-viewer preferences in the web view's storage
+(`gb.preferences`).
+
 ### Command-line tools: Homebrew is not required
 
 **Command-line tools…** in the popup footer puts the bundled `agent-bot` and

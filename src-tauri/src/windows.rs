@@ -9,9 +9,10 @@
 //! shell which team windows should exist through `sync_team_windows`.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 use crate::Mode;
@@ -63,6 +64,141 @@ impl Surface {
 
 /// The team window for a lead.
 const TEAM_PREFIX: &str = "team-";
+
+/// Where a window sat and how big it was (#264), in logical points.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Frame {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl Frame {
+    /// A frame worth restoring: finite, with a size to show.
+    pub fn valid(&self) -> bool {
+        [self.x, self.y, self.width, self.height]
+            .iter()
+            .all(|v| v.is_finite())
+            && self.width > 0.0
+            && self.height > 0.0
+    }
+}
+
+/// A monitor in logical points: its top-left and its size.
+pub type MonitorRect = ((f64, f64), (f64, f64));
+
+/// Whether a remembered frame still lands on a screen that is here now:
+/// the window's title area (a point just inside its top-left) is on one of
+/// the monitors. A frame from a monitor since unplugged is not restored.
+pub fn on_screen(frame: &Frame, monitors: &[MonitorRect]) -> bool {
+    let (px, py) = (frame.x + 40.0, frame.y + 20.0);
+    monitors
+        .iter()
+        .any(|((x, y), (w, h))| px >= *x && px < x + w && py >= *y && py < y + h)
+}
+
+/// The last frame of every surface window, and the popup's size, by window
+/// label (#264): a session's label carries its soul, so each companion's
+/// window comes back where it was. Kept across launches in `windows.json`
+/// in the app's config folder; a missing or malformed file is no frames,
+/// and a frame with nothing to show is left out.
+#[derive(Default)]
+pub struct Frames(Mutex<HashMap<String, Frame>>);
+
+impl Frames {
+    /// The file's text back to frames; malformed text, or one bad frame, is dropped.
+    pub fn parse(text: &str) -> HashMap<String, Frame> {
+        serde_json::from_str::<HashMap<String, Frame>>(text)
+            .map(|frames| frames.into_iter().filter(|(_, f)| f.valid()).collect())
+            .unwrap_or_default()
+    }
+
+    /// The frames as the file holds them.
+    pub fn to_text(frames: &HashMap<String, Frame>) -> String {
+        serde_json::to_string_pretty(frames).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    /// Replaces what is held with the file's contents, if it has any.
+    pub fn load_from(&self, path: &Path) {
+        if let Ok(text) = std::fs::read_to_string(path) {
+            *self.0.lock().unwrap() = Self::parse(&text);
+        }
+    }
+
+    pub fn get(&self, label: &str) -> Option<Frame> {
+        self.0.lock().unwrap().get(label).copied()
+    }
+
+    /// Notes where `label` is now; an invalid frame is ignored.
+    pub fn record(&self, label: &str, frame: Frame) {
+        if frame.valid() {
+            self.0.lock().unwrap().insert(label.to_string(), frame);
+        }
+    }
+
+    /// Writes the frames to `path`, creating its folder.
+    pub fn save_to(&self, path: &Path) -> std::io::Result<()> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let text = Self::to_text(&self.0.lock().unwrap());
+        std::fs::write(path, text)
+    }
+}
+
+/// `windows.json` in the app's config folder (`~/Library/Application
+/// Support/app.geniusbar` on macOS); None when the shell has no such folder.
+pub fn frames_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|dir| dir.join("windows.json"))
+}
+
+/// Writes the remembered frames; failures are logged, never raised.
+pub fn save_frames<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let Some(path) = frames_path(app) else {
+        return;
+    };
+    if let Err(error) = app.state::<Frames>().save_to(&path) {
+        log_line(app, &format!("windows.json not saved: {error}"));
+    }
+}
+
+/// Reads the frames remembered by an earlier launch.
+pub fn load_frames<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(path) = frames_path(app) {
+        app.state::<Frames>().load_from(&path);
+    }
+}
+
+/// A window's frame now, in logical points; None while the shell cannot say.
+pub fn frame_of<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> Option<Frame> {
+    let scale = window.scale_factor().ok()?;
+    let at = window.outer_position().ok()?.to_logical::<f64>(scale);
+    let size = window.inner_size().ok()?.to_logical::<f64>(scale);
+    Some(Frame {
+        x: at.x,
+        y: at.y,
+        width: size.width,
+        height: size.height,
+    })
+}
+
+/// The monitors here now, in logical points.
+fn monitors<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Vec<MonitorRect> {
+    app.available_monitors()
+        .unwrap_or_default()
+        .iter()
+        .map(|monitor| {
+            let scale = monitor.scale_factor();
+            let at = monitor.position().to_logical::<f64>(scale);
+            let size = monitor.size().to_logical::<f64>(scale);
+            ((at.x, at.y), (size.width, size.height))
+        })
+        .collect()
+}
 
 /// The computer-use perimeter (#122): the orange border over the whole
 /// screen, click-through, while a soul drives the screen.
@@ -229,13 +365,23 @@ pub async fn open_surface(
     }
     let documents = app.state::<Documents>();
     documents.opened();
+    // Where this window was last, if that is still on a screen (#264);
+    // else the design's size, centred.
+    let remembered = app
+        .state::<Frames>()
+        .get(&label)
+        .filter(|frame| on_screen(frame, &monitors(&app)));
     let builder = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()))
         .title("GeniusBar")
-        .inner_size(width, height)
         .min_inner_size(min_width, min_height)
         .resizable(true)
-        .center()
         .focused(true);
+    let builder = match remembered {
+        Some(frame) => builder
+            .inner_size(frame.width.max(min_width), frame.height.max(min_height))
+            .position(frame.x, frame.y),
+        None => builder.inner_size(width, height).center(),
+    };
     // The traffic lights float over the page's own header (the design draws
     // the title bar itself); Windows keeps its own frame.
     #[cfg(target_os = "macos")]
@@ -252,13 +398,24 @@ pub async fn open_surface(
         }
     };
     let handle = app.clone();
-    window.on_window_event(move |event| {
-        if let WindowEvent::Destroyed = event {
+    let this = window.clone();
+    window.on_window_event(move |event| match event {
+        // Each move or resize is noted; the file is written as the window
+        // closes (and as the app exits), not on every step of a drag.
+        WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
+            if let Some(frame) = frame_of(&this) {
+                handle.state::<Frames>().record(this.label(), frame);
+            }
+        }
+        WindowEvent::CloseRequested { .. } => save_frames(&handle),
+        WindowEvent::Destroyed => {
+            save_frames(&handle);
             let left = handle.state::<Documents>().closed();
             if left == 0 && tray && handle.get_webview_window(crate::DESKTOP_LABEL).is_none() {
                 accessory(&handle);
             }
         }
+        _ => {}
     });
     window.set_focus().map_err(|e| e.to_string())
 }
@@ -628,6 +785,105 @@ mod tests {
         assert_eq!(Surface::parse("session"), Some(Surface::Session));
         assert_eq!(Surface::parse("tray"), None);
         assert!(Surface::Launch.size().0 .0 > Surface::Launch.size().1 .0);
+    }
+
+    #[test]
+    fn frames_round_trip_and_drop_the_malformed() {
+        let frames = Frames::default();
+        let session = Frame {
+            x: 100.0,
+            y: 80.5,
+            width: 820.0,
+            height: 700.0,
+        };
+        frames.record("session-abc", session);
+        frames.record(
+            "main",
+            Frame {
+                x: 0.0,
+                y: 0.0,
+                width: 420.0,
+                height: 640.0,
+            },
+        );
+        // Nothing to show is not remembered.
+        frames.record(
+            "audit",
+            Frame {
+                x: 1.0,
+                y: 1.0,
+                width: 0.0,
+                height: 300.0,
+            },
+        );
+        frames.record(
+            "launch",
+            Frame {
+                x: f64::NAN,
+                y: 1.0,
+                width: 300.0,
+                height: 300.0,
+            },
+        );
+        let text = Frames::to_text(&frames.0.lock().unwrap());
+        let back = Frames::parse(&text);
+        assert_eq!(back.len(), 2);
+        assert_eq!(back["session-abc"], session);
+        assert_eq!(back["main"].width, 420.0);
+        // A frame with nothing to show is dropped; the rest of the file stays.
+        let partial = Frames::parse(
+            r#"{"audit":{"x":10,"y":20,"width":600,"height":400},"zero":{"x":0,"y":0,"width":-1,"height":5}}"#,
+        );
+        assert_eq!(partial.len(), 1);
+        assert_eq!(partial["audit"].height, 400.0);
+        // A file that is not frames at all is no frames.
+        assert!(Frames::parse(r#"{"bad":{"x":"left"}}"#).is_empty());
+        assert!(Frames::parse("not json").is_empty());
+        assert!(Frames::parse("").is_empty());
+    }
+
+    #[test]
+    fn frames_save_and_load_through_a_file() {
+        let dir = std::env::temp_dir().join(format!("gb-frames-{}", std::process::id()));
+        let path = dir.join("nested").join("windows.json");
+        let frames = Frames::default();
+        frames.record(
+            "session-x",
+            Frame {
+                x: 5.0,
+                y: 6.0,
+                width: 700.0,
+                height: 500.0,
+            },
+        );
+        frames.save_to(&path).unwrap();
+        let again = Frames::default();
+        again.load_from(&path);
+        assert_eq!(again.get("session-x").unwrap().width, 700.0);
+        assert_eq!(again.get("session-y"), None);
+        // A missing file leaves what is held.
+        again.load_from(&dir.join("missing.json"));
+        assert!(again.get("session-x").is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_frame_is_restored_only_on_a_screen_still_here() {
+        let main = ((0.0, 0.0), (1440.0, 900.0));
+        let right = ((1440.0, -100.0), (1920.0, 1080.0));
+        let frame = |x, y| Frame {
+            x,
+            y,
+            width: 780.0,
+            height: 660.0,
+        };
+        assert!(on_screen(&frame(100.0, 100.0), &[main]));
+        assert!(on_screen(&frame(1500.0, -50.0), &[main, right]));
+        // The monitor to the right was unplugged.
+        assert!(!on_screen(&frame(1500.0, -50.0), &[main]));
+        // Just off the bottom-right, or on no monitor at all.
+        assert!(!on_screen(&frame(1420.0, 890.0), &[main]));
+        assert!(!on_screen(&frame(100.0, 100.0), &[]));
     }
 
     #[test]

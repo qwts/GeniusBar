@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { History, Plus, Volume2, VolumeX, X } from 'lucide-react';
+import { ExternalLink, History, Plus, Volume2, VolumeX, X } from 'lucide-react';
 import { ApprovalCounts, ApprovalsList } from './components/ApprovalsList';
 import { ArchiveDialog, ArchivedNotice, liveArchiver, type Archiver } from './components/ArchiveDialog';
-import { currentWindow, inApp, listSoulTemplates, liveComputerUse, openSurface, popupVisible, soulStopSupported, stopSoul, syncPerimeter, syncTeamWindows, type ComputerUseSwitch, type RemovedSoul, type SurfaceRequest, type TeamWindowSpec, shellLog } from './bridge';
+import { currentWindow, inApp, listSoulTemplates, liveComputerUse, openSurface, popupVisible, setPopupAutohide, soulStopSupported, stopSoul, syncPerimeter, syncTeamWindows, type ComputerUseSwitch, type RemovedSoul, type SurfaceRequest, type TeamWindowSpec, shellLog } from './bridge';
 import { FooterMenu } from './components/FooterMenu';
 import { CompanionSession, ComputerUseContext, InfoButton, type SessionTab } from './components/CompanionSession';
 import { AuditWindow, CompanionWindow, Desktop } from './components/Desktop';
@@ -37,7 +37,8 @@ import { desktopWindowsOn, layoutActions, useLayout } from './state/layout';
 import { SurfaceOpenerContext, type OpenSurface } from './surfaces/opener';
 import { usePerimeter } from './usePerimeter';
 import { useTeamWindows } from './useTeamWindows';
-import { usePreferences } from './state/preferences';
+import { opensInOwnWindow, preferenceActions, usePreferences } from './state/preferences';
+import { queryTabOf } from './model/surface';
 import { DefaultHarness } from './components/DefaultHarness';
 import { defaultSandboxSource, SandboxProvider, useSandbox, type SandboxSource } from './components/Sandbox';
 import { SandboxCard } from './components/SandboxCard';
@@ -57,9 +58,13 @@ export type AppMode = 'tray' | 'window';
 
 /**
  * The popup's native windows (#223): sessions, the audit log, Customize and
- * Launch open in their own windows, and every team card is one on the
- * desktop. Each `open` rejects when the shell has none, and the popup then
- * shows that view itself, as before.
+ * Launch can open in their own windows, and every team card is one on the
+ * desktop. By default (#264) the popup shows a session, the audit log,
+ * Customize and Launch inside itself, as it did before #223, and each view
+ * offers a pop-out; "Open conversations in their own window" (the footer ⋯)
+ * opens them in windows at once, and a companion's Details can choose for
+ * itself. Each `open` rejects when the shell has none, and the popup then
+ * shows that view itself.
  */
 export interface NativeSurfaces {
   open: OpenSurface;
@@ -69,6 +74,8 @@ export interface NativeSurfaces {
   sync: (teams: TeamWindowSpec[]) => Promise<boolean>;
   /** The coordinator's `sync_perimeter` (#122); absent keeps the in-popup perimeter only. */
   perimeter?: (on: boolean) => Promise<boolean>;
+  /** "Close GeniusBar when clicking outside it" (#265), sent to the shell; absent leaves the shell's default (off). */
+  autohide?: (on: boolean) => Promise<void>;
 }
 
 const liveSurfaces: NativeSurfaces = {
@@ -76,6 +83,7 @@ const liveSurfaces: NativeSurfaces = {
   hide: () => currentWindow()?.hide() ?? Promise.resolve(),
   sync: (teams) => syncTeamWindows(teams),
   perimeter: (on) => syncPerimeter(on),
+  autohide: (on) => setPopupAutohide(on),
 };
 
 interface AppProps {
@@ -230,6 +238,14 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   // is none, so the caller shows the view in the popup instead.
   const openNative = useMemo<OpenSurface | null>(() => native && ((request: SurfaceRequest) =>
     native.open(request).then(() => { native.hide().catch(() => {}); })), [native]);
+  const prefs = usePreferences();
+  // The popup keeps its views inside itself unless asked otherwise (#264):
+  // this opener is null then, and each view's pop-out uses `openNative`.
+  const openWindowed = prefs.ownWindows ? openNative : null;
+  // "Close GeniusBar when clicking outside it" (#265): the shell starts
+  // with it off and hears the stored choice from here.
+  const autohide = native?.autohide;
+  useEffect(() => { if (autohide) void autohide(prefs.closeOnClickOut); }, [autohide, prefs.closeOnClickOut]);
   const sandbox = useSandbox();
   // The badges' population read also carries the hues souls declare (#64),
   // joined into the census here, before anything draws a Dudle.
@@ -290,9 +306,11 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const toggleAuditPanel = () => setPanel((open) => (open === 'audit' ? null : 'audit'));
   const openAudit = mode === 'window'
     ? () => { setAuditWindow(true); setMenuOpen(false); }
-    // The popup opens the audit window (#223); without one, its panel.
-    : openNative ? () => { openNative({ surface: 'audit' }).catch(toggleAuditPanel); }
+    // The popup opens the audit window when asked to (#223, #264); else its panel.
+    : openWindowed ? () => { openWindowed({ surface: 'audit' }).catch(toggleAuditPanel); }
     : toggleAuditPanel;
+  // The panel's pop-out: the same log in its own window.
+  const popOutAudit = openNative && (() => { openNative({ surface: 'audit' }).then(() => setPanel(null)).catch(() => {}); });
   // An installed soul opened from Finder is that companion, never a new
   // launch (#80); one not in the roster yet keeps the form, and the daemon
   // relaunches it rather than spawning another.
@@ -333,10 +351,10 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   // Custom soul path. The footer + (#97) and the palette open it as "add a
   // companion"; the ⋯ menu keeps it as "Launch soul…" for a package.
   const launchHere = () => { setSelectedKey(null); setLaunchingPackage(true); setMenuOpen(false); };
-  // The popup's + opens the launch window (#223); without one, the dialog here.
-  const launchPackage = openNative ? () => { openNative({ surface: 'launch' }).catch(launchHere); } : launchHere;
+  // The popup's + opens the launch window when asked to (#223, #264); else the dialog here.
+  const launchPackage = openWindowed ? () => { openWindowed({ surface: 'launch' }).catch(launchHere); } : launchHere;
   useEffect(() => { if (showSetup || showStarter) setMenuOpen(true); }, [showSetup, showStarter]);
-  const { defaultHarness } = usePreferences();
+  const { defaultHarness } = prefs;
   const launch = useMemo(() => launcher && {
     launcher,
     accounts: [...new Set(roster.map((s) => s.account))].sort(),
@@ -383,10 +401,16 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const open = (soul: CensusRow) => {
     const key = soulKey(soul);
     setMenuOpen(false);
-    // The popup opens the session in its own window (#223); without one, here.
-    if (openNative) openNative({ surface: 'session', soul: key }).catch(() => setSelectedKey(key));
+    // The popup opens the session here unless the app, or this companion,
+    // asked for its own window (#223, #264); a window that fails opens here.
+    if (openNative && opensInOwnWindow(prefs, key)) openNative({ surface: 'session', soul: key }).catch(() => setSelectedKey(key));
     else setSelectedKey(key);
   };
+  // The in-popup session's pop-out (#264): the same session, on the same
+  // tab, in its own window; the popup goes back to the fleet behind it.
+  const popOut = mode === 'tray' && openNative && openKey !== null
+    ? (tab: SessionTab) => { openNative({ surface: 'session', soul: openKey, tab: queryTabOf(tab) }).then(() => setSelectedKey(null)).catch(() => {}); }
+    : undefined;
   // The floating Dudle's quick menu opens its lead on a given tab; the
   // session remounts so the tab applies even when it is already open.
   const [quick, setQuick] = useState<{ tab: SessionTab; n: number }>({ tab: 'chat', n: 0 });
@@ -422,6 +446,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
       onOpen={open}
       onClose={() => setSelectedKey(null)}
       showBack={mode === 'tray'}
+      onPopOut={popOut}
       awaiting={awaitingIds}
       busy={busyIds}
       computerUse={(badges ?? liveBadges).computerUse}
@@ -474,6 +499,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
             <FooterMenu items={[
               openDesktop && { label: t('openDesktop'), run: openDesktop },
               native && { label: t('desktopWindows'), checked: desktopOn, run: () => layoutActions.setDesktopWindows(!desktopOn) },
+              native && { label: t('ownWindows'), checked: prefs.ownWindows, run: () => preferenceActions.setOwnWindows(!prefs.ownWindows) },
+              native && { label: t('closeOnClickOut'), checked: prefs.closeOnClickOut, run: () => preferenceActions.setCloseOnClickOut(!prefs.closeOnClickOut) },
               canCheckUpdates && { label: t('checkUpdates'), run: checkUpdates },
               canLaunchPackage && { label: t('launchPackage'), run: launchPackage },
               cliTools && { label: t('cli.action'), run: () => setPanel('cli') },
@@ -490,6 +517,11 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
         <section className="border-t border-border" aria-label={t('auditTitle')}>
           <div className="flex items-center gap-2 px-3 pt-2">
             <h3 className="m-0 flex-1 text-sm font-medium">{t('auditTitle')} <span className="font-normal text-muted-foreground">· {t('allActivity')}</span></h3>
+            {popOutAudit && (
+              <button type="button" className={footerIcon} aria-label={t('popOut')} title={t('popOut')} onClick={popOutAudit}>
+                <ExternalLink className="size-3.5" aria-hidden />
+              </button>
+            )}
             <button type="button" className={footerIcon} aria-label={t('close')} onClick={() => setPanel(null)}><X className="size-3.5" aria-hidden /></button>
           </div>
           <div className="max-h-72 overflow-y-auto"><AuditLog agentId={null} roster={roster} /></div>
