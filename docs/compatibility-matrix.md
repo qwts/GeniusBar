@@ -116,6 +116,7 @@ commit of this document.
 | `soul env clean`, `soul env migrate --complete` | agent-bot ≥ v0.10.54 (capabilities `env-clean`, `migrate-complete`) | The Environment section keeps **Clean up cache** / **Complete setup** disabled with a note unless the descriptor lists the capability; an older engine's usage line maps to `*-unsupported`. |
 | `soul env export`, `soul env import` | agent-bot ≥ v0.10.55 (capabilities `env-export`, `env-import`) | **Export life…** / **Import life…** disabled with a note unless listed; same usage-line mapping. |
 | `soul env migrate --harnesses-into-runtimes` (and the step inside `--complete`) | agent-bot ≥ v0.10.56 (capability `harnesses-into-runtimes`) | An older engine lists the `harnesses-into-runtimes` step as pending and **Complete setup** leaves it so; the legacy install still launches. No app control is gated on it. |
+| `soul env history` | agent-bot ≥ v0.10.57 (capability `env-history`) | The Memory tab's **Past conversations** shows "This agent-bot can't list past runs yet." unless the descriptor lists the capability, and never asks the engine; an older engine's usage line maps to `soul-env-history-unsupported`. Continuity and the memory location still render from `soul env`. |
 | Bundled git on `AGENT_BOT_TOOL_PATH` | GeniusBar ≥ 0.1.53 | Older apps use whatever git the system has. |
 
 ## 3. Pairs exercised

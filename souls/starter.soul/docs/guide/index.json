@@ -280,7 +280,11 @@
         "cache",
         "backup",
         "move",
-        "fork"
+        "fork",
+        "memory tab",
+        "past runs",
+        "conversations",
+        "env history"
       ],
       "file": "12-environment-memory-history.md"
     },
