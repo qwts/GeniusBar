@@ -115,6 +115,7 @@ commit of this document.
 | `soul env`, `.soul-state` migration journal | agent-bot ≥ v0.10.50 (#583) | Absent command on older pins; files untouched. GeniusBar #268 adopts the contract. |
 | `soul env clean`, `soul env migrate --complete` | agent-bot ≥ v0.10.54 (capabilities `env-clean`, `migrate-complete`) | The Environment section keeps **Clean up cache** / **Complete setup** disabled with a note unless the descriptor lists the capability; an older engine's usage line maps to `*-unsupported`. |
 | `soul env export`, `soul env import` | agent-bot ≥ v0.10.55 (capabilities `env-export`, `env-import`) | **Export life…** / **Import life…** disabled with a note unless listed; same usage-line mapping. |
+| `soul env migrate --harnesses-into-runtimes` (and the step inside `--complete`) | agent-bot ≥ v0.10.56 (capability `harnesses-into-runtimes`) | An older engine lists the `harnesses-into-runtimes` step as pending and **Complete setup** leaves it so; the legacy install still launches. No app control is gated on it. |
 | Bundled git on `AGENT_BOT_TOOL_PATH` | GeniusBar ≥ 0.1.53 | Older apps use whatever git the system has. |
 
 ## 3. Pairs exercised
