@@ -42,12 +42,13 @@ import { TeamSurface } from './surfaces/TeamSurface';
 import type { Stopper } from './components/FloatingDudle';
 import { AuditSourceContext, type AuditSource } from './components/AuditLog';
 import { SoulSourceContext, type SoulSource } from './components/SoulNotices';
+import { EnvironmentSourceContext, type EnvironmentSource } from './components/EnvironmentSection';
 import type { CensusRow } from './model/census';
 import { emptyChat, emptyComposer, mergeIncoming, type ChatState } from './model/chat';
-import { inboxMessage, sampleApprovals, sampleAudit, sampleBadges, sampleCensus, sampleColdWake, sampleConnection, sampleFloating, sampleModels, sampleModes, sampleOpenedPackages, samplePaused, samplePopulation, sampleRemovalPlan, sampleSessionEntries, samplePreparedRevision, sampleProfile, sampleProfileFiles, sampleTemplates } from './model/fixtures';
+import { inboxMessage, sampleApprovals, sampleAudit, sampleBadges, sampleCensus, sampleColdWake, sampleConnection, sampleFloating, sampleModels, sampleModes, sampleOpenedPackages, samplePaused, samplePopulation, sampleRemovalPlan, sampleSessionEntries, samplePreparedRevision, sampleProfile, sampleProfileFiles, sampleTemplates, sampleEnvironments } from './model/fixtures';
 import type { Pauser } from './usePause';
 import type { TemplateLister } from './useSoulTemplates';
-import { BridgeError } from './bridge';
+import { BridgeError, type SoulEnvironment } from './bridge';
 import { ProfileSourceContext, type ProfileSource } from './useSoulProfile';
 import { CustomizeDialog } from './components/CustomizeDialog';
 import { I18nProvider } from './lib/i18n';
@@ -119,6 +120,52 @@ const computerUseSwitch: ComputerUseSwitch = {
     const record = population[agentId];
     if (record) population[agentId] = { ...record, computerUse: on };
     return { agentId, computerUse: on };
+  },
+};
+
+// The Environment section (#268) on sampleEnvironments: luna's install and
+// migrations "succeed" as the engine would report them once the owner
+// approves; scout's older engine offers none; the rest read as offline,
+// and the archived soul as an engine without `soul env`.
+const environments: Record<string, SoulEnvironment> = { ...sampleEnvironments };
+const environmentSource: EnvironmentSource = {
+  environment: async (agentId) => {
+    const env = environments[agentId];
+    if (env) return env;
+    throw new BridgeError(agentId === 'agent_gone' ? 'soul-env-unsupported' : 'soul-env-unavailable', 'no environment in the preview');
+  },
+  installRuntime: async (agentId, runtime) => {
+    const env = environments[agentId];
+    if (!env) throw new BridgeError('soul-not-found', 'Soul not found.');
+    const row = env.runtimes.missing.find((r) => r.name === runtime);
+    if (!row) throw new BridgeError('runtime-install-failed', `${runtime} is not declared`);
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    const installed = { ...row, source: 'catalog', path: `${env.root.soulDir}/.soul-state/runtimes/${runtime}/${row.version}`, bin: 'bin' };
+    environments[agentId] = {
+      ...env,
+      runtimes: { ...env.runtimes, installed: [...env.runtimes.installed, installed], missing: env.runtimes.missing.filter((r) => r.name !== runtime) },
+      readiness: { ...env.readiness, problems: env.readiness.problems.filter((p) => !(p.code === 'runtime-missing' && typeof p.message === 'string' && p.message.startsWith(`${runtime} `))) },
+    };
+    return { agentId, ready: environments[agentId].readiness.ready, installed: [runtime], skipped: [], harnesses: [],
+      runtimes: [{ name: runtime, status: 'installed', version: typeof row.version === 'string' ? row.version : null, lastError: null }] };
+  },
+  migrate: async (agentId, kind, harness) => {
+    const env = environments[agentId];
+    if (!env) throw new BridgeError('soul-not-found', 'Soul not found.');
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    const id = kind === 'space-into-soul' ? 'space-into-soul' : `adopt-host-signin:${harness ?? env.harnesses.selected ?? ''}`;
+    const code = kind === 'space-into-soul' ? 'memory-not-contained' : 'tool-signin-missing';
+    const steps = env.migration.steps.map((s) => (s.id === id ? { ...s, status: 'done' } : s));
+    const pending = steps.some((s) => s.status === 'pending');
+    environments[agentId] = {
+      ...env,
+      components: env.components.map((c) => (kind === 'space-into-soul' && c.id === 'memory' ? { ...c, location: 'inside', contained: true, target: null }
+        : kind === 'adopt-host-signin' && c.id === 'tool-state' ? { ...c, present: true, entries: (Array.isArray(c.entries) ? c.entries : []).map((e) => (e && typeof e === 'object' && (e as { harness?: unknown }).harness === harness ? { ...e, signIn: 'present', containment: 'soul' } : e)) } : c)),
+      readiness: { ...env.readiness, problems: env.readiness.problems.filter((p) => p.code !== code) },
+      migration: { ...env.migration, status: pending ? 'pending' : 'none', steps },
+    };
+    return { agentId, operation: kind, decision: kind === 'space-into-soul' ? 'migrated' : 'adopted',
+      steps: steps.filter((s) => s.id === id).map((s) => ({ ...s, note: kind === 'space-into-soul' ? null : 'copied auth.json' })) };
   },
 };
 
@@ -243,4 +290,4 @@ function Preview() {
   return <>{mode === 'tray' ? <div style={{ width: 384, height: 560, margin: 16, outline: '1px solid #444' }}>{app}</div> : app}{dialog}</>;
 }
 
-createRoot(document.getElementById('root')!).render(<StrictMode><AuditSourceContext.Provider value={audit}><SoulSourceContext.Provider value={soulSource}><Preview /></SoulSourceContext.Provider></AuditSourceContext.Provider></StrictMode>);
+createRoot(document.getElementById('root')!).render(<StrictMode><AuditSourceContext.Provider value={audit}><SoulSourceContext.Provider value={soulSource}><EnvironmentSourceContext.Provider value={environmentSource}><Preview /></EnvironmentSourceContext.Provider></SoulSourceContext.Provider></AuditSourceContext.Provider></StrictMode>);

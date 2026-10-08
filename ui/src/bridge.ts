@@ -1734,3 +1734,123 @@ export async function discardRevision(staging: string, invokeImpl: typeof invoke
     throw failureAs(error, 'soul-revision-failed');
   }
 }
+
+/** One runtime or harness row of `soul runtimes install --json` (agent-bot-identity #583 slice 3). */
+export interface RuntimeInstallRow {
+  name: string;
+  /** `installed`, `missing` or `unsupported`, as the engine says. */
+  status: string | null;
+  version: string | null;
+  /** The last failed install of that version; null otherwise. */
+  lastError: { code: string; message: string } | null;
+}
+
+/**
+ * The engine's report after `soul runtimes install <soul> --runtime NAME
+ * --json` (#268): the inspection afterwards with `installed[]` and
+ * `skipped[]` (already there). The install runs to completion in the
+ * engine (no plan, confirm or cancel protocol yet); the owner gate is the
+ * engine's own (its consent dialog, Touch ID), as `soul remove`'s.
+ */
+export interface RuntimeInstall {
+  agentId: string;
+  ready: boolean | null;
+  installed: string[];
+  skipped: string[];
+  runtimes: RuntimeInstallRow[];
+  harnesses: RuntimeInstallRow[];
+}
+
+function installRows(value: unknown): RuntimeInstallRow[] {
+  return records(value).flatMap((row): RuntimeInstallRow[] => {
+    const name = text(row.name);
+    if (!name) return [];
+    const last = record(row.lastError);
+    const lastError = typeof last.message === 'string' ? { code: text(last.code) ?? 'runtime-install-failed', message: last.message } : null;
+    return [{ name, status: text(row.status), version: text(row.version), lastError }];
+  });
+}
+
+/** The install report with its shape checked; null when the answer is not one. */
+export function normalizeRuntimeInstall(raw: unknown): RuntimeInstall | null {
+  if (!isRecord(raw) || typeof raw.agentId !== 'string' || !Array.isArray(raw.installed)) return null;
+  return {
+    agentId: raw.agentId,
+    ready: typeof raw.ready === 'boolean' ? raw.ready : null,
+    installed: strings(raw.installed),
+    skipped: strings(raw.skipped),
+    runtimes: installRows(raw.runtimes),
+    harnesses: installRows(raw.harnesses),
+  };
+}
+
+/** Installs one declared runtime into the soul (`soul runtimes install --runtime`). Rejects with a BridgeError. */
+export async function installSoulRuntime(agentId: string, runtime: string, invokeImpl: typeof invoke = invoke): Promise<RuntimeInstall> {
+  if (!inApp() && invokeImpl === invoke) throw new BridgeError('soul-runtimes-unavailable', 'not in the app');
+  let raw: unknown;
+  try {
+    raw = await invokeImpl<unknown>('soul_runtimes_install', { agent: agentId, runtime });
+  } catch (error) {
+    throw failureAs(error, 'soul-runtimes-failed');
+  }
+  const result = normalizeRuntimeInstall(raw);
+  if (!result) throw new BridgeError('soul-runtimes-failed', 'agent-bot did not report the install');
+  return result;
+}
+
+/** The two `soul env migrate` operations (agent-bot-identity #583 slices 2 and 5). */
+export type MigrationKind = 'adopt-host-signin' | 'space-into-soul';
+
+export interface EnvironmentMigrationStep {
+  id: string;
+  /** `done`, `skipped`, `failed`, or a phase (`copying`, `verifying`, ...). */
+  status: string | null;
+  note: string | null;
+  from: string | null;
+  to: string | null;
+}
+
+/**
+ * The engine's report of a migration (#268): `adopted` / `skipped` /
+ * `failed` for a sign-in adoption, `migrated` / `skipped` / `failed` for
+ * the space move, with the step records it journalled. Names paths and
+ * files only, never contents.
+ */
+export interface EnvironmentMigration {
+  agentId: string;
+  operation: string;
+  decision: string | null;
+  steps: EnvironmentMigrationStep[];
+}
+
+export function normalizeEnvironmentMigration(raw: unknown): EnvironmentMigration | null {
+  if (!isRecord(raw) || typeof raw.agentId !== 'string' || typeof raw.operation !== 'string' || !Array.isArray(raw.steps)) return null;
+  return {
+    agentId: raw.agentId,
+    operation: raw.operation,
+    decision: text(raw.decision),
+    steps: records(raw.steps).flatMap((s): EnvironmentMigrationStep[] => {
+      const id = text(s.id);
+      return id ? [{ id, status: text(s.status), note: text(s.note), from: text(s.from), to: text(s.to) }] : [];
+    }),
+  };
+}
+
+/**
+ * Runs one migration for the soul: adopting the host's sign-in for a
+ * harness into its tool home, or moving its Agent Space inside. Owner-gated
+ * by the engine itself. Rejects with a BridgeError (`space-migrate-busy`
+ * while the soul runs).
+ */
+export async function migrateSoulEnvironment(agentId: string, kind: MigrationKind, harness: string | null = null, invokeImpl: typeof invoke = invoke): Promise<EnvironmentMigration> {
+  if (!inApp() && invokeImpl === invoke) throw new BridgeError('soul-env-migrate-unavailable', 'not in the app');
+  let raw: unknown;
+  try {
+    raw = await invokeImpl<unknown>('soul_env_migrate', { agent: agentId, kind, harness });
+  } catch (error) {
+    throw failureAs(error, 'soul-env-migrate-failed');
+  }
+  const result = normalizeEnvironmentMigration(raw);
+  if (!result) throw new BridgeError('soul-env-migrate-failed', 'agent-bot did not report the migration');
+  return result;
+}

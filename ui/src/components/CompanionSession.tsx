@@ -21,6 +21,7 @@ import { useSoulProfile } from '../useSoulProfile';
 import { AuditLog } from './AuditLog';
 import { Conversation } from './Conversation';
 import { CustomizeDialog } from './CustomizeDialog';
+import { EnvironmentSection } from './EnvironmentSection';
 import { liveState, presenceText, SoulDudle } from './FleetList';
 import { useStop, type Stopper } from './FloatingDudle';
 import type { DudleState } from './Dudle';
@@ -559,6 +560,8 @@ export function CompanionDetails({ soul, roster = [], launch, metricsRefresh = 0
       {errors.map((error, index) => (
         <p key={index} className="m-0 text-[11px] text-muted-foreground">{t('metrics.collectorError', { source: error.source, message: error.message })}</p>
       ))}
+      {/* The soul's environment (#268): what agent-bot's descriptor says, in the same scroll pane. */}
+      <EnvironmentSection soul={soul} refresh={metricsRefresh} />
       {launch && launching && <LaunchForm {...launch} soul={soul} initialComms={comms?.comms} roster={roster} />}
       {launch && !launching && (
         <div className="flex justify-end">

@@ -1,6 +1,6 @@
 // The fixed fake census and health from R1's snapshot test, for tests and
 // for previewing the popup before the bridge (#7) supplies real rows.
-import type { PreparedRevision, RemovalPlan, RemovalPlanEntry, RemovalScope, SoulColdWake, SoulMode, SoulModel, SoulPopulation, SoulProfile, SoulTemplateList } from '../bridge';
+import type { PreparedRevision, RemovalPlan, RemovalPlanEntry, RemovalScope, SoulColdWake, SoulMode, SoulModel, SoulPopulation, SoulProfile, SoulTemplateList, SoulEnvironment } from '../bridge';
 import type { AuditRecord } from './audit';
 import type { CensusRow } from './census';
 import type { PauseEntry } from './pause';
@@ -316,3 +316,103 @@ export function sampleRemovalPlan(agentId: string, scope: RemovalScope): Removal
     ? { schemaVersion: 1, scope, agentId, capabilities, archived: [luna, child, sprocket], independent: [], unchanged: [] }
     : { schemaVersion: 1, scope, agentId, capabilities, archived: [luna], independent: [child], unchanged: [sprocket] };
 }
+const lunaRoot = '/Users/user/Souls/Luna.soul';
+
+/**
+ * agent-bot `soul env --json` descriptors for the Environment section (#268;
+ * preview and tests). luna's comes from the bundled 0.10.52 engine with
+ * every capability: one declared runtime missing (node), one partial-read
+ * error (the generated output could not be checked), a pending migration
+ * (its Agent Space is a link outside the soul), codex's sign-in still on
+ * the host, and a provider secret missing. No state is invented: readiness
+ * is what the engine would report. scout's is an older engine (0.10.46,
+ * `env` and `revision-prepare` only), the real capture of a built soul, so
+ * nothing capability-gated is offered for it. Other souls have none: the
+ * preview answers offline for them.
+ */
+export const sampleEnvironments: Readonly<Record<string, SoulEnvironment>> = {
+  agent_p: {
+    schemaVersion: 1,
+    engine: { version: '0.10.52', contractVersion: 1, capabilities: ['env', 'revision-prepare', 'runtimes', 'providers', 'tool-homes', 'memory', 'history'] },
+    identity: { agentId: 'agent_p', name: 'luna', displayName: 'Luna', status: 'active', harness: 'codex', revision: '2026.10.1', parentRevision: null, template: false, formatVersion: 2 },
+    root: { soulDir: lunaRoot, soulsRoot: '/Users/user/Souls', source: 'environment', registered: true, marker: 'ok', copies: [], device: 16777229 },
+    components: [
+      { id: 'manifest', path: 'soul.json', classification: 'definition', present: true, retention: 'durable' },
+      { id: 'instructions', path: 'AGENTS.md', classification: 'definition', present: true, retention: 'durable' },
+      { id: 'skills', path: 'skills', classification: 'definition', present: true, retention: 'durable', entries: ['triage'] },
+      { id: 'hooks', path: 'hooks', classification: 'definition', present: false, retention: 'durable' },
+      { id: 'tools-bin', path: 'bin', classification: 'definition', present: false, retention: 'durable' },
+      { id: 'workflows', path: 'workflows', classification: 'definition', present: true, retention: 'durable', entries: ['release.toml'] },
+      { id: 'sop', path: 'sop', classification: 'definition', present: true, retention: 'durable' },
+      { id: 'harness-pins', path: 'package.json', classification: 'definition', present: false, retention: 'durable' },
+      { id: 'generated', path: null, classification: 'generated', present: true, retention: 'reconstructible', paths: ['.codex/', 'AGENTS.md', '.mcp.json'], drift: null },
+      { id: 'workspaces', path: 'worktrees', classification: 'workspace', present: true, retention: 'durable', entries: [{ name: 'main', location: 'inside', branch: 'main' }] },
+      { id: 'home', path: '.soul-state/home', classification: 'private-home', present: true, retention: 'durable', git: false, built: true, harnessInstall: 'codex' },
+      { id: 'tool-state', path: '.soul-state/tools', classification: 'private-home', present: false, retention: 'durable',
+        entries: [{ harness: 'codex', path: '.soul-state/tools/codex', routing: [], containment: 'shared-host', reason: 'the sign-in is not in the soul', hostPath: '/Users/user/.codex', signIn: 'missing', hostSignIn: 'present', note: null }] },
+      { id: 'credentials', path: '.soul-state/credentials', classification: 'private-home', present: false, retention: 'durable', exportable: false, declared: 'luna-geniusbar', secrets: ['openai-key'] },
+      { id: 'runtimes', path: '.soul-state/runtimes', classification: 'runtime', present: false, retention: 'reconstructible' },
+      { id: 'memory', path: '.soul-state/space', classification: 'memory', present: true, retention: 'durable', location: 'linked', target: '/Users/user/space/luna', contained: false, spacePath: '/Users/user/space/luna', status: 'ready' },
+      { id: 'history', path: '.soul-state/runs', classification: 'history', present: true, retention: 'durable', mirror: '.soul-state/runs', turns: 42, revisions: 3, mirrored: true,
+        external: [{ what: 'revision journal', path: '/Users/user/.local/state/agent-bot/soul-revisions/agent_p', present: true }, { what: 'task turns', path: '/Users/user/.local/state/agent-bot/task-turns.jsonl', present: true }], confinementLog: false },
+      { id: 'cache', path: '.soul-state/cache', classification: 'cache', present: false, retention: 'reconstructible' },
+      { id: 'temp', path: '.soul-state/tmp', classification: 'temp', present: false, retention: 'disposable', entries: [] },
+      { id: 'host-tools', path: null, classification: 'external', present: true, retention: null,
+        entries: [{ name: 'agent-bot', path: '/Applications/GeniusBar.app/Contents/Resources/components/agent-bot/agent-bot', source: 'engine' }, { name: 'git', path: '/usr/bin/git', source: 'host' }] },
+    ],
+    classification: { enum: ['definition', 'generated', 'workspace', 'runtime', 'private-home', 'memory', 'history', 'cache', 'temp', 'external'], rules: [] },
+    harnesses: { selected: 'codex', declared: [{ name: 'codex', kind: 'npm', package: '@openai/codex', version: '0.52.0', source: 'package.json' }], installed: [{ name: 'codex', kind: 'npm', package: '@openai/codex', version: '0.52.0', location: '.soul-state/home', status: 'ok' }], launchable: true },
+    runtimes: { declared: { node: { version: '24.11.1' } }, installed: [], missing: [{ name: 'node', version: '24.11.1', declared: '24', requiredBy: [], reason: 'not provisioned' }], unsupported: [] },
+    providers: {
+      declared: [{ harness: 'codex', id: 'openai', name: 'OpenAI', baseUrl: null, envKey: 'OPENAI_API_KEY', wireApi: 'responses', credential: 'openai-key', store: 'keychain', status: 'secret-missing' }],
+      secrets: [{ name: 'openai-key', store: 'keychain', status: 'missing', usedBy: ['codex'] }],
+      invalid: [],
+    },
+    launch: { supported: true, lane: 'acp', cwd: `${lunaRoot}/.soul-state/home`, routing: { HOME: 'host', PATH: 'host', TMPDIR: 'host', toolHome: 'host' },
+      limitations: [{ harness: 'codex', message: "codex's native state (/Users/user/.codex) stays shared on the host with every other soul: the sign-in is not in the soul" }] },
+    readiness: {
+      ready: false,
+      problems: [
+        { code: 'runtime-missing', severity: 'warning', component: 'runtimes', message: 'node 24.11.1 is declared but not installed in the soul; the next launch installs it.', action: 'agent-bot soul runtimes install agent_p' },
+        { code: 'provider-secret-missing', severity: 'error', component: 'credentials', message: "codex's provider openai needs the secret \"openai-key\" (OPENAI_API_KEY), which is not stored for this soul", action: 'agent-bot soul secret agent_p set openai-key' },
+        { code: 'tool-signin-missing', severity: 'warning', component: 'tool-state', message: "codex's sign-in is on the host (/Users/user/.codex) but not in the soul's tool home, so the launch keeps the shared host store; adopt it once to contain this soul", action: 'agent-bot soul env migrate agent_p --adopt-host-signin --harness codex' },
+        { code: 'memory-not-contained', severity: 'warning', component: 'memory', message: "The Agent Space is a link to /Users/user/space/luna, outside the soul; the soul's memory does not travel with its folder until it is moved inside.", action: 'agent-bot soul env migrate agent_p --space-into-soul' },
+      ],
+    },
+    migration: { status: 'pending', journal: '.soul-state/migration.json', steps: [
+      { id: 'space-into-soul', status: 'pending', from: '/Users/user/space/luna', to: `${lunaRoot}/.soul-state/space` },
+      { id: 'adopt-host-signin:codex', status: 'pending', from: '/Users/user/.codex', to: `${lunaRoot}/.soul-state/tools/codex` },
+    ] },
+    retention: { durable: ['manifest', 'instructions', 'skills', 'hooks', 'tools-bin', 'workflows', 'sop', 'harness-pins', 'workspaces', 'home', 'tool-state', 'credentials', 'memory', 'history'], reconstructible: ['generated', 'runtimes', 'cache'], disposable: ['temp'] },
+    errors: [{ area: 'generated', message: 'Generated output could not be checked: AGENTS.md is not UTF-8 text' }],
+  },
+  agent_s: {
+    schemaVersion: 1,
+    engine: { version: '0.10.46', contractVersion: 1, capabilities: ['env', 'revision-prepare'] },
+    identity: { agentId: 'agent_s', name: 'scout', displayName: 'Scout', status: 'active', harness: 'claude', revision: null, parentRevision: null, template: null, formatVersion: 2 },
+    root: { soulDir: '/Users/user/Souls/Scout.soul', soulsRoot: '/Users/user/Souls', source: 'environment', registered: true, marker: 'ok', copies: [], device: 16777229 },
+    components: [
+      { id: 'manifest', path: 'soul.json', classification: 'definition', present: true, retention: 'durable' },
+      { id: 'instructions', path: 'AGENTS.md', classification: 'definition', present: true, retention: 'durable' },
+      { id: 'skills', path: 'skills', classification: 'definition', present: true, retention: 'durable', entries: ['hello'] },
+      { id: 'generated', path: null, classification: 'generated', present: true, retention: 'reconstructible', paths: ['.claude/', 'CLAUDE.md'], drift: [] },
+      { id: 'home', path: '.soul-state/home', classification: 'private-home', present: true, retention: 'durable', git: false, built: true, harnessInstall: null },
+      { id: 'tool-state', path: '.soul-state/tools', classification: 'private-home', present: false, retention: 'durable',
+        entries: [{ harness: 'claude', path: '.soul-state/tools/claude', routing: [], containment: 'shared-host', hostPath: '/Users/user/.claude', signIn: 'unknown' }] },
+      { id: 'runtimes', path: '.soul-state/runtimes', classification: 'runtime', present: false, retention: 'reconstructible' },
+      { id: 'memory', path: '.soul-state/space', classification: 'memory', present: true, retention: 'durable', location: 'linked', target: '/Users/user/space/scout', contained: false, spacePath: '/Users/user/space/scout', status: 'missing' },
+      { id: 'history', path: '.soul-state/runs', classification: 'history', present: false, retention: 'durable', external: [], confinementLog: false },
+      { id: 'temp', path: '.soul-state/tmp', classification: 'temp', present: false, retention: 'disposable', entries: [] },
+    ],
+    classification: { enum: ['definition', 'generated', 'workspace', 'runtime', 'private-home', 'memory', 'history', 'cache', 'temp', 'external'], rules: [] },
+    harnesses: { selected: 'claude', declared: [], installed: [], launchable: false },
+    runtimes: { declared: { node: { version: '24.11.1' } }, installed: [], missing: [{ name: 'node', version: '24.11.1', reason: 'not provisioned' }], unsupported: [] },
+    providers: {},
+    launch: { supported: true, lane: 'acp', cwd: '/Users/user/Souls/Scout.soul/.soul-state/home', routing: { HOME: 'host', PATH: 'host', TMPDIR: 'host' },
+      limitations: [{ harness: 'claude', message: "claude's native state (/Users/user/.claude) is shared on the host with every other soul until the launch environment contract routes it into the soul" }] },
+    readiness: { ready: true, problems: [] },
+    migration: { status: 'pending', journal: '.soul-state/migration.json', steps: [{ id: 'space-into-soul', status: 'pending', from: '/Users/user/space/scout', to: '/Users/user/Souls/Scout.soul/.soul-state/space' }] },
+    retention: { durable: ['manifest', 'instructions', 'skills', 'home', 'tool-state', 'memory', 'history'], reconstructible: ['generated', 'runtimes'], disposable: ['temp'] },
+    errors: [],
+  },
+};
