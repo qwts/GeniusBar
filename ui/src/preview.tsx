@@ -24,6 +24,12 @@
 // ⓘ offers Customize…, showing sampleProfile read-only for any companion
 // (&customize=1 opens it on load for the selected one, &customize=0 hides it
 // as an agent-bot without `soul profile` would);
+// &sandbox=editable|locked|missing|gated|unknown shows the Sandboxing card
+// on sampleSandbox and its Edit account… dialog (#66) in that scenario
+// (luna's chip menu has it too; locked = the SOP pack decides luna's
+// account; missing = a saved account agent-bot finds absent, with its
+// steps; gated = an agent-bot without `sandbox account`; unknown = a save
+// agent-bot answers unclearly, then re-read);
 // &surface=team|session|audit|customize|launch (with &soul=user/agent_p,
 // and &tab= / &action=archive for a session) shows that native window's
 // page (#223), and what it opens opens in a new tab:
@@ -45,7 +51,8 @@ import { SoulSourceContext, type SoulSource } from './components/SoulNotices';
 import { EnvironmentSourceContext, type EnvironmentSource } from './components/EnvironmentSection';
 import type { CensusRow } from './model/census';
 import { emptyChat, emptyComposer, mergeIncoming, type ChatState } from './model/chat';
-import { inboxMessage, sampleApprovals, sampleAudit, sampleBadges, sampleCensus, sampleColdWake, sampleConnection, sampleFloating, sampleModels, sampleModes, sampleOpenedPackages, samplePaused, samplePopulation, sampleRemovalPlan, sampleSessionEntries, samplePreparedRevision, sampleProfile, sampleProfileFiles, sampleTemplates, sampleEnvironments } from './model/fixtures';
+import { inboxMessage, sampleApprovals, sampleAudit, sampleBadges, sampleCensus, sampleColdWake, sampleConnection, sampleFloating, sampleModels, sampleModes, sampleOpenedPackages, samplePaused, samplePopulation, sampleRemovalPlan, sampleSandbox, sampleSandboxSteps, sampleSessionEntries, samplePreparedRevision, sampleProfile, sampleProfileFiles, sampleTemplates, sampleEnvironments } from './model/fixtures';
+import type { SandboxSource, SandboxStatus } from './components/Sandbox';
 import type { Pauser } from './usePause';
 import type { TemplateLister } from './useSoulTemplates';
 import { BridgeError, type SoulEnvironment } from './bridge';
@@ -169,6 +176,42 @@ const environmentSource: EnvironmentSource = {
   },
 };
 
+// The Sandboxing card and its account dialog (#66) on sampleSandbox, in the
+// scenario &sandbox= names; absent, the card stays hidden as it is without
+// agent-bot. A save lands locally as agent-bot would once the owner approves.
+function previewSandbox(scenario: string): SandboxSource {
+  const sop = { state: 'ok', decides: true, repository: 'qwts/sop', commit: 'abcdef0123456789abcdef0123456789abcdef01', rules: 1, message: null };
+  let current: SandboxStatus = scenario === 'locked'
+    ? { ...sampleSandbox, sop, souls: sampleSandbox.souls.map((s) => (s.agentId === 'agent_p' ? { ...s, runsAs: 'gb-luna', source: 'sop', rule: 'soul:luna' } : s)) }
+    : sampleSandbox;
+  const withAccount = (account: string): SandboxStatus => {
+    const missing = scenario === 'missing' && account !== sampleSandbox.account;
+    return { ...current, account, status: missing ? 'missing' : 'ready', steps: missing ? sampleSandboxSteps(account) : [],
+      souls: current.souls.map((s) => (s.sandboxed && s.source !== 'sop' ? { ...s, runsAs: account } : s)) };
+  };
+  return {
+    status: async () => current,
+    set: async (on) => { current = { ...current, enabled: on }; return { enabled: on, provider: current.provider, account: current.account }; },
+    override: async (agentId, override) => {
+      const row = current.souls.find((s) => s.agentId === agentId);
+      if (!row) throw new BridgeError('soul-not-found', 'Soul not found.');
+      const sandboxed = override === 'inherit' ? current.enabled : override === 'sandboxed';
+      const next = { ...row, override, sandboxed, runsAs: sandboxed ? current.account : 'user', source: override === 'inherit' ? 'global' as const : 'override' as const };
+      current = { ...current, souls: current.souls.map((s) => (s.agentId === agentId ? next : s)) };
+      return next;
+    },
+    pairings: async () => [],
+    approve: async () => ({}),
+    account: async (name) => {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      if (scenario === 'unknown') { current = withAccount(name); throw new BridgeError('sandbox-failed', 'agent-bot sandbox: no answer'); }
+      current = withAccount(name);
+      return { enabled: current.enabled, provider: current.provider, account: name };
+    },
+    accountSupported: async () => scenario !== 'gated',
+  };
+}
+
 // The Customize dialog (#64): sampleProfile for whichever companion asks.
 const profileSource: ProfileSource = {
   profile: async (agentId) => {
@@ -253,10 +296,12 @@ function Preview() {
   }, []);
   // The launch form's soul picker (#65), as agent-bot `soul templates` would list it.
   const templateLister = useMemo<TemplateLister | undefined>(() => (params.get('templates') === '0' ? undefined : async () => sampleTemplates), []);
+  const sandboxScenario = params.get('sandbox');
+  const sandboxSource = useMemo<SandboxSource | null>(() => (sandboxScenario ? previewSandbox(sandboxScenario) : null), [sandboxScenario]);
   const opened = params.get('open');
   const fixture = opened === 'copy' || opened === 'described' ? sampleOpenedPackages[opened] : null;
   const openedPackage = opened ? { id: 1, checking: false, error: null, path: opened, ...fixture } : undefined;
-  const app = <App mode={mode} select={params.get('select')} openedPackage={openedPackage} census={souls} badges={floating ? { ...sampleBadges, computerUse: driving ?? floating.computerUse, busy: floating.busy } : sampleBadges} stopper={stopper} pauser={pauser} computerUseSwitch={computerUseSwitch} templateLister={templateLister} profileSource={profileSource} floatingButton={floating !== null} archiver={archiver} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}
+  const app = <App mode={mode} select={params.get('select')} openedPackage={openedPackage} census={souls} badges={floating ? { ...sampleBadges, computerUse: driving ?? floating.computerUse, busy: floating.busy } : sampleBadges} stopper={stopper} pauser={pauser} computerUseSwitch={computerUseSwitch} templateLister={templateLister} profileSource={profileSource} sandboxSource={sandboxSource} floatingButton={floating !== null} archiver={archiver} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}
     onRefresh={() => {}} onRemoveServices={async () => {}} updates={{ status: { state: 'idle', version: null }, act: () => {} }}
     launcher={{ state: { phase: 'idle' }, launch: async () => {}, reset: () => {} }} />;
   // &customize=1: the Customize dialog open on load, for the selected companion (or luna).
@@ -277,7 +322,7 @@ function Preview() {
     };
     const launcher = { state: { phase: 'idle' as const }, launch: async () => {}, reset: () => {} };
     return (
-      <AppProviders profileSource={profileSource} computerUseSwitch={computerUseSwitch}>
+      <AppProviders profileSource={profileSource} computerUseSwitch={computerUseSwitch} sandboxSource={sandboxSource}>
         {query.surface === 'team' && <TeamSurface {...data} soul={query.soul} open={open} />}
         {query.surface === 'session' && <SessionSurface {...data} soul={query.soul} tab={query.tab} action={query.action} open={open} launcher={launcher} archiver={archiver} />}
         {query.surface === 'audit' && <AuditSurface {...data} soul={query.soul} />}

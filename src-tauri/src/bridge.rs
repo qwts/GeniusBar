@@ -2740,6 +2740,36 @@ pub async fn sandbox_override<R: Runtime>(
     parse_sandbox_override(&output.stdout, &output.stderr)
 }
 
+/// Names the sandbox account (#66, the "Edit account…" dialog): `sandbox
+/// account NAME --json`, which agent-bot validates (`invalid-account`, its
+/// own short-name rule) and owner-gates as `sandbox_set` is, then answers
+/// `{enabled, provider, account}`. It picks an existing standard account:
+/// agent-bot never creates, renames or moves one. Only the argument's shape
+/// is checked here (never an option, no control characters), so agent-bot's
+/// refusal of a bad name reaches the dialog as it is. A bundle whose
+/// `sandbox` lacks `account` answers its `sandbox` usage line, which maps to
+/// `sandbox-account-unsupported`.
+#[tauri::command]
+pub async fn sandbox_account<R: Runtime>(
+    app: AppHandle<R>,
+    account: String,
+) -> Result<Value, BridgeError> {
+    let args = sandbox_account_args(&account)?;
+    let output = run_agent_bot(&app, args, "sandbox-unavailable").await?;
+    parse_sandbox_account(&output.stdout, &output.stderr)
+}
+
+/// Whether the bundled agent-bot has `sandbox account`: `{supported}`. Runs
+/// it with no name, which sets nothing and asks no owner: a bundle that has
+/// it answers with a usage line naming `sandbox account`, an older one with
+/// a usage line that does not.
+#[tauri::command]
+pub async fn sandbox_account_probe<R: Runtime>(app: AppHandle<R>) -> Result<Value, BridgeError> {
+    let args = vec!["sandbox".into(), "account".into(), "--json".into()];
+    let output = run_agent_bot(&app, args, "sandbox-unavailable").await?;
+    parse_sandbox_account_probe(&output.stdout, &output.stderr)
+}
+
 /// agent-bot's own rule for a sandbox account name, `^[a-z_][a-z0-9_-]{0,30}$`:
 /// a short macOS account name that lands in argv, never a shell.
 /// The pairings the broker knows (#66): `agent-comms broker pairings`, on
@@ -2901,6 +2931,80 @@ fn sandbox_set_args(
     }
     args.push("--json".into());
     Ok(args)
+}
+
+/// The account's shape only: agent-bot judges the name itself. Empty, an
+/// option, a control character or something absurdly long never reaches it.
+fn sandbox_account_args(account: &str) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    if account.is_empty()
+        || account.starts_with('-')
+        || account.len() > 256
+        || account.chars().any(char::is_control)
+    {
+        return Err(BridgeError::new(
+            "sandbox-invalid",
+            "account must be a short macOS account name",
+        ));
+    }
+    Ok(vec![
+        "sandbox".into(),
+        "account".into(),
+        account.into(),
+        "--json".into(),
+    ])
+}
+
+/// True when agent-bot answered its `sandbox` usage line and that line does
+/// not list `sandbox account`: with `--json` the line comes as a JSON error
+/// (`{error: {code: "sandbox-failed", message: "usage: …"}}`), without one
+/// on stderr. A usage line that names `sandbox account` is a real mistake
+/// (or the probe's answer) and is not this.
+fn sandbox_account_missing(stdout: &[u8], stderr: &[u8]) -> bool {
+    let unaware = |message: &str| {
+        message.contains("usage: agent-bot sandbox") && !message.contains("sandbox account")
+    };
+    match serde_json::from_str::<Value>(&last_line(stdout)) {
+        Ok(value) => value
+            .get("error")
+            .and_then(|error| error.get("message"))
+            .and_then(Value::as_str)
+            .is_some_and(unaware),
+        Err(_) => unaware(&last_line(stderr)),
+    }
+}
+
+fn parse_sandbox_account(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    if sandbox_account_missing(stdout, stderr) {
+        return Err(BridgeError::new(
+            "sandbox-account-unsupported",
+            "this agent-bot has no sandbox account",
+        ));
+    }
+    parse_sandbox(
+        stdout,
+        stderr,
+        "agent-bot gave no sandbox setting",
+        |value| {
+            value.get("enabled").and_then(Value::as_bool).is_some()
+                && value.get("account").and_then(Value::as_str).is_some()
+        },
+    )
+}
+
+fn parse_sandbox_account_probe(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    match parse_sandbox_account(stdout, stderr) {
+        Err(error) if error.code == "sandbox-account-unsupported" => {
+            Ok(serde_json::json!({ "supported": false }))
+        }
+        Err(error) if error.message.contains("usage: agent-bot sandbox") => {
+            Ok(serde_json::json!({ "supported": true }))
+        }
+        Err(error) => Err(error),
+        Ok(_) => Err(BridgeError::new(
+            "sandbox-failed",
+            "agent-bot set a sandbox account it was not asked to",
+        )),
+    }
 }
 
 fn sandbox_override_args(
@@ -3196,9 +3300,130 @@ mod sandbox_tests {
             parse_sandbox_status,
             parse_sandbox_set,
             parse_sandbox_override,
+            parse_sandbox_account,
+            parse_sandbox_account_probe,
         ] {
             assert_eq!(parse(b"", OLD).unwrap_err().code, "sandbox-unsupported");
         }
+    }
+
+    /// The `sandbox` usage line of agent-bot 0.10.53, which lists `sandbox account`.
+    const USAGE: &str = "usage: agent-bot sandbox status [--json] | sandbox plan [--json] | sandbox on|off [--json] [--principal-stdin] | sandbox account NAME [--json] [--principal-stdin] | sandbox override <agentId|name> [show|inherit|sandboxed|unrestricted] [--json] [--principal-stdin] | sandbox resolve <agentId|name> [--json]";
+    /// A hypothetical bundle whose `sandbox` has no `account`.
+    const USAGE_WITHOUT_ACCOUNT: &str = "usage: agent-bot sandbox status [--json] | sandbox on|off [--json] | sandbox override <agentId|name> [show|inherit|sandboxed|unrestricted] [--json]";
+
+    fn usage_json(usage: &str) -> Vec<u8> {
+        serde_json::json!({ "error": { "code": "sandbox-failed", "message": usage } })
+            .to_string()
+            .into_bytes()
+    }
+
+    #[test]
+    fn builds_sandbox_account_arguments_checking_only_their_shape() {
+        assert_eq!(
+            sandbox_account_args("gb-luna").unwrap(),
+            vec!["sandbox", "account", "gb-luna", "--json"]
+        );
+        // agent-bot judges the name; a name it refuses still reaches it.
+        assert_eq!(
+            sandbox_account_args("Agent.X").unwrap(),
+            vec!["sandbox", "account", "Agent.X", "--json"]
+        );
+        let long = "a".repeat(257);
+        for bad in ["", "-x", "--json", "a\nb", "a\u{7}b", long.as_str()] {
+            assert_eq!(
+                sandbox_account_args(bad).unwrap_err().code,
+                "sandbox-invalid",
+                "{bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_the_account_setting_and_agent_bot_refusals_as_they_are() {
+        let set = parse_sandbox_account(
+            b"{\"enabled\":true,\"provider\":\"standard_macos_account\",\"account\":\"gb-luna\"}\n",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(set["account"], "gb-luna");
+        assert_eq!(
+            parse_sandbox_account(
+                b"{\"error\":{\"code\":\"invalid-account\",\"message\":\"sandbox account must be a short macOS account name like geniusbar-agent (lowercase letters, digits, _ and -), not \\\"Agent.X\\\"\"}}\n",
+                b""
+            ),
+            Err(BridgeError::new(
+                "invalid-account",
+                "sandbox account must be a short macOS account name like geniusbar-agent (lowercase letters, digits, _ and -), not \"Agent.X\""
+            ))
+        );
+        assert_eq!(
+            parse_sandbox_account(
+                b"{\"error\":{\"code\":\"owner-approval-denied\",\"message\":\"the owner did not approve\"}}\n",
+                b""
+            )
+            .unwrap_err()
+            .code,
+            "owner-approval-denied"
+        );
+        assert_eq!(
+            parse_sandbox_account(b"{\"enabled\":\"yes\"}\n", b"").unwrap_err(),
+            BridgeError::new("sandbox-failed", "agent-bot gave no sandbox setting")
+        );
+        // The current usage line names `sandbox account`: a real mistake, not an older bundle.
+        let mistake = parse_sandbox_account(&usage_json(USAGE), b"").unwrap_err();
+        assert_eq!(mistake.code, "sandbox-failed");
+        assert_eq!(mistake.message, USAGE);
+    }
+
+    #[test]
+    fn a_sandbox_without_account_is_unsupported_not_failed() {
+        assert_eq!(
+            parse_sandbox_account(&usage_json(USAGE_WITHOUT_ACCOUNT), b"")
+                .unwrap_err()
+                .code,
+            "sandbox-account-unsupported"
+        );
+        let stderr = format!("agent-bot sandbox: {USAGE_WITHOUT_ACCOUNT}\n");
+        assert_eq!(
+            parse_sandbox_account(b"", stderr.as_bytes())
+                .unwrap_err()
+                .code,
+            "sandbox-account-unsupported"
+        );
+    }
+
+    #[test]
+    fn probes_for_sandbox_account() {
+        assert_eq!(
+            parse_sandbox_account_probe(&usage_json(USAGE), b"").unwrap()["supported"],
+            true
+        );
+        assert_eq!(
+            parse_sandbox_account_probe(&usage_json(USAGE_WITHOUT_ACCOUNT), b"").unwrap()
+                ["supported"],
+            false
+        );
+        let stderr = format!("agent-bot sandbox: {USAGE}\n");
+        assert_eq!(
+            parse_sandbox_account_probe(b"", stderr.as_bytes()).unwrap()["supported"],
+            true
+        );
+        assert_eq!(
+            parse_sandbox_account_probe(b"", b"agent-bot: config could not be read\n")
+                .unwrap_err()
+                .code,
+            "sandbox-failed"
+        );
+        assert_eq!(
+            parse_sandbox_account_probe(
+                b"{\"enabled\":true,\"provider\":\"standard_macos_account\",\"account\":\"x\"}\n",
+                b""
+            )
+            .unwrap_err()
+            .message,
+            "agent-bot set a sandbox account it was not asked to"
+        );
     }
 }
 

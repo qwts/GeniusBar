@@ -1,6 +1,7 @@
 // The fixed fake census and health from R1's snapshot test, for tests and
 // for previewing the popup before the bridge (#7) supplies real rows.
 import type { PreparedRevision, RemovalPlan, RemovalPlanEntry, RemovalScope, SoulColdWake, SoulMode, SoulModel, SoulPopulation, SoulProfile, SoulTemplateList, SoulEnvironment } from '../bridge';
+import type { SandboxStatus } from '../components/Sandbox';
 import type { AuditRecord } from './audit';
 import type { CensusRow } from './census';
 import type { PauseEntry } from './pause';
@@ -416,3 +417,34 @@ export const sampleEnvironments: Readonly<Record<string, SoulEnvironment>> = {
     errors: [],
   },
 };
+
+/**
+ * The sandbox as `agent-bot sandbox status --json` reports it (#66), for the
+ * preview's Sandboxing card and account dialog: the switch on, GeniusBar's
+ * default account `geniusbar-agent` ready, luna sandboxed on it, agent_c
+ * running as the owner, and no SOP pack; the preview's scenarios vary it.
+ */
+export const sampleSandbox: SandboxStatus = {
+  enabled: true,
+  provider: 'standard_macos_account',
+  account: 'geniusbar-agent',
+  status: 'ready',
+  steps: [],
+  souls: [
+    { agentId: 'agent_p', name: 'luna', override: 'inherit', sandboxed: true, runsAs: 'geniusbar-agent', source: 'global', rule: null, reason: null },
+    { agentId: 'agent_c', name: 'agent_c', override: 'unrestricted', sandboxed: false, runsAs: 'user', source: 'override', rule: null, reason: null },
+  ],
+  sop: { state: 'none', decides: false, repository: null, commit: null, rules: 0, message: null },
+};
+
+/** The owner's steps agent-bot lists for an account that does not exist yet, as `sandbox plan` prints them. */
+export const sampleSandboxSteps = (account: string): SandboxStatus['steps'] => [
+  { id: 'create-account', title: `Create the standard account ${account}`, run: 'owner-admin',
+    commands: [`sudo sysadminctl -addUser ${account} -fullName "GeniusBar Agent" -password -`], done: false,
+    note: 'Either command; the first asks for a password for the new account. Leave it a Standard account: no admin rights.' },
+  { id: 'standard-account', title: `${account} has no admin rights`, run: 'owner-admin', commands: [`sudo dseditgroup -o edit -d ${account} -t user admin`], done: null },
+  { id: 'dev-tools', title: 'Apple command-line tools are installed (shared by every account)', run: 'owner', commands: ['xcode-select --install'], done: true },
+  { id: 'broker-group', title: `${account} may reach the agent-comms broker`, run: 'owner-admin', commands: [`sudo dseditgroup -o edit -a ${account} -t user agent-comms`], done: null },
+  { id: 'pair', title: `Pair ${account} with the broker`, run: 'account', commands: ['agent-comms account pair --broker user'], done: false },
+  { id: 'harness-sign-in', title: `Sign the harnesses in as ${account}`, run: 'account', commands: ['claude'], done: null },
+];

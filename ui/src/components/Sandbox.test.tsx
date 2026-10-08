@@ -65,6 +65,11 @@ function fakeSource(initial: SandboxStatus, pairings: SandboxPairing[] = []) {
       current = { ...current, souls: current.souls.map((s) => (s.agentId === agentId ? row : s)) };
       return row;
     }),
+    account: vi.fn(async (name: string) => {
+      current = { ...current, account: name };
+      return { enabled: current.enabled, provider: current.provider, account: name };
+    }),
+    accountSupported: vi.fn(async () => true),
   } satisfies SandboxSource;
   return source;
 }
