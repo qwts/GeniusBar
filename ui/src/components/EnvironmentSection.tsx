@@ -3,17 +3,20 @@
 // `soul env` descriptor says about the soul's root, components, harnesses,
 // runtimes, sign-in, providers, secrets and retained memory, rendered as
 // reported and never inferred from the filesystem. Every button is gated on
-// `engine.capabilities`; the engine runs the install and the migrations
-// itself and owner-gates them (Touch ID), as `soul remove` does.
-import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+// `engine.capabilities`; the engine runs the install, the migrations and
+// the clean itself and owner-gates them (Touch ID), as `soul remove` does.
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, CheckCircle2, CircleSlash, Info, WifiOff, X } from 'lucide-react';
-import { installSoulRuntime, migrateSoulEnvironment, soulEnvironment, type EnvironmentMigration, type MigrationKind, type RuntimeInstall, type SoulEnvironment } from '../bridge';
+import {
+  installSoulRuntime, migrateSoulEnvironment, soulEnvClean, soulEnvironment,
+  type EnvironmentMigration, type EnvironmentMigrationStep, type MigrationKind, type RuntimeInstall, type SoulCleanRow, type SoulEnvironment, type SoulEnvironmentClean,
+} from '../bridge';
 import { displayName, type CensusRow } from '../model/census';
 import {
-  componentRows, environmentActions, environmentState, failedStep, harnessRows, historySummary, installOutcome, installProgress, installReducer, installSummary,
-  memoryContinuity, nextStep, planInstall, providerRows, runtimeRows, secretRows, toolSignIns,
-  type EnvironmentRead, type EnvironmentState, type InstallEvent, type InstallRun, type InstallableRow, type SignInState,
+  cleanGroups, componentRows, environmentActions, environmentState, failedStep, formatBytes, harnessRows, historySummary, installOutcome, installProgress, installReducer, installSummary,
+  memoryContinuity, migrationStepStatus, nextStep, planInstall, providerRows, refusalOf, runtimeRows, secretRows, toolSignIns,
+  type EngineRun, type EnvironmentRead, type EnvironmentState, type InstallEvent, type InstallRun, type InstallableRow, type SignInState,
 } from '../model/environment';
 import { useI18n, type Translate } from '../lib/i18n';
 
@@ -22,8 +25,13 @@ export interface EnvironmentSource {
   environment: (agentId: string) => Promise<SoulEnvironment>;
   /** `soul runtimes install <soul> --runtime NAME --json`, owner-gated by the engine. */
   installRuntime: (agentId: string, runtime: string) => Promise<RuntimeInstall>;
-  /** `soul env migrate <soul> --adopt-host-signin --harness NAME | --space-into-soul --json`, owner-gated by the engine. */
-  migrate: (agentId: string, kind: MigrationKind, harness: string | null) => Promise<EnvironmentMigration>;
+  /**
+   * `soul env migrate <soul> --adopt-host-signin --harness NAME | --space-into-soul | --complete [--plan] --json`,
+   * owner-gated by the engine; `plan` (complete only) is the read-only list of the pending steps.
+   */
+  migrate: (agentId: string, kind: MigrationKind, harness: string | null, plan?: boolean) => Promise<EnvironmentMigration>;
+  /** `soul env clean <soul> [--plan] [--component ID] --json`: the plan is read-only, the apply owner-gated by the engine. */
+  clean: (agentId: string, options: { plan: boolean; components: string[] | null }) => Promise<SoulEnvironmentClean>;
 }
 
 // A source that throws instead of rejecting still settles as a rejection.
@@ -32,7 +40,8 @@ const settled = <T,>(run: () => Promise<T>): Promise<T> => new Promise<T>((resol
 export const EnvironmentSourceContext = createContext<EnvironmentSource>({
   environment: (agentId) => settled(() => soulEnvironment(agentId)),
   installRuntime: (agentId, runtime) => settled(() => installSoulRuntime(agentId, runtime)),
-  migrate: (agentId, kind, harness) => settled(() => migrateSoulEnvironment(agentId, kind, harness)),
+  migrate: (agentId, kind, harness, plan = false) => settled(() => migrateSoulEnvironment(agentId, kind, harness, undefined, plan)),
+  clean: (agentId, options) => settled(() => soulEnvClean(agentId, options)),
 });
 
 const messageOf = (failure: unknown): string => {
@@ -66,6 +75,7 @@ const SIGN_IN_TEXT = { 'signed-in': 'env.signIn.signedIn', expired: 'env.signIn.
 const CONTINUITY_TEXT = { ready: 'env.continuity.ready', 'needs-migration': 'env.continuity.needsMigration', unavailable: 'env.continuity.unavailable', unsupported: 'env.continuity.unsupported' } as const;
 const STATUS_TEXT = { installed: 'env.status.installed', missing: 'env.status.missing', unsupported: 'env.status.unsupported' } as const;
 const STEP_TEXT = { 'not-started': 'env.step.notStarted', running: 'env.step.running', completed: 'env.step.completed', failed: 'env.step.failed', unknown: 'env.step.unknown' } as const;
+const MIGRATION_STEP_TEXT = { 'not-started': 'env.step.notStarted', completed: 'env.step.completed', failed: 'env.step.failed', skipped: 'env.step.skipped' } as const;
 
 const severityClass = (severity: 'error' | 'warning') => (severity === 'error' ? 'border-destructive text-destructive' : 'border-border text-muted-foreground');
 const button = 'inline-flex min-h-8 items-center gap-2 rounded-md border border-border px-3 text-sm font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50';
@@ -111,24 +121,16 @@ const STATE_ICON: Record<EnvironmentState, typeof CheckCircle2> = {
 };
 
 /**
- * The plan dialog (the handoff's Dialog): review the steps, confirm, watch
- * the progress, then the verified result or an actionable failure. Focus
- * is trapped, Escape cancels before anything runs and closes afterwards,
- * and is ignored while a step runs (there is no engine cancel, so none is
- * offered); failure moves focus to Retry.
+ * The handoff's Dialog, shared by the plan dialogs: focus is trapped,
+ * Escape cancels before anything runs and closes afterwards, and is
+ * ignored while the engine runs (there is no engine cancel, so none is
+ * offered and the corner X goes too). Each dialog places its own initial
+ * focus and returns it to its trigger on close.
  */
-function InstallPlanDialog({ name, run, onConfirm, onRetry, onClose }: {
-  name: string; run: InstallRun; onConfirm: () => void; onRetry: () => void; onClose: () => void;
-}) {
+function Modal({ title, running, cancelling, onClose, children }: { title: string; running: boolean; cancelling: boolean; onClose: () => void; children: ReactNode }) {
   const { t } = useI18n();
   const titleId = useId();
   const box = useRef<HTMLElement>(null);
-  const confirm = useRef<HTMLButtonElement>(null);
-  const retry = useRef<HTMLButtonElement>(null);
-  const summary = installSummary(run);
-  const running = run.phase === 'running';
-  useEffect(() => { confirm.current?.focus(); }, []);
-  useEffect(() => { if (summary === 'failure') retry.current?.focus(); }, [summary]);
   const trap = (e: KeyboardEvent<HTMLElement>) => {
     if (e.key === 'Escape') {
       e.stopPropagation();
@@ -142,49 +144,273 @@ function InstallPlanDialog({ name, run, onConfirm, onRetry, onClose }: {
     const last = focusable[focusable.length - 1];
     if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   };
-  const progress = installProgress(run);
-  const failed = failedStep(run);
   return createPortal(
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4" onPointerDown={(e) => e.stopPropagation()}>
       <section ref={box} role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={trap}
         className="relative grid max-h-full w-full max-w-md gap-4 overflow-y-auto rounded-lg border border-border bg-background p-6 shadow-lg">
         {!running && (
-          <button type="button" onClick={onClose} aria-label={run.phase === 'plan' ? t('cancel') : t('close')}
+          <button type="button" onClick={onClose} aria-label={cancelling ? t('cancel') : t('close')}
             className="absolute top-4 right-4 rounded-sm text-foreground opacity-70 outline-none hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring">
             <X className="size-4" aria-hidden />
           </button>
         )}
-        <h2 id={titleId} className="m-0 pr-6 text-lg leading-none font-semibold tracking-tight">{t('env.planTitle', { name })}</h2>
-        {run.phase === 'plan' && <p className="m-0 text-sm text-muted-foreground">{t('env.planBody')}</p>}
-        <ol className="m-0 grid list-none gap-1 p-0 text-sm">
-          {run.steps.map((step) => (
-            <li key={step.runtime} className="flex flex-wrap items-baseline gap-x-2">
-              <span className={mono}>{step.runtime}{step.version ? ` ${step.version}` : ''}</span>
-              <span className={`text-xs ${step.status === 'completed' ? 'text-success' : step.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'}`}>
-                {t(STEP_TEXT[step.status])}{step.message ? `: ${step.message}` : ''}
-              </span>
-            </li>
-          ))}
-        </ol>
-        <p role="status" aria-live="polite" className="m-0 min-h-5 text-sm">
-          {progress && t('env.progress', { n: progress.step, total: progress.total })}
-          {summary === 'success' && t('env.success', { name })}
-          {summary === 'done-not-ready' && t('env.doneNotReady', { name })}
-          {summary === 'unknown' && t('env.unknownOutcome')}
-        </p>
-        {running && <p className="m-0 text-xs text-muted-foreground">{t('env.noCancel')}</p>}
-        {summary === 'failure' && failed && (
-          <p role="alert" className="m-0 text-sm text-destructive">{t('env.failure', { step: failed.runtime, engineMessage: failed.message ?? t('unknown') })}</p>
-        )}
-        <div className="flex flex-wrap justify-end gap-2">
-          {run.phase === 'plan' && <button type="button" onClick={onClose} className={button}>{t('cancel')}</button>}
-          {run.phase === 'plan' && <button ref={confirm} type="button" onClick={onConfirm} className={primary}>{t('env.confirmInstall')}</button>}
-          {summary === 'failure' && <button ref={retry} type="button" onClick={onRetry} className={primary}>{t('env.retry')}</button>}
-          {run.phase !== 'plan' && <button type="button" onClick={onClose} className={button}>{t('close')}</button>}
-        </div>
+        <h2 id={titleId} className="m-0 pr-6 text-lg leading-none font-semibold tracking-tight">{title}</h2>
+        {children}
       </section>
     </div>,
     document.body,
+  );
+}
+
+/**
+ * The install plan dialog: review the steps, confirm, watch the progress,
+ * then the verified result or an actionable failure; failure moves focus
+ * to Retry.
+ */
+function InstallPlanDialog({ name, run, onConfirm, onRetry, onClose }: {
+  name: string; run: InstallRun; onConfirm: () => void; onRetry: () => void; onClose: () => void;
+}) {
+  const { t } = useI18n();
+  const confirm = useRef<HTMLButtonElement>(null);
+  const retry = useRef<HTMLButtonElement>(null);
+  const summary = installSummary(run);
+  const running = run.phase === 'running';
+  useEffect(() => { confirm.current?.focus(); }, []);
+  useEffect(() => { if (summary === 'failure') retry.current?.focus(); }, [summary]);
+  const progress = installProgress(run);
+  const failed = failedStep(run);
+  return (
+    <Modal title={t('env.planTitle', { name })} running={running} cancelling={run.phase === 'plan'} onClose={onClose}>
+      {run.phase === 'plan' && <p className="m-0 text-sm text-muted-foreground">{t('env.planBody')}</p>}
+      <ol className="m-0 grid list-none gap-1 p-0 text-sm">
+        {run.steps.map((step) => (
+          <li key={step.runtime} className="flex flex-wrap items-baseline gap-x-2">
+            <span className={mono}>{step.runtime}{step.version ? ` ${step.version}` : ''}</span>
+            <span className={`text-xs ${step.status === 'completed' ? 'text-success' : step.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'}`}>
+              {t(STEP_TEXT[step.status])}{step.message ? `: ${step.message}` : ''}
+            </span>
+          </li>
+        ))}
+      </ol>
+      <p role="status" aria-live="polite" className="m-0 min-h-5 text-sm">
+        {progress && t('env.progress', { n: progress.step, total: progress.total })}
+        {summary === 'success' && t('env.success', { name })}
+        {summary === 'done-not-ready' && t('env.doneNotReady', { name })}
+        {summary === 'unknown' && t('env.unknownOutcome')}
+      </p>
+      {running && <p className="m-0 text-xs text-muted-foreground">{t('env.noCancel')}</p>}
+      {summary === 'failure' && failed && (
+        <p role="alert" className="m-0 text-sm text-destructive">{t('env.failure', { step: failed.runtime, engineMessage: failed.message ?? t('unknown') })}</p>
+      )}
+      <div className="flex flex-wrap justify-end gap-2">
+        {run.phase === 'plan' && <button type="button" onClick={onClose} className={button}>{t('cancel')}</button>}
+        {run.phase === 'plan' && <button ref={confirm} type="button" onClick={onConfirm} className={primary}>{t('env.confirmInstall')}</button>}
+        {summary === 'failure' && <button ref={retry} type="button" onClick={onRetry} className={primary}>{t('env.retry')}</button>}
+        {run.phase !== 'plan' && <button type="button" onClick={onClose} className={button}>{t('close')}</button>}
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * One plan-then-apply run against the engine, kept in the section rather
+ * than its dialog: closing an in-progress view hides it without stopping
+ * the engine, and the result still lands (and the descriptor is read
+ * again). `shown` is the soul on screen; a result for another soul is
+ * dropped.
+ */
+function useEngineRun<T>(agentId: string, shown: RefObject<string>, read: () => Promise<T>, apply: () => Promise<T>, after: () => void) {
+  const [run, setRun] = useState<EngineRun<T> | null>(null);
+  const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const latest = useRef<EngineRun<T> | null>(null);
+  const set = useCallback((next: EngineRun<T> | null) => { latest.current = next; if (shown.current === agentId) setRun(next); }, [agentId, shown]);
+  const plan = useCallback(async () => {
+    set({ phase: 'planning', plan: null, result: null, error: null });
+    try {
+      const planned = await read();
+      set({ phase: 'plan', plan: planned, result: null, error: null });
+    } catch (failure) {
+      set({ phase: 'finished', plan: null, result: null, error: refusalOf(failure) });
+    }
+  }, [read, set]);
+  const confirm = useCallback(async () => {
+    const current = latest.current;
+    if (!current || current.phase === 'running') return;
+    set({ ...current, phase: 'running', result: null, error: null });
+    try {
+      const result = await apply();
+      set({ ...current, phase: 'finished', result, error: null });
+    } catch (failure) {
+      set({ ...current, phase: 'finished', result: null, error: refusalOf(failure) });
+    }
+    if (shown.current === agentId) after();
+  }, [agentId, after, apply, set, shown]);
+  // Retry re-reads a plan that could not be read, else runs the apply again (the engine plans afresh itself).
+  const retry = useCallback(() => { if (latest.current?.plan) void confirm(); else void plan(); }, [confirm, plan]);
+  const start = useCallback(() => { setOpen(true); if (latest.current?.phase !== 'running') void plan(); }, [plan]);
+  const close = useCallback(() => { setOpen(false); if (latest.current?.phase !== 'running') set(null); trigger.current?.focus(); }, [set]);
+  const reset = useCallback(() => { latest.current = null; setRun(null); setOpen(false); }, []);
+  return { run, open, trigger, start, confirm, retry, close, reset };
+}
+
+/** An engine refusal, with the command it names shown as text the owner may run; the app never runs it. */
+function Refusal({ text, action }: { text: string; action: string | null }) {
+  return (
+    <div role="alert" className="grid gap-1 text-sm text-destructive">
+      <p className="m-0">{text}</p>
+      {action && <code className="block text-[11px] text-muted-foreground [overflow-wrap:anywhere]">{action}</code>}
+    </div>
+  );
+}
+
+function CleanRows({ rows, t }: { rows: SoulCleanRow[]; t: Translate }) {
+  return (
+    <ul className="m-0 grid list-none gap-0.5 p-0 pl-3 text-xs">
+      {rows.map((row) => (
+        <li key={row.relative} className="grid gap-x-2 min-[480px]:grid-cols-[1fr_auto]">
+          <span className={mono}>{row.relative}</span>
+          <span className="text-muted-foreground">{row.kind ?? row.classification ?? ''}{row.files !== null ? ` · ${formatBytes(row.bytes)}` : ''}</span>
+          {row.reason && <span className="text-muted-foreground min-[480px]:col-span-2">{row.reason}</span>}
+          {row.error && <span className="text-destructive min-[480px]:col-span-2">{t('env.clean.notRemoved', { error: row.error })}</span>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * The clean dialog: what the engine would remove, grouped by component
+ * with counts and sizes, and what it keeps with the reason; confirm; the
+ * owner-gated apply; then the engine's counts, `nothing`, the paths it
+ * could not remove with their errors, or its refusal (`soul-running`
+ * names the command, shown and never run). Nothing is said of durable
+ * data: the engine never lists it, and the dialog repeats the engine.
+ */
+function CleanDialog({ name, run, onConfirm, onRetry, onClose }: {
+  name: string; run: EngineRun<SoulEnvironmentClean>; onConfirm: () => void; onRetry: () => void; onClose: () => void;
+}) {
+  const { t } = useI18n();
+  const confirm = useRef<HTMLButtonElement>(null);
+  const retry = useRef<HTMLButtonElement>(null);
+  const running = run.phase === 'running';
+  const plan = run.phase === 'plan' ? run.plan : null;
+  const removable = plan ? cleanGroups(plan.removable) : [];
+  const result = run.phase === 'finished' ? run.result : null;
+  const failed = result?.decision === 'failed' || run.error !== null;
+  useEffect(() => { if (run.phase === 'plan') confirm.current?.focus(); }, [run.phase]);
+  useEffect(() => { if (failed) retry.current?.focus(); }, [failed]);
+  return (
+    <Modal title={t('env.clean.title', { name })} running={running} cancelling={run.phase === 'plan' || run.phase === 'planning'} onClose={onClose}>
+      {run.phase === 'planning' && <p role="status" className="m-0 text-sm text-muted-foreground">{t('env.clean.planning')}</p>}
+      {plan && removable.length > 0 && <p className="m-0 text-sm text-muted-foreground">{t('env.clean.body')}</p>}
+      {plan && (
+        <div className="grid gap-2 text-sm">
+          {removable.length === 0 && <p className="m-0">{t('env.clean.nothing')}</p>}
+          {removable.length > 0 && (
+            <div className="grid gap-1.5">
+              <h3 className={heading}>{t('env.clean.wouldRemove')}</h3>
+              {removable.map((group) => (
+                <div key={group.component} className="grid gap-0.5">
+                  <p className={`m-0 ${mono}`}>{t('env.clean.group', { component: group.component, files: group.files, bytes: formatBytes(group.bytes) })}</p>
+                  <CleanRows rows={group.rows} t={t} />
+                </div>
+              ))}
+            </div>
+          )}
+          {plan.kept.length > 0 && (
+            <div className="grid gap-1">
+              <h3 className={heading}>{t('env.clean.kept')}</h3>
+              <CleanRows rows={plan.kept} t={t} />
+            </div>
+          )}
+        </div>
+      )}
+      <p role="status" aria-live="polite" className="m-0 min-h-5 text-sm">
+        {running && t('env.clean.running')}
+        {result?.decision === 'cleaned' && t('env.clean.done', { files: result.files ?? 0, bytes: formatBytes(result.bytes ?? 0) })}
+        {result?.decision === 'nothing' && t('env.clean.nothing')}
+      </p>
+      {running && <p className="m-0 text-xs text-muted-foreground">{t('env.noCancel')}</p>}
+      {result?.decision === 'failed' && (
+        <div className="grid gap-1.5">
+          <Refusal text={t('env.clean.failed')} action={null} />
+          <CleanRows rows={result.failed} t={t} />
+          {result.removed.length > 0 && <p className="m-0 text-xs text-muted-foreground">{t('env.clean.done', { files: result.files ?? 0, bytes: formatBytes(result.bytes ?? 0) })}</p>}
+        </div>
+      )}
+      {run.error && <Refusal text={t('env.clean.refused', { message: run.error.message })} action={run.error.action} />}
+      <div className="flex flex-wrap justify-end gap-2">
+        {plan && removable.length > 0 && <button type="button" onClick={onClose} className={button}>{t('cancel')}</button>}
+        {plan && removable.length > 0 && <button ref={confirm} type="button" onClick={onConfirm} className={primary}>{t('env.clean.confirm')}</button>}
+        {failed && <button ref={retry} type="button" onClick={onRetry} className={primary}>{t('env.retry')}</button>}
+        {!(plan && removable.length > 0) && <button type="button" onClick={onClose} className={button}>{t('close')}</button>}
+      </div>
+    </Modal>
+  );
+}
+
+function MigrationStepRows({ steps, planned, t }: { steps: EnvironmentMigrationStep[]; planned: boolean; t: Translate }) {
+  return (
+    <ol className="m-0 grid list-none gap-1 p-0 text-sm">
+      {steps.map((step) => {
+        const status = migrationStepStatus(step.status);
+        const tone = status === 'completed' ? 'text-success' : status === 'failed' ? 'text-destructive' : 'text-muted-foreground';
+        return (
+          <li key={step.id} className="grid gap-x-2 gap-y-0.5">
+            <span className="flex flex-wrap items-baseline gap-x-2">
+              <span className={mono}>{step.id}</span>
+              {/* In the plan the engine's status word is the step's state (`pending`, `copying`, `failed`); after the run the handoff's four. */}
+              <span className={`text-xs ${planned ? 'text-muted-foreground' : tone}`}>{planned || status === 'other' ? step.status ?? t('unknown') : t(MIGRATION_STEP_TEXT[status])}</span>
+            </span>
+            {step.note && <span className="text-xs text-muted-foreground">{step.note}</span>}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/**
+ * The migration completion dialog: the pending steps with the engine's
+ * note on each, confirm, the owner-gated apply, then per-step results
+ * (completed / failed / not started / skipped) and the engine's decision;
+ * a failure moves focus to Retry, and the refusal while the soul runs
+ * shows the command as text.
+ */
+function CompleteDialog({ name, run, onConfirm, onRetry, onClose }: {
+  name: string; run: EngineRun<EnvironmentMigration>; onConfirm: () => void; onRetry: () => void; onClose: () => void;
+}) {
+  const { t } = useI18n();
+  const confirm = useRef<HTMLButtonElement>(null);
+  const retry = useRef<HTMLButtonElement>(null);
+  const running = run.phase === 'running';
+  const plan = run.phase === 'plan' ? run.plan : null;
+  const result = run.phase === 'finished' ? run.result : null;
+  const failed = result?.decision === 'failed' || run.error !== null;
+  useEffect(() => { if (run.phase === 'plan') confirm.current?.focus(); }, [run.phase]);
+  useEffect(() => { if (failed) retry.current?.focus(); }, [failed]);
+  const steps = result?.steps ?? run.plan?.steps ?? [];
+  return (
+    <Modal title={t('env.complete.title', { name })} running={running} cancelling={run.phase === 'plan' || run.phase === 'planning'} onClose={onClose}>
+      {run.phase === 'planning' && <p role="status" className="m-0 text-sm text-muted-foreground">{t('env.complete.planning')}</p>}
+      {plan && <p className="m-0 text-sm text-muted-foreground">{t('env.complete.body')}</p>}
+      {steps.length > 0 && <MigrationStepRows steps={steps} planned={result === null} t={t} />}
+      <p role="status" aria-live="polite" className="m-0 min-h-5 text-sm">
+        {running && t('env.complete.running')}
+        {result?.decision === 'completed' && t('env.complete.done')}
+        {result?.decision === 'skipped' && t('env.complete.skipped')}
+      </p>
+      {running && <p className="m-0 text-xs text-muted-foreground">{t('env.noCancel')}</p>}
+      {result?.decision === 'failed' && <Refusal text={t('env.complete.failed')} action={null} />}
+      {run.error && <Refusal text={t('env.complete.refused', { message: run.error.message })} action={run.error.action} />}
+      <div className="flex flex-wrap justify-end gap-2">
+        {plan && <button type="button" onClick={onClose} className={button}>{t('cancel')}</button>}
+        {plan && <button ref={confirm} type="button" onClick={onConfirm} className={primary}>{t('env.complete.confirm')}</button>}
+        {failed && <button ref={retry} type="button" onClick={onRetry} className={primary}>{t('env.retry')}</button>}
+        {!plan && <button type="button" onClick={onClose} className={button}>{t('close')}</button>}
+      </div>
+    </Modal>
   );
 }
 
@@ -211,7 +437,18 @@ export function EnvironmentSection({ soul, refresh = 0 }: { soul: CensusRow; ref
   const planButton = useRef<HTMLButtonElement>(null);
   const [migration, setMigration] = useState<MigrationState | null>(null);
   const shown = useRef(soul.agentId);
-  useEffect(() => { shown.current = soul.agentId; setRun(null); setPlanOpen(false); setMigration(null); }, [soul.agentId]);
+  const agentId = soul.agentId;
+  const clean = useEngineRun<SoulEnvironmentClean>(agentId, shown,
+    useCallback(() => source.clean(agentId, { plan: true, components: null }), [source, agentId]),
+    useCallback(() => source.clean(agentId, { plan: false, components: null }), [source, agentId]),
+    reload);
+  const complete = useEngineRun<EnvironmentMigration>(agentId, shown,
+    useCallback(() => source.migrate(agentId, 'complete', null, true), [source, agentId]),
+    useCallback(() => source.migrate(agentId, 'complete', null, false), [source, agentId]),
+    reload);
+  const resetClean = clean.reset;
+  const resetComplete = complete.reset;
+  useEffect(() => { shown.current = soul.agentId; setRun(null); setPlanOpen(false); setMigration(null); resetClean(); resetComplete(); }, [soul.agentId, resetClean, resetComplete]);
 
   const execute = useCallback(async (start: InstallRun) => {
     const agentId = soul.agentId;
@@ -312,6 +549,12 @@ export function EnvironmentSection({ soul, refresh = 0 }: { soul: CensusRow; ref
             <ul className="m-0 list-none p-0 text-xs text-muted-foreground">
               {env.migration.steps.map((s) => <li key={s.id} className={mono}>{s.id} — {s.status ?? t('unknown')}{s.from && s.to ? ` (${s.from} → ${s.to})` : ''}</li>)}
             </ul>
+          )}
+          {/* Capability-gated: the engine finishes every pending step at once (`migrate-complete`). */}
+          {actions?.complete && (
+            <div>
+              <button ref={complete.trigger} type="button" aria-haspopup="dialog" className={button} onClick={complete.start}>{t('env.complete')}</button>
+            </div>
           )}
           {/* Capability-gated recovery: the engine lists the action for the problem, and can run it. */}
           {actions?.install && (
@@ -430,14 +673,16 @@ export function EnvironmentSection({ soul, refresh = 0 }: { soul: CensusRow; ref
         </div>
       )}
 
-      {/* Later features, visible and gated until the engine has the capabilities. */}
+      {/* Export and import wait for their engine slice; the clean is live once the engine lists `env-clean`. */}
       <div className="grid gap-1.5">
         <div className="flex flex-wrap gap-2">
           <button type="button" disabled aria-describedby={`${ids}-gated`} className={button}>{t('env.export')}</button>
           <button type="button" disabled aria-describedby={`${ids}-gated`} className={button}>{t('env.import')}</button>
-          <button type="button" disabled aria-describedby={`${ids}-gated`} className={button}>{t('env.cleanCache')}</button>
+          {actions?.clean
+            ? <button ref={clean.trigger} type="button" aria-haspopup="dialog" className={button} onClick={clean.start}>{t('env.cleanCache')}</button>
+            : <button type="button" disabled aria-describedby={`${ids}-gated`} className={button}>{t('env.cleanCache')}</button>}
         </div>
-        <p id={`${ids}-gated`} className="m-0 text-xs text-muted-foreground">{t('env.gated')}</p>
+        <p id={`${ids}-gated`} className="m-0 text-xs text-muted-foreground">{t(actions?.clean ? 'env.gatedExport' : 'env.gated')}</p>
       </div>
 
       {env && (
@@ -463,6 +708,12 @@ export function EnvironmentSection({ soul, refresh = 0 }: { soul: CensusRow; ref
         <InstallPlanDialog name={name} run={run} onClose={closePlan}
           onConfirm={() => { void execute(run); }}
           onRetry={() => { const next = installReducer(run, { type: 'retry' }); setRun(next); void execute(next); }} />
+      )}
+      {clean.open && clean.run && (
+        <CleanDialog name={name} run={clean.run} onClose={clean.close} onConfirm={() => { void clean.confirm(); }} onRetry={clean.retry} />
+      )}
+      {complete.open && complete.run && (
+        <CompleteDialog name={name} run={complete.run} onClose={complete.close} onConfirm={() => { void complete.confirm(); }} onRetry={complete.retry} />
       )}
     </section>
   );

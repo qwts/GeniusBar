@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BridgeError, call, openDesktop, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, exportAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRemovalPlan, normalizeRemovalEffects, removalPlan, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, normalizeAppearance, savedBrief, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported, normalizeSoulComputerUse, soulComputerUse, soulComputerUseSupported, liveComputerUse, listSoulTemplates, normalizeSoulTemplates, normalizeSoulProfile, soulProfile, soulProfileFile, popupVisible, normalizeSoulEnvironment, soulEnvironment, engineCan, normalizePreparedRevision, prepareRevision, discardRevision, editableInStaging, normalizeRuntimeInstall, installSoulRuntime, normalizeEnvironmentMigration, migrateSoulEnvironment } from './bridge';
+import { BridgeError, call, openDesktop, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, exportAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRemovalPlan, normalizeRemovalEffects, removalPlan, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, normalizeAppearance, savedBrief, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported, normalizeSoulComputerUse, soulComputerUse, soulComputerUseSupported, liveComputerUse, listSoulTemplates, normalizeSoulTemplates, normalizeSoulProfile, soulProfile, soulProfileFile, popupVisible, normalizeSoulEnvironment, soulEnvironment, engineCan, normalizePreparedRevision, prepareRevision, discardRevision, editableInStaging, normalizeRuntimeInstall, installSoulRuntime, normalizeEnvironmentMigration, migrateSoulEnvironment, normalizeSoulEnvironmentClean, soulEnvClean } from './bridge';
 
 describe('bridge', () => {
   it('invokes the shell command with the method and params', async () => {
@@ -992,12 +992,61 @@ describe('soul runtimes install and soul env migrate (#268)', () => {
     const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); return { agentId: 'agent_p', operation: 'space-into-soul', decision: 'migrated', steps: [{ id: 'space-into-soul', status: 'done' }] }; }) as never;
     await expect(migrateSoulEnvironment('agent_p', 'space-into-soul', null, fake)).resolves.toMatchObject({ decision: 'migrated' });
     await migrateSoulEnvironment('agent_p', 'adopt-host-signin', 'codex', fake);
+    await migrateSoulEnvironment('agent_p', 'complete', null, fake, true);
+    await migrateSoulEnvironment('agent_p', 'complete', null, fake);
     expect(calls).toEqual([
-      ['soul_env_migrate', { agent: 'agent_p', kind: 'space-into-soul', harness: null }],
-      ['soul_env_migrate', { agent: 'agent_p', kind: 'adopt-host-signin', harness: 'codex' }],
+      ['soul_env_migrate', { agent: 'agent_p', kind: 'space-into-soul', harness: null, plan: false }],
+      ['soul_env_migrate', { agent: 'agent_p', kind: 'adopt-host-signin', harness: 'codex', plan: false }],
+      ['soul_env_migrate', { agent: 'agent_p', kind: 'complete', harness: null, plan: true }],
+      ['soul_env_migrate', { agent: 'agent_p', kind: 'complete', harness: null, plan: false }],
     ]);
     const busy = (async () => { throw { code: 'space-migrate-busy', message: 'agent_p is running' }; }) as never;
-    await expect(migrateSoulEnvironment('agent_p', 'space-into-soul', null, busy)).rejects.toMatchObject({ code: 'space-migrate-busy' });
+    await expect(migrateSoulEnvironment('agent_p', 'space-into-soul', null, busy)).rejects.toMatchObject({ code: 'space-migrate-busy', action: null });
+    // The engine's recovery command rides on its refusal, as text for the page.
+    const running = (async () => { throw { code: 'soul-running', message: 'agent_p is running; stop it before completing its migration', action: 'agent-bot soul stop agent_p' }; }) as never;
+    await expect(migrateSoulEnvironment('agent_p', 'complete', null, running)).rejects.toMatchObject({ code: 'soul-running', action: 'agent-bot soul stop agent_p' });
     await expect(migrateSoulEnvironment('agent_p', 'space-into-soul')).rejects.toMatchObject({ code: 'soul-env-migrate-unavailable' });
+  });
+});
+
+describe('soul env clean (#268, agent-bot-identity #583 slice 6)', () => {
+  const removable = { component: 'cache', path: '/s/.soul-state/cache/index.db', relative: '.soul-state/cache/index.db', classification: 'cache', retention: 'reconstructible', kind: 'cache-entry', files: 1, bytes: 12 };
+  const kept = { component: 'temp', path: '/s/.soul-state/tmp/revision-x', relative: '.soul-state/tmp/revision-x', classification: 'temp', retention: 'disposable', kind: 'revision-staging', reason: 'within its 24-hour window' };
+  const plan = { schemaVersion: 1, agentId: 'agent_p', soulDir: '/s', applied: false, decision: 'planned', components: ['cache', 'temp', 'runtimes'], removable: [removable], removed: [], failed: [], kept: [kept], files: 1, bytes: 12, journal: '.soul-state/clean.json' };
+
+  it('normalizes the plan and the report: rows with their counts, reasons and errors, unknown rows dropped', () => {
+    expect(normalizeSoulEnvironmentClean(plan)).toEqual({
+      agentId: 'agent_p', soulDir: '/s', applied: false, decision: 'planned', components: ['cache', 'temp', 'runtimes'],
+      removable: [{ ...removable, reason: null, error: null }], removed: [], failed: [],
+      kept: [{ ...kept, files: null, bytes: null, error: null }], files: 1, bytes: 12,
+    });
+    const failed = normalizeSoulEnvironmentClean({ ...plan, applied: true, decision: 'failed', removable: [removable, { component: 'cache' }, 'x', { relative: 'no-component' }], failed: [{ ...removable, error: 'EACCES' }], files: 0, bytes: 0 });
+    expect(failed?.applied).toBe(true);
+    expect(failed?.removable.map((r) => r.relative)).toEqual(['.soul-state/cache/index.db']);
+    expect(failed?.failed[0]).toMatchObject({ relative: '.soul-state/cache/index.db', error: 'EACCES' });
+    // Not a clean report: a descriptor, a migration, nothing.
+    expect(normalizeSoulEnvironmentClean({ schemaVersion: 1, agentId: 'agent_p', engine: {}, components: [] })).toBeNull();
+    expect(normalizeSoulEnvironmentClean({ agentId: 'agent_p', operation: 'complete', steps: [] })).toBeNull();
+    expect(normalizeSoulEnvironmentClean(null)).toBeNull();
+  });
+
+  it('plans and applies through the bridge, keeping the engine refusal and its action', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); return plan; }) as never;
+    await expect(soulEnvClean('agent_p', { plan: true }, fake)).resolves.toMatchObject({ applied: false, decision: 'planned' });
+    await soulEnvClean('agent_p', { plan: false, components: ['cache'] }, fake);
+    await soulEnvClean('agent_p', undefined, fake);
+    expect(calls).toEqual([
+      ['soul_env_clean', { agent: 'agent_p', plan: true, components: null }],
+      ['soul_env_clean', { agent: 'agent_p', plan: false, components: ['cache'] }],
+      ['soul_env_clean', { agent: 'agent_p', plan: false, components: null }],
+    ]);
+    const running = (async () => { throw { code: 'soul-running', message: 'agent_p is running; stop it before cleaning its environment', action: 'agent-bot soul stop agent_p' }; }) as never;
+    await expect(soulEnvClean('agent_p', {}, running)).rejects.toMatchObject({ code: 'soul-running', message: 'agent_p is running; stop it before cleaning its environment', action: 'agent-bot soul stop agent_p' });
+    const silent = (async () => ({ agentId: 'agent_p' })) as never;
+    await expect(soulEnvClean('agent_p', { plan: true }, silent)).rejects.toMatchObject({ code: 'soul-env-clean-failed' });
+    const old = (async () => { throw { code: 'soul-env-clean-unsupported', message: 'this agent-bot cannot clean a soul environment' }; }) as never;
+    await expect(soulEnvClean('agent_p', { plan: true }, old)).rejects.toMatchObject({ code: 'soul-env-clean-unsupported' });
+    await expect(soulEnvClean('agent_p', { plan: true })).rejects.toMatchObject({ code: 'soul-env-clean-unavailable' });
   });
 });

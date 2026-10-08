@@ -3,7 +3,7 @@
 // rows and buttons, and the install flow's step bookkeeping. Pure: every
 // row traces to a descriptor field, nothing is read from the filesystem,
 // and every button is gated on `engine.capabilities`, never a version.
-import { engineCan, type RuntimeInstall, type SoulEnvironment, type SoulEnvironmentProblem, type SoulRetention } from '../bridge';
+import { engineCan, type RuntimeInstall, type SoulCleanRow, type SoulEnvironment, type SoulEnvironmentProblem, type SoulRetention } from '../bridge';
 
 /**
  * The five states the handoff keeps distinct. `offline`: the engine did not
@@ -272,16 +272,105 @@ export interface EnvironmentActions {
   adopt: string | null;
   /** Whether "Migrate" (the Agent Space into the soul) is offered. */
   migrateSpace: boolean;
+  /** Whether "Clean up cache" is live (`env-clean`): the engine plans and removes, the app shows. */
+  clean: boolean;
+  /** Whether "Complete migration" is offered (`migrate-complete` and a step still to finish). */
+  complete: boolean;
 }
 
 const listed = (problems: SoulEnvironmentProblem[], match: (p: SoulEnvironmentProblem) => boolean) => problems.some((p) => p.action !== null && match(p));
+
+/** The migration steps the descriptor lists as neither done nor skipped: what `--complete` would finish. */
+export function pendingMigrationSteps(env: SoulEnvironment): SoulEnvironment['migration']['steps'] {
+  return env.migration.steps.filter((step) => !MIGRATION_FINAL.has(step.status ?? ''));
+}
 
 export function environmentActions(env: SoulEnvironment): EnvironmentActions {
   const missing = missingRuntimes(env);
   const install = engineCan(env, 'runtimes') && missing.length > 0 && listed(env.readiness.problems, (p) => INSTALL_CODES.has(p.code)) ? missing : null;
   const adopt = engineCan(env, 'tool-homes') && listed(env.readiness.problems, (p) => p.code === 'tool-signin-missing') ? env.harnesses.selected : null;
   const migrateSpace = engineCan(env, 'memory') && listed(env.readiness.problems, (p) => p.code === 'memory-not-contained');
-  return { install, adopt, migrateSpace };
+  const clean = engineCan(env, 'env-clean');
+  const complete = engineCan(env, 'migrate-complete') && pendingMigrationSteps(env).length > 0;
+  return { install, adopt, migrateSpace, clean, complete };
+}
+
+/**
+ * An engine refusal as the dialogs show it: the code, the message, and the
+ * command the engine names (`agent-bot soul stop <id>` for `soul-running`),
+ * which is shown as text and never run by the app.
+ */
+export interface EngineRefusal {
+  code: string;
+  message: string;
+  action: string | null;
+}
+
+export function refusalOf(failure: unknown): EngineRefusal {
+  const e = failure as { code?: unknown; message?: unknown; action?: unknown };
+  return {
+    code: typeof e?.code === 'string' ? e.code : 'failed',
+    message: typeof e?.message === 'string' ? e.message : String(failure),
+    action: typeof e?.action === 'string' && e.action.trim() !== '' ? e.action : null,
+  };
+}
+
+/**
+ * One plan-then-apply run against the engine (a clean, a migration
+ * completion): the plan is read first and reviewed, nothing runs until
+ * the owner confirms, and the result or the engine's refusal lands as it
+ * came. The run outlives its dialog: closing an in-progress view hides
+ * it without stopping the engine.
+ */
+export interface EngineRun<T> {
+  phase: 'planning' | 'plan' | 'running' | 'finished';
+  plan: T | null;
+  result: T | null;
+  error: EngineRefusal | null;
+}
+
+/** Sizes as the engine counts them (bytes), rounded for a line of text; the engine's number is the source. */
+export function formatBytes(bytes: number | null): string {
+  if (bytes === null) return '—';
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+}
+
+/** A clean's rows grouped by the component they belong to, with that group's counts summed from the rows. */
+export interface CleanGroup {
+  component: string;
+  rows: SoulCleanRow[];
+  files: number;
+  bytes: number;
+}
+
+export function cleanGroups(rows: readonly SoulCleanRow[]): CleanGroup[] {
+  const groups = new Map<string, CleanGroup>();
+  for (const row of rows) {
+    let group = groups.get(row.component);
+    if (!group) { group = { component: row.component, rows: [], files: 0, bytes: 0 }; groups.set(row.component, group); }
+    group.rows.push(row);
+    group.files += row.files ?? 0;
+    group.bytes += row.bytes ?? 0;
+  }
+  return [...groups.values()];
+}
+
+/** The handoff's step states for a migration step, from the engine's status word; anything else is shown as the engine said it. */
+export type MigrationStepStatus = 'completed' | 'failed' | 'not-started' | 'skipped' | 'other';
+
+export function migrationStepStatus(status: string | null): MigrationStepStatus {
+  switch (status) {
+    case 'done': return 'completed';
+    case 'failed': return 'failed';
+    case 'skipped': return 'skipped';
+    case 'pending': return 'not-started';
+    default: return 'other';
+  }
 }
 
 /** The handoff's step states: completed / failed / not started / result unknown, plus the one running. */
