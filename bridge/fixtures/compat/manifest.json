@@ -1,0 +1,43 @@
+{
+  "writtenBy": {
+    "agent-bot": "v0.10.51@db6ed2dccd8a490e400a4220e916196a7922eb37",
+    "agent-comms": "v0.3.14@429729652a37f4b84f8eea8c2d978bde38a8ae2d"
+  },
+  "agentId": "agent_be54a743-f2cd-896d-9a93-e52c6d29e4d0",
+  "revisions": [
+    "sha256:86f6cfb7184c3f4eba8b1b49ee568bc0be0c354919ca0e059793ebf8d724605a",
+    "sha256:3586857cf7a84142200aad4f080a818bb67ad072d32e01eef379ae7bef682270",
+    "sha256:edd5a3f64a80728d0d058dfcb831fc778ea61557984da9889e858f329d7d56b5"
+  ],
+  "rowKeys": [
+    "id",
+    "name",
+    "soulDir",
+    "appSlug",
+    "parentId",
+    "status",
+    "spacePath",
+    "worktree",
+    "worktrees",
+    "transcriptLocator",
+    "lastSeen",
+    "managed",
+    "comms",
+    "brief",
+    "paused",
+    "computerUse",
+    "sandbox",
+    "displayName",
+    "harnessAuth"
+  ],
+  "brokerRecordTypes": [
+    "pair-request",
+    "pair-approve",
+    "join",
+    "message",
+    "ack",
+    "principal-request",
+    "principal-approve"
+  ],
+  "recordedAt": "2026-10-08T03:13:33.085Z"
+}

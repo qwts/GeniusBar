@@ -23,11 +23,19 @@
 // migrate stops it, and renames its unit aside only once GeniusBar's are
 // running. Both installs keep their state in the same directories, so the
 // souls, inboxes, pairings and daemon settings carry over as they are.
+//
+// Older engines rewrite newer state without the fields they do not know
+// (ADR-0282, docs/compatibility-matrix.md), so neither action puts older
+// engines on state a newer release wrote: refresh holds when the running
+// app is older than the stamped one, until GENIUSBAR_ALLOW_DOWNGRADE=1 or
+// that release is installed again, and migrate refuses another install's
+// broker or daemon that is newer than the bundled one, before stopping it.
 // Result: one JSON line, {ok: true, broker, daemon} with each one of
-// 'absent' | 'current' | 'reinstalled' | 'restarted' | 'removed' |
+// 'absent' | 'current' | 'reinstalled' | 'restarted' | 'held' | 'removed' |
 // 'migrated' | 'unsupported' (inspect: null or {label, program, version, state}),
-// and, from refresh and remove when the app bundles agent-bot-keyd, keyd:
-// 'absent' | 'current' | 'reinstalled' | 'restarted' | 'removed' | 'unavailable',
+// `downgrade: {from, to}` beside 'held', and, from refresh and remove when
+// the app bundles agent-bot-keyd, keyd:
+// 'absent' | 'current' | 'reinstalled' | 'restarted' | 'held' | 'removed' | 'unavailable',
 // or {ok: false, code, message}.
 //
 // usage: node services.mjs refresh|remove|inspect|migrate AGENT_COMMS_DIR AGENT_BOT_DIR
@@ -55,6 +63,27 @@ function failed(result, fallback) {
 }
 
 /**
+ * Orders release versions (`0.1.60`, `v0.10.51`): negative when `a` is the
+ * older, zero when equal. Numeric parts compare as numbers, so 0.1.9 comes
+ * before 0.1.10; a pre-release suffix sorts before its release.
+ */
+export function compareVersions(a, b) {
+  const parts = (value) => String(value).replace(/^v/, '').split(/[.-]/);
+  const left = parts(a);
+  const right = parts(b);
+  for (let i = 0; i < Math.max(left.length, right.length); i += 1) {
+    const [x, y] = [left[i], right[i]];
+    if (x === undefined) return /^\d+$/.test(y) ? -1 : 1;
+    if (y === undefined) return /^\d+$/.test(x) ? 1 : -1;
+    if (x === y) continue;
+    const numeric = /^\d+$/.test(x) && /^\d+$/.test(y);
+    if (numeric) return Number(x) - Number(y);
+    return /^\d+$/.test(x) ? 1 : /^\d+$/.test(y) ? -1 : x < y ? -1 : 1;
+  }
+  return 0;
+}
+
+/**
  * `units` maps 'broker' and 'daemon' to their plist paths; `read` returns a
  * plist's text or null when absent. `node` and `commsEntry` are
  * the broker command line this copy of the app runs.
@@ -64,10 +93,24 @@ function failed(result, fallback) {
  * restarts the named unit and resolves true only when launchd did. When the
  * stamped version differs from the running one, the bundle was swapped under
  * unchanged unit paths, so current units are restarted onto the new files.
+ *
+ * When the running version is older than the stamped one, the bundle was
+ * swapped for an older release: its engines rewrite state the newer one
+ * wrote without the fields they do not know (ADR-0282), so nothing is
+ * restarted, re-registered or stamped. The units keep running the files
+ * they loaded, and the result says 'held' with `downgrade: {from, to}`
+ * until the newer release is installed again or `allowDowngrade` is set.
+ * A reboot or a crash still starts the older files; the hold is the host's
+ * fail-before-write, not a guarantee the component itself must give.
  */
-export async function refreshServices({ units, read, node, commsEntry, cli, bot, version, stamp, kickstart, keyd = null }) {
+export async function refreshServices({ units, read, node, commsEntry, cli, bot, version, stamp, kickstart, keyd = null, allowDowngrade = false }) {
   const result = {};
   const reconciled = stamp ? await stamp.read() : null;
+  if (version !== undefined && reconciled !== null && !allowDowngrade && compareVersions(version, reconciled) < 0) {
+    for (const which of ['broker', 'daemon']) result[which] = read(units[which]) === null ? 'absent' : 'held';
+    if (keyd) result.keyd = result.daemon === 'absent' ? 'absent' : 'held';
+    return { ...result, downgrade: { from: reconciled, to: version } };
+  }
   const stale = version !== undefined && reconciled !== version;
   const broker = read(units.broker);
   if (broker === null) result.broker = 'absent';
@@ -184,10 +227,21 @@ export async function inspectServices({ foreign, read, loaded }) {
  * loaded units again (`bootstrap`). Present but unloaded plists are renamed
  * aside without bootout, and remain unloaded on rollback,
  * so a failed or cancelled move leaves the machine running as before.
+ *
+ * `bundled` names the versions this app bundles ({broker, daemon}). An
+ * install whose unit names a newer version (a Homebrew Cellar path) is
+ * refused before anything stops: its state may carry fields the bundled
+ * engines would drop on their first write (ADR-0282). A unit with no
+ * readable version is moved as before.
  */
-export async function migrateServices({ foreign, read, loaded, cli, bot, bootout, bootstrap, rename, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now }) {
+export async function migrateServices({ foreign, read, loaded, cli, bot, bootout, bootstrap, rename, bundled = null, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now }) {
   const found = await inspectServices({ foreign, read, loaded });
   if (!found.broker && !found.daemon) return { broker: 'absent', daemon: 'absent' };
+  const newer = ['broker', 'daemon'].filter((which) => found[which]?.version && bundled?.[which] && compareVersions(found[which].version, bundled[which]) > 0);
+  if (newer.length) {
+    const named = newer.map((which) => `${which} ${found[which].version} (GeniusBar bundles ${bundled[which]})`).join(' and ');
+    throw new SetupError('migrate-downgrade', `the other install’s ${named} is newer than GeniusBar’s; update GeniusBar first, so its services can read what that install wrote`);
+  }
   const stopped = [];
   const installed = [];
   const renamed = [];
@@ -284,7 +338,15 @@ async function main() {
       { timeout: 15_000 }, (error) => resolve(error === null));
   });
   const version = process.env.GENIUSBAR_APP_VERSION || undefined;
-  const ports = { units, read, cli: runner(commsEntry), bot: runner(botEntry), version, stamp, kickstart, keyd: bundledKeyd() };
+  const ports = {
+    units, read, cli: runner(commsEntry), bot: runner(botEntry), version, stamp, kickstart, keyd: bundledKeyd(),
+    allowDowngrade: process.env.GENIUSBAR_ALLOW_DOWNGRADE === '1',
+  };
+  // The bundled component versions, for migrate's newer-install check.
+  const packageVersion = (dir) => {
+    try { return JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8')).version ?? null; } catch { return null; }
+  };
+  const bundled = { broker: packageVersion(commsDir), daemon: packageVersion(botDir) };
   const foreign = Object.fromEntries(Object.entries(FOREIGN_LABELS)
     .map(([which, label]) => [which, { label, plist: path.join(agents, `${label}.plist`) }]));
   const launchctl = (args) => new Promise((resolve) => {
@@ -301,7 +363,7 @@ async function main() {
     const result = action === 'refresh'
       ? await refreshServices({ ...ports, node: process.execPath, commsEntry })
       : action === 'inspect' ? await inspectServices({ ...migration, read })
-        : action === 'migrate' ? await migrateServices({ ...ports, ...migration })
+        : action === 'migrate' ? await migrateServices({ ...ports, ...migration, bundled })
           : await removeServices(ports);
     write({ ok: true, ...result });
   } catch (error) {

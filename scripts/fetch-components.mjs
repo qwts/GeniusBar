@@ -214,19 +214,25 @@ export function shippedEntries(entries, pkg) {
   return entries.filter((entry) => (keep ? keep.has(entry) : !EXCLUDED.has(entry)));
 }
 
-export function fetchComponent(name, { repo, tag, ref }) {
+/**
+ * `resources` is where the component lands (the app's resources by default)
+ * and `remote` where git fetches it from: the published repository, or a
+ * local mirror of it for scripts/compat-check.mjs, which materializes several
+ * pinned releases side by side with this same tag-and-commit check.
+ */
+export function fetchComponent(name, { repo, tag, ref }, { resources = RESOURCES, remote = `https://github.com/${repo}.git` } = {}) {
   if (!/^[0-9a-f]{40}$/.test(ref)) throw new Error(`${name} must be pinned to a full commit SHA`);
   if (typeof tag !== 'string' || !/^v\d+\.\d+\.\d+$/.test(tag)) throw new Error(`${name} must name a release tag`);
-  const dest = path.join(RESOURCES, name);
-  const stamp = path.join(RESOURCES, `${name}.ref`);
+  const dest = path.join(resources, name);
+  const stamp = path.join(resources, `${name}.ref`);
   if (existsSync(dest) && existsSync(stamp) && readFileSync(stamp, 'utf8') === ref) return dest;
   const work = mkdtempSync(path.join(tmpdir(), `geniusbar-${name}-`));
   try {
     const git = (...args) => execFileSync('git', ['-C', work, ...args], { stdio: ['ignore', 'pipe', 'inherit'] });
     git('init', '-q');
-    const listed = tagCommit(git('ls-remote', `https://github.com/${repo}.git`, `refs/tags/${tag}*`).toString(), tag);
+    const listed = tagCommit(git('ls-remote', remote, `refs/tags/${tag}*`).toString(), tag);
     if (listed !== ref) throw new Error(`${name} ${tag} resolves to ${listed ?? 'nothing'}, expected ${ref}`);
-    git('fetch', '-q', '--depth', '1', `https://github.com/${repo}.git`, ref);
+    git('fetch', '-q', '--depth', '1', remote, ref);
     // Through a tar file rather than a shell pipeline, so a Windows host
     // needs no sh beside git and tar.
     const tree = path.join(work, 'tree');

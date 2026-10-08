@@ -1,0 +1,1 @@
+{"formatVersion":1,"name":"Compat Probe","description":"State written for the compatibility check","displaySeed":"compat","preferredHarnesses":["claude"],"revision":"sha256:86f6cfb7184c3f4eba8b1b49ee568bc0be0c354919ca0e059793ebf8d724605a","parentRevision":null}
