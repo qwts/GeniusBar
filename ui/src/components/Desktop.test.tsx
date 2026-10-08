@@ -5,7 +5,7 @@ import { sampleCensus } from '../model/fixtures';
 import { noBadges, type SoulBadges } from '../model/refresh';
 import { translate } from '../lib/i18n';
 import { layoutActions, useLayout } from '../state/layout';
-import { sampleProfile } from '../model/fixtures';
+import { samplePreparedRevision, sampleProfile } from '../model/fixtures';
 import { ProfileSourceContext, type ProfileSource } from '../useSoulProfile';
 import { CompanionWindow, Desktop } from './Desktop';
 import { noStatus, soulStatus, statusText } from './DesktopStatus';
@@ -273,6 +273,8 @@ describe('Desktop Customize… (#64)', () => {
   const profiles: ProfileSource = {
     profile: vi.fn(async () => sampleProfile),
     file: vi.fn(async (agentId: string, path: string) => ({ agentId, path, size: 0, contents: '' })),
+    prepare: vi.fn(async () => samplePreparedRevision),
+    discard: vi.fn(async () => {}),
   };
 
   it('offers Customize… between Open and Hide in the right-click menu, and opens the dialog for that companion', async () => {

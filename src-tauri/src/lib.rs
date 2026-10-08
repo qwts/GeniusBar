@@ -378,6 +378,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(bridge::Bridge::default())
         .manage(bridge::IdentityJobs::default())
+        .manage(bridge::PreparedRevisions::default())
         .manage(soul_package::PendingSoulPackages::default())
         .manage(Dismissed::default())
         .manage(updates::Updates::default())
@@ -428,6 +429,9 @@ pub fn run() {
             bridge::list_soul_templates,
             bridge::soul_profile,
             bridge::soul_profile_file,
+            bridge::soul_env,
+            bridge::soul_revision_prepare,
+            bridge::soul_revision_discard,
             bridge::soul_revision_edit,
             bridge::soul_remove,
             bridge::daemon_status,

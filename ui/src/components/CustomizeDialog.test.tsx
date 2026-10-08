@@ -1,9 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BridgeError, type SoulProfile, type SoulProfileFile } from '../bridge';
+import { BridgeError, type PreparedRevision, type SoulProfile, type SoulProfileFile } from '../bridge';
 import { derivedHue } from '../model/dudle';
-import { sampleCensus, sampleProfile, sampleProfileFiles } from '../model/fixtures';
+import { sampleCensus, samplePreparedRevision, sampleProfile, sampleProfileFiles } from '../model/fixtures';
 import type { CensusRow } from '../model/census';
 import { ProfileSourceContext, type ProfileSource } from '../useSoulProfile';
 import { CustomizeDialog, type SaveRevision } from './CustomizeDialog';
@@ -17,6 +17,8 @@ function source(overrides: Partial<ProfileSource> = {}): ProfileSource {
   return {
     profile: vi.fn(async (): Promise<SoulProfile> => sampleProfile),
     file: vi.fn(async (agentId: string, path: string): Promise<SoulProfileFile> => ({ agentId, path, size: 1, contents: sampleProfileFiles[path] ?? '' })),
+    prepare: vi.fn(async (): Promise<PreparedRevision> => samplePreparedRevision),
+    discard: vi.fn(async () => {}),
     ...overrides,
   };
 }
@@ -27,6 +29,7 @@ function open(s: ProfileSource, onClose = vi.fn(), wrap = (node: ReactNode) => n
 }
 
 const REVISION = 'sha256:4be1c0ffee5a9d8e7f6a5b4c3d2e1f00112233445566778899aabbccddeeff00';
+const STAGING = samplePreparedRevision.staging;
 
 describe('CustomizeDialog (#64)', () => {
   it('is named by its heading and shows the profile, Save off until something changes', async () => {
@@ -241,6 +244,7 @@ describe('CustomizeDialog (#64)', () => {
       expectedRevision: '2026.10.1',
       reason: 'Renamed to Nova',
       edit: { name: 'Nova', files: { 'soul.md': '# Nova\n' } },
+      staging: STAGING,
     });
     expect((await within(dialog).findByText('Saved as revision 4be1c0ffee5a.')).getAttribute('role')).toBe('status');
     expect(within(dialog).getByRole('heading', { name: 'Nova' })).toBeTruthy();
@@ -254,6 +258,86 @@ describe('CustomizeDialog (#64)', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: /\.claude\/settings\.json/ }));
     expect((await within(dialog).findByLabelText('.claude/settings.json')).tagName).toBe('PRE');
     expect(within(dialog).queryByRole('textbox', { name: '.claude/settings.json' })).toBeNull();
+  });
+
+  describe('the engine\'s staging (#268)', () => {
+    it('edits only what the staging marks editable text, and shows the rest read-only', async () => {
+      const prepare = vi.fn(async (): Promise<PreparedRevision> => ({
+        ...samplePreparedRevision,
+        files: samplePreparedRevision.files.map((f) => (f.path === 'soul.md' ? { ...f, editable: false } : f)),
+      }));
+      const { dialog } = open(source({ prepare }), vi.fn(), undefined, vi.fn<SaveRevision>());
+      await within(dialog).findByDisplayValue('Luna');
+      await waitFor(() => expect(prepare).toHaveBeenCalledWith('agent_p'));
+      fireEvent.click(within(dialog).getByRole('tab', { name: 'Context' }));
+      // The profile lists soul.md as a soul text file; the engine's word wins.
+      fireEvent.click(within(dialog).getByRole('button', { name: /^soul\.md/ }));
+      expect((await within(dialog).findByLabelText('soul.md')).tagName).toBe('PRE');
+      expect(within(dialog).queryByRole('textbox', { name: 'soul.md' })).toBeNull();
+      fireEvent.click(within(dialog).getByRole('button', { name: /skills\/triage\/SKILL\.md/ }));
+      expect((await within(dialog).findByRole('textbox', { name: 'skills/triage/SKILL.md' })).tagName).toBe('TEXTAREA');
+      // Editable but not text: nothing opens, as before.
+      expect(within(dialog).queryByRole('button', { name: /diagram\.png/ })).toBeNull();
+      expect(within(dialog).getByTitle('skills/triage/diagram.png · not text')).toBeTruthy();
+    });
+
+    it('hands the staging to Save, stages afresh after it, and discards the staging on close', async () => {
+      const s = source();
+      const save = vi.fn<SaveRevision>(async () => ({ revision: REVISION }));
+      const { dialog } = open(s, vi.fn(), undefined, save);
+      fireEvent.change(await within(dialog).findByDisplayValue('Luna'), { target: { value: 'Nova' } });
+      await waitFor(() => expect(s.prepare).toHaveBeenCalledTimes(1));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+      expect(save).toHaveBeenCalledWith('agent_p', expect.objectContaining({ staging: STAGING }));
+      await within(dialog).findByText('Saved as revision 4be1c0ffee5a.');
+      // The bridge consumed that staging: a new one, nothing discarded.
+      await waitFor(() => expect(s.prepare).toHaveBeenCalledTimes(2));
+      expect(s.discard).not.toHaveBeenCalled();
+      cleanup();
+      expect(s.discard).toHaveBeenCalledExactlyOnceWith(STAGING);
+    });
+
+    it('stages afresh after a refused Save too, keeping the edits', async () => {
+      const s = source();
+      const save = vi.fn<SaveRevision>(async () => { throw new BridgeError('owner-credential-required', 'no owner'); });
+      const { dialog } = open(s, vi.fn(), undefined, save);
+      fireEvent.change(await within(dialog).findByDisplayValue('Luna'), { target: { value: 'Nova' } });
+      await waitFor(() => expect(s.prepare).toHaveBeenCalledTimes(1));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+      await within(dialog).findByRole('alert');
+      await waitFor(() => expect(s.prepare).toHaveBeenCalledTimes(2));
+      expect(s.discard).not.toHaveBeenCalled();
+      expect((within(dialog).getByLabelText('Name') as HTMLInputElement).value).toBe('Nova');
+    });
+
+    it('discards the staging on Cancel, and Save stages for itself when the engine staged nothing', async () => {
+      const s = source({ prepare: vi.fn(async (): Promise<PreparedRevision> => ({ ...samplePreparedRevision, staging: null })) });
+      const save = vi.fn<SaveRevision>(async () => ({ revision: REVISION }));
+      const onClose = vi.fn();
+      const { dialog } = open(s, onClose, undefined, save);
+      fireEvent.change(await within(dialog).findByDisplayValue('Luna'), { target: { value: 'Nova' } });
+      await waitFor(() => expect(s.prepare).toHaveBeenCalledTimes(1));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+      expect(save).toHaveBeenCalledWith('agent_p', expect.objectContaining({ staging: null, expectedRevision: '2026.10.1' }));
+      await within(dialog).findByText('Saved as revision 4be1c0ffee5a.');
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+      expect(onClose).toHaveBeenCalledOnce();
+      cleanup();
+      // Nothing to discard without a staging.
+      expect(s.discard).not.toHaveBeenCalled();
+    });
+
+    it('leaves the files read-only, saying why, when the engine could not stage', async () => {
+      const s = source({ prepare: vi.fn(async (): Promise<PreparedRevision> => { throw new BridgeError('soul-state-missing', 'the soul has no .soul-state directory yet; launch it once, or pass --dest'); }) });
+      const { dialog } = open(s, vi.fn(), undefined, vi.fn<SaveRevision>());
+      await within(dialog).findByDisplayValue('Luna');
+      expect((await within(dialog).findByText('revision: the soul has no .soul-state directory yet; launch it once, or pass --dest')).className).toContain('text-muted-foreground');
+      // The Profile fields still save: the bridge stages for itself.
+      expect((within(dialog).getByLabelText('Name') as HTMLInputElement).disabled).toBe(false);
+      fireEvent.click(within(dialog).getByRole('tab', { name: 'Context' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: /^soul\.md/ }));
+      expect((await within(dialog).findByLabelText('soul.md')).tagName).toBe('PRE');
+    });
   });
 
   it('will not save an empty name or reason', async () => {
@@ -358,7 +442,7 @@ describe('CustomizeDialog colour (#64)', () => {
     fireEvent.click(within(dialog).getByRole('radio', { name: '170°' }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
     expect(save).toHaveBeenCalledWith('agent_p', {
-      expectedRevision: '2026.10.1', reason: 'Edited in GeniusBar', edit: { appearance: { hue: 170 }, files: {} },
+      expectedRevision: '2026.10.1', reason: 'Edited in GeniusBar', edit: { appearance: { hue: 170 }, files: {} }, staging: STAGING,
     });
     await within(dialog).findByText('Saved as revision 4be1c0ffee5a.');
     expect((within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
@@ -402,7 +486,7 @@ describe('CustomizeDialog colour (#64)', () => {
     fireEvent.click(within(dialog).getByRole('switch', { name: 'review on' }));
     fireEvent.click(button);
     expect(save).toHaveBeenCalledWith('agent_p', {
-      expectedRevision: '2026.10.1', reason: 'Edited in GeniusBar', edit: { skills: { disabled: ['review', 'triage'] }, files: {} },
+      expectedRevision: '2026.10.1', reason: 'Edited in GeniusBar', edit: { skills: { disabled: ['review', 'triage'] }, files: {} }, staging: STAGING,
     });
     await within(dialog).findByText('Saved as revision 4be1c0ffee5a.');
     expect(button.disabled).toBe(true);
@@ -459,7 +543,7 @@ describe('CustomizeDialog colour (#64)', () => {
       fireEvent.change(role, { target: { value: ' Reviewer ' } });
       fireEvent.click(button);
       expect(save).toHaveBeenCalledWith('agent_p', {
-        expectedRevision: '2026.10.1', reason: 'Edited in GeniusBar', edit: { role: 'Reviewer', files: {} },
+        expectedRevision: '2026.10.1', reason: 'Edited in GeniusBar', edit: { role: 'Reviewer', files: {} }, staging: STAGING,
       });
       await within(dialog).findByText('Saved as revision 4be1c0ffee5a.');
       // The saved role stays shown before the next population read.

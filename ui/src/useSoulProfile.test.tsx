@@ -1,14 +1,14 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { BridgeError, type SoulProfile } from './bridge';
-import { sampleProfile } from './model/fixtures';
-import { ProfileSourceContext, useSoulProfile, type ProfileSource } from './useSoulProfile';
+import { BridgeError, type PreparedRevision, type SoulProfile } from './bridge';
+import { samplePreparedRevision, sampleProfile } from './model/fixtures';
+import { ProfileSourceContext, useRevisionStaging, useSoulProfile, type ProfileSource } from './useSoulProfile';
 
 const wrap = (source: ProfileSource | null) => ({ children }: { children: ReactNode }) => (
   <ProfileSourceContext.Provider value={source}>{children}</ProfileSourceContext.Provider>
 );
-const source = (profile: ProfileSource['profile']): ProfileSource => ({ profile, file: vi.fn() });
+const source = (profile: ProfileSource['profile'], rest: Partial<ProfileSource> = {}): ProfileSource => ({ profile, file: vi.fn(), prepare: vi.fn(async () => samplePreparedRevision), discard: vi.fn(async () => {}), ...rest });
 
 describe('useSoulProfile (#64)', () => {
   it('reads the profile when opened, and again on each opening', async () => {
@@ -46,5 +46,60 @@ describe('useSoulProfile (#64)', () => {
   it('asks nothing without a source', () => {
     const { result } = renderHook(() => useSoulProfile('agent_p', true), { wrapper: wrap(null) });
     expect(result.current).toEqual({ profile: null, supported: false, loading: false, error: null });
+  });
+});
+
+describe('useRevisionStaging (#268)', () => {
+  const STAGING = samplePreparedRevision.staging as string;
+
+  it('stages when opened, and discards the staging when closed without a save', async () => {
+    const s = source(async () => sampleProfile);
+    const { result, rerender } = renderHook(({ open }) => useRevisionStaging('agent_p', open),
+      { initialProps: { open: false }, wrapper: wrap(s) });
+    expect(s.prepare).not.toHaveBeenCalled();
+    expect(result.current.prepared).toBeNull();
+    rerender({ open: true });
+    await waitFor(() => expect(result.current.prepared?.staging).toBe(STAGING));
+    expect(s.prepare).toHaveBeenCalledWith('agent_p');
+    expect(result.current.error).toBeNull();
+    rerender({ open: false });
+    expect(s.discard).toHaveBeenCalledExactlyOnceWith(STAGING);
+    expect(result.current.prepared).toBeNull();
+  });
+
+  it('renews after a Save without discarding what the bridge consumed', async () => {
+    const s = source(async () => sampleProfile);
+    const { result } = renderHook(() => useRevisionStaging('agent_p', true), { wrapper: wrap(s) });
+    await waitFor(() => expect(result.current.prepared).not.toBeNull());
+    act(() => result.current.renew());
+    await waitFor(() => expect(s.prepare).toHaveBeenCalledTimes(2));
+    expect(s.discard).not.toHaveBeenCalled();
+    await waitFor(() => expect(result.current.prepared).not.toBeNull());
+  });
+
+  it('discards a staging that arrives after the dialog closed', async () => {
+    let settle: (value: PreparedRevision) => void = () => {};
+    const prepare = vi.fn(() => new Promise<PreparedRevision>((resolve) => { settle = resolve; }));
+    const s = source(async () => sampleProfile, { prepare });
+    const { unmount } = renderHook(() => useRevisionStaging('agent_p', true), { wrapper: wrap(s) });
+    unmount();
+    expect(s.discard).not.toHaveBeenCalled();
+    settle(samplePreparedRevision);
+    await waitFor(() => expect(s.discard).toHaveBeenCalledExactlyOnceWith(STAGING));
+  });
+
+  it('keeps the engine\'s refusal, and has nothing to discard for it', async () => {
+    const s = source(async () => sampleProfile, { prepare: vi.fn(async () => { throw new BridgeError('soul-state-missing', 'launch it once'); }) });
+    const { result, unmount } = renderHook(() => useRevisionStaging('agent_p', true), { wrapper: wrap(s) });
+    await waitFor(() => expect(result.current.error).toBe('launch it once'));
+    expect(result.current.prepared).toBeNull();
+    unmount();
+    expect(s.discard).not.toHaveBeenCalled();
+  });
+
+  it('asks nothing without a source', () => {
+    const { result } = renderHook(() => useRevisionStaging('agent_p', true), { wrapper: wrap(null) });
+    expect(result.current.prepared).toBeNull();
+    expect(result.current.error).toBeNull();
   });
 });

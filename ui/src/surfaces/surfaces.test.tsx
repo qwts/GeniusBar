@@ -37,7 +37,7 @@ function fakeOpen() {
 }
 
 const data = { census: sampleCensus, loaded: true };
-const profiles: ProfileSource = { profile: async () => sampleProfile, file: async () => { throw new Error('none'); } };
+const profiles: ProfileSource = { profile: async () => sampleProfile, file: async () => { throw new Error('none'); }, prepare: async () => { throw new Error('none'); }, discard: async () => {} };
 
 describe('TeamSurface (#223)', () => {
   it('draws the lead\'s team card on a transparent page, its title a drag region', () => {

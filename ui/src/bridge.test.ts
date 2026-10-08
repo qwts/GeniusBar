@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BridgeError, call, openDesktop, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, exportAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, normalizeAppearance, savedBrief, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported, normalizeSoulComputerUse, soulComputerUse, soulComputerUseSupported, liveComputerUse, listSoulTemplates, normalizeSoulTemplates, normalizeSoulProfile, soulProfile, soulProfileFile, popupVisible } from './bridge';
+import { BridgeError, call, openDesktop, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, exportAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, normalizeAppearance, savedBrief, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported, normalizeSoulComputerUse, soulComputerUse, soulComputerUseSupported, liveComputerUse, listSoulTemplates, normalizeSoulTemplates, normalizeSoulProfile, soulProfile, soulProfileFile, popupVisible, normalizeSoulEnvironment, soulEnvironment, engineCan, normalizePreparedRevision, prepareRevision, discardRevision, editableInStaging } from './bridge';
 
 describe('bridge', () => {
   it('invokes the shell command with the method and params', async () => {
@@ -751,5 +751,138 @@ describe('role and roleLine (agent-bot-identity #535)', () => {
   it('carries the role from population show', () => {
     expect(normalizeSoulPopulation({ agentId: 'a', role: 'Reviewer', roleLine: 'Reviewer' })).toMatchObject({ role: 'Reviewer', roleLine: 'Reviewer' });
     expect(normalizeSoulPopulation({ agentId: 'a', role: null })).not.toHaveProperty('role');
+  });
+});
+
+describe('soul environment (#268)', () => {
+  /** agent-bot 0.10.46's `soul env --json`, cut to what the shape checks need. */
+  const raw = {
+    schemaVersion: 1,
+    engine: { version: '0.10.46', contractVersion: 1, capabilities: ['env', 'revision-prepare'] },
+    identity: { agentId: 'agent_p', name: 'example', harness: null },
+    root: { soulDir: '/Users/me/souls/example.soul', soulsRoot: '/Users/me/souls', source: 'environment', registered: true, marker: 'ok', copies: [], device: 16777229 },
+    components: [
+      { id: 'manifest', path: 'soul.json', classification: 'definition', present: true, retention: 'durable' },
+      { id: 'generated', path: null, classification: 'generated', present: true, retention: 'reconstructible', paths: ['CLAUDE.md'], marker: '<!-- agent-bot soul-builder: generated -->', drift: [] },
+      { id: 'host-tools', path: null, classification: 'external', present: true, retention: null, entries: [{ name: 'git', path: '/usr/bin/git', source: 'host' }] },
+      { path: 'x' },
+    ],
+    classification: { enum: ['definition', 'generated'], rules: [{ match: 'default', classification: 'definition' }] },
+    harnesses: { selected: 'claude', declared: [], installed: [{ harness: 'claude', version: '1.0.0', status: 'ok' }], launchable: true },
+    runtimes: { declared: { node: { version: '24.11.1' } }, installed: [], missing: [{ name: 'node', version: '24.11.1', reason: 'not provisioned' }], unsupported: [] },
+    providers: {},
+    launch: { supported: true, lane: 'acp', cwd: '/Users/me/souls/example.soul/.soul-state/home', routing: { HOME: 'host', PATH: 'host', TMPDIR: 'host', odd: 1 }, limitations: [{ harness: 'claude', message: 'shared on the host' }, {}] },
+    readiness: { ready: false, problems: [{ code: 'generated-drift', severity: 'warning', component: 'generated', message: 'rebuild', action: 'agent-bot soul build "/Users/me/souls/example.soul"' }, { code: 'marker-invalid', severity: 'error', component: null, message: 'bad marker', action: null }, { message: 'no code' }] },
+    migration: { status: 'pending', journal: '.soul-state/migration.json', steps: [{ id: 'space-into-soul', status: 'pending', from: '/Users/me/space', to: '/Users/me/souls/example.soul/.soul-state/space' }] },
+    retention: { durable: ['manifest'], reconstructible: ['generated'], disposable: ['temp'] },
+    errors: [{ area: 'home', message: 'EACCES' }, { area: 'x' }],
+  };
+
+  it('keeps the descriptor as the engine printed it, with its shape checked', () => {
+    const env = normalizeSoulEnvironment(raw);
+    expect(env).toMatchObject({
+      schemaVersion: 1,
+      engine: { version: '0.10.46', contractVersion: 1, capabilities: ['env', 'revision-prepare'] },
+      root: { soulDir: '/Users/me/souls/example.soul', registered: true, marker: 'ok', copies: [], device: 16777229 },
+      harnesses: { selected: 'claude', launchable: true, installed: [{ harness: 'claude', version: '1.0.0', status: 'ok' }] },
+      runtimes: { declared: { node: { version: '24.11.1' } }, missing: [{ name: 'node', reason: 'not provisioned' }] },
+      launch: { supported: true, lane: 'acp', routing: { HOME: 'host', PATH: 'host', TMPDIR: 'host' }, limitations: [{ harness: 'claude', message: 'shared on the host' }] },
+      readiness: { ready: false, problems: [
+        { code: 'generated-drift', severity: 'warning', component: 'generated', message: 'rebuild', action: 'agent-bot soul build "/Users/me/souls/example.soul"' },
+        { code: 'marker-invalid', severity: 'error', component: null, message: 'bad marker', action: null },
+      ] },
+      migration: { status: 'pending', steps: [{ id: 'space-into-soul', status: 'pending', from: '/Users/me/space' }] },
+      retention: { durable: ['manifest'], reconstructible: ['generated'], disposable: ['temp'] },
+      errors: [{ area: 'home', message: 'EACCES' }],
+    });
+    // A component keeps what it knows beyond the common row.
+    expect(env?.components.map((c) => c.id)).toEqual(['manifest', 'generated', 'host-tools']);
+    expect(env?.components[1]).toMatchObject({ path: null, retention: 'reconstructible', paths: ['CLAUDE.md'], drift: [] });
+    expect(env?.components[2]).toMatchObject({ retention: null, entries: [{ name: 'git' }] });
+    expect(normalizeSoulEnvironment({ schemaVersion: 1, engine: {}, components: [] })).toMatchObject({ engine: { version: null, capabilities: [] }, root: { marker: null, registered: false }, readiness: { ready: false, problems: [] }, errors: [] });
+    expect(normalizeSoulEnvironment({ schemaVersion: 2, engine: {}, components: [] })).toBeNull();
+    expect(normalizeSoulEnvironment({ schemaVersion: 1, components: [] })).toBeNull();
+    expect(normalizeSoulEnvironment(null)).toBeNull();
+  });
+
+  it('gates on the engine\'s capabilities, never a version', () => {
+    const env = normalizeSoulEnvironment(raw);
+    expect(engineCan(env, 'revision-prepare')).toBe(true);
+    expect(engineCan(env, 'provision')).toBe(false);
+    expect(engineCan(normalizeSoulEnvironment({ ...raw, engine: { version: '9.9.9', capabilities: ['env'] } }), 'revision-prepare')).toBe(false);
+    expect(engineCan(null, 'env')).toBe(false);
+  });
+
+  it('reads through the shell, keeping its error code, and is unsupported outside the app', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); return raw; }) as never;
+    await expect(soulEnvironment('agent_p', fake)).resolves.toMatchObject({ engine: { capabilities: ['env', 'revision-prepare'] } });
+    expect(calls).toEqual([['soul_env', { agent: 'agent_p' }]]);
+    const old = (async () => { throw { code: 'soul-env-unsupported', message: 'this agent-bot has no soul environment' }; }) as never;
+    await expect(soulEnvironment('agent_p', old)).rejects.toMatchObject({ code: 'soul-env-unsupported' });
+    await expect(soulEnvironment('agent_p', (async () => ({ nope: true })) as never)).rejects.toMatchObject({ code: 'soul-env-failed' });
+    await expect(soulEnvironment('agent_p', (async () => { throw new Error('boom'); }) as never)).rejects.toMatchObject({ code: 'soul-env-failed', message: 'boom' });
+    await expect(soulEnvironment('agent_p')).rejects.toMatchObject({ code: 'soul-env-unsupported' });
+  });
+});
+
+describe('revision staging (#268)', () => {
+  /** agent-bot 0.10.46's `soul revision prepare --json` (temp path shortened). */
+  const raw = {
+    schemaVersion: 1, agentId: 'agent_p', soulDir: '/Users/me/souls/example.soul',
+    staging: '/Users/me/souls/example.soul/.soul-state/tmp/revision-44430c4f-05a7-417b-9c3f-36bb4bc2a2eb',
+    revision: 'sha256:4d39', parentRevision: null,
+    files: [
+      { path: '.mcp.json', classification: 'generated', kind: null, editable: false, text: true, size: 235, mode: '100644' },
+      { path: 'AGENTS.md', classification: 'definition', kind: 'context', editable: true, text: true, size: 22, mode: '100644' },
+      { path: 'bin/run', classification: 'definition', kind: null, editable: false, text: true, size: 19, mode: '100755' },
+      { path: 'skills/hello/diagram.png', classification: 'definition', kind: 'skill', editable: true, text: false, size: 4, mode: '100644' },
+      { path: 'soul.json', classification: 'definition', kind: 'soul', editable: false, text: true, size: 647, mode: '100644' },
+      { path: '' },
+    ],
+    excluded: { workingState: ['worktrees', '.soul-state'], generated: ['CLAUDE.md', 3] },
+    expiresAt: '2026-10-08T23:48:48.629Z',
+  };
+
+  it('keeps the engine\'s rows, and lets the dialog edit only editable text', () => {
+    const prepared = normalizePreparedRevision(raw);
+    expect(prepared).toEqual({
+      agentId: 'agent_p', soulDir: '/Users/me/souls/example.soul', staging: raw.staging, revision: 'sha256:4d39', parentRevision: null,
+      files: [
+        { path: '.mcp.json', classification: 'generated', kind: null, editable: false, text: true, size: 235, mode: '100644' },
+        { path: 'AGENTS.md', classification: 'definition', kind: 'context', editable: true, text: true, size: 22, mode: '100644' },
+        { path: 'bin/run', classification: 'definition', kind: null, editable: false, text: true, size: 19, mode: '100755' },
+        { path: 'skills/hello/diagram.png', classification: 'definition', kind: 'skill', editable: true, text: false, size: 4, mode: '100644' },
+        { path: 'soul.json', classification: 'definition', kind: 'soul', editable: false, text: true, size: 647, mode: '100644' },
+      ],
+      excluded: { workingState: ['worktrees', '.soul-state'], generated: ['CLAUDE.md'] },
+      expiresAt: '2026-10-08T23:48:48.629Z',
+    });
+    expect(editableInStaging(prepared, 'AGENTS.md')).toBe(true);
+    expect(editableInStaging(prepared, 'bin/run')).toBe(false);
+    expect(editableInStaging(prepared, '.mcp.json')).toBe(false);
+    expect(editableInStaging(prepared, 'soul.json')).toBe(false);
+    expect(editableInStaging(prepared, 'skills/hello/diagram.png')).toBe(false);
+    expect(editableInStaging(prepared, 'CLAUDE.md')).toBe(false);
+    expect(editableInStaging(null, 'AGENTS.md')).toBe(false);
+    // The app's fallback answers the same shape with no staging.
+    expect(normalizePreparedRevision({ ...raw, staging: null, expiresAt: null })).toMatchObject({ staging: null, expiresAt: null });
+    expect(normalizePreparedRevision({ agentId: 'agent_p' })).toBeNull();
+    expect(normalizePreparedRevision(null)).toBeNull();
+  });
+
+  it('prepares and discards through the shell, keeping the error code', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); return cmd === 'soul_revision_prepare' ? raw : { discarded: raw.staging }; }) as never;
+    await expect(prepareRevision('agent_p', fake)).resolves.toMatchObject({ staging: raw.staging });
+    await expect(discardRevision(raw.staging, fake)).resolves.toBeUndefined();
+    expect(calls).toEqual([['soul_revision_prepare', { agent: 'agent_p' }], ['soul_revision_discard', { staging: raw.staging }]]);
+    const refused = (async () => { throw { code: 'soul-state-missing', message: 'launch it once' }; }) as never;
+    await expect(prepareRevision('agent_p', refused)).rejects.toMatchObject({ code: 'soul-state-missing', message: 'launch it once' });
+    await expect(prepareRevision('agent_p', (async () => ({ nope: true })) as never)).rejects.toMatchObject({ code: 'soul-revision-failed' });
+    const gone = (async () => { throw { code: 'staging-missing', message: 'no staging directory' }; }) as never;
+    await expect(discardRevision(raw.staging, gone)).rejects.toMatchObject({ code: 'staging-missing' });
+    await expect(prepareRevision('agent_p')).rejects.toMatchObject({ code: 'soul-revision-unavailable' });
+    await expect(discardRevision(raw.staging)).rejects.toMatchObject({ code: 'soul-revision-unavailable' });
   });
 });

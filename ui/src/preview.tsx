@@ -44,7 +44,7 @@ import { AuditSourceContext, type AuditSource } from './components/AuditLog';
 import { SoulSourceContext, type SoulSource } from './components/SoulNotices';
 import type { CensusRow } from './model/census';
 import { emptyChat, emptyComposer, mergeIncoming, type ChatState } from './model/chat';
-import { inboxMessage, sampleApprovals, sampleAudit, sampleBadges, sampleCensus, sampleColdWake, sampleConnection, sampleFloating, sampleModels, sampleModes, sampleOpenedPackages, samplePaused, samplePopulation, sampleSessionEntries, sampleProfile, sampleProfileFiles, sampleTemplates } from './model/fixtures';
+import { inboxMessage, sampleApprovals, sampleAudit, sampleBadges, sampleCensus, sampleColdWake, sampleConnection, sampleFloating, sampleModels, sampleModes, sampleOpenedPackages, samplePaused, samplePopulation, sampleSessionEntries, samplePreparedRevision, sampleProfile, sampleProfileFiles, sampleTemplates } from './model/fixtures';
 import type { Pauser } from './usePause';
 import type { TemplateLister } from './useSoulTemplates';
 import { BridgeError } from './bridge';
@@ -133,6 +133,8 @@ const profileSource: ProfileSource = {
     if (contents === undefined) throw new BridgeError('soul-profile-file-denied', 'Profile file is not in the inventory.');
     return { agentId, path, size: contents.length, contents };
   },
+  prepare: async (agentId) => ({ ...samplePreparedRevision, agentId }),
+  discard: async () => {},
 };
 
 function Preview() {

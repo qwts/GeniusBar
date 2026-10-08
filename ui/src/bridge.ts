@@ -1228,11 +1228,14 @@ export function normalizeSoulProfile(raw: unknown): SoulProfile | null {
   };
 }
 
-function profileFailure(error: unknown): BridgeError {
+/** The shell's error as a BridgeError, with `fallback` for a code it did not give. */
+function failureAs(error: unknown, fallback: string): BridgeError {
   const e = error as { code?: unknown; message?: unknown };
-  return new BridgeError(typeof e?.code === 'string' ? e.code : 'soul-profile-failed',
+  return new BridgeError(typeof e?.code === 'string' ? e.code : fallback,
     typeof e?.message === 'string' ? e.message : String(error));
 }
+
+const profileFailure = (error: unknown): BridgeError => failureAs(error, 'soul-profile-failed');
 
 /**
  * A soul's profile from agent-bot. Rejects with a BridgeError;
@@ -1265,4 +1268,223 @@ export async function soulProfileFile(agentId: string, path: string, invokeImpl:
     throw new BridgeError('soul-profile-failed', 'agent-bot gave no file contents');
   }
   return { agentId: typeof raw.agentId === 'string' ? raw.agentId : agentId, path: raw.path, size: count(raw.size), contents: raw.contents };
+}
+
+/** What losing a component costs (`soul-env-contract.mjs`): durable state is the soul's life. */
+export type SoulRetention = 'durable' | 'reconstructible' | 'disposable';
+
+/** One component of a soul's environment, as `SOUL_LAYOUT` names it. */
+export interface SoulEnvironmentComponent {
+  id: string;
+  /** Root-relative; null for a set of paths (generated output) or host tools. */
+  path: string | null;
+  classification: string;
+  present: boolean;
+  retention: SoulRetention | null;
+  /** What the component knows beyond that (`entries`, `paths`, `drift`, `location`, ...), as the engine printed it. */
+  [detail: string]: unknown;
+}
+
+/** A readiness problem, with the command that fixes it; the app runs nothing itself. */
+export interface SoulEnvironmentProblem {
+  code: string;
+  severity: 'error' | 'warning';
+  component: string | null;
+  message: string;
+  action: string | null;
+}
+
+/**
+ * A soul's environment (#268; agent-bot-identity #583, ADR-0583,
+ * `docs/soul-environment.md`, schema 1): what lives where under its root,
+ * as `agent-bot soul env` describes it, read-only. Every key is present;
+ * unknown scalars are null, collections empty. The app renders it and
+ * decides nothing from it: `engine.capabilities` gates each slice the app
+ * adopts (`revision-prepare` today), never the version.
+ */
+export interface SoulEnvironment {
+  schemaVersion: 1;
+  engine: { version: string | null; contractVersion: number | null; capabilities: string[] };
+  identity: Record<string, unknown>;
+  root: {
+    soulDir: string | null; soulsRoot: string | null; source: string | null; registered: boolean;
+    marker: 'ok' | 'missing' | 'invalid' | null;
+    /** Other folders carrying this soul's marker. */
+    copies: string[];
+    device: number | null;
+  };
+  components: SoulEnvironmentComponent[];
+  classification: { enum: string[]; rules: Record<string, unknown>[] };
+  harnesses: { selected: string | null; declared: Record<string, unknown>[]; installed: Record<string, unknown>[]; launchable: boolean };
+  runtimes: { declared: Record<string, unknown>; installed: Record<string, unknown>[]; missing: Record<string, unknown>[]; unsupported: Record<string, unknown>[] };
+  providers: Record<string, unknown>;
+  launch: { supported: boolean; lane: string | null; cwd: string | null; routing: Record<string, string>; limitations: { harness: string | null; message: string }[] };
+  readiness: { ready: boolean; problems: SoulEnvironmentProblem[] };
+  migration: { status: string | null; journal: string | null; steps: { id: string; status: string | null; from: string | null; to: string | null }[] };
+  retention: Record<SoulRetention, string[]>;
+  /** What could not be read; the rest is still complete. */
+  errors: { area: string | null; message: string }[];
+}
+
+const records = (value: unknown): Record<string, unknown>[] => (Array.isArray(value) ? value.filter(isRecord) : []);
+const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string' && v !== '') : []);
+const record = (value: unknown): Record<string, unknown> => (isRecord(value) ? value : {});
+const RETENTIONS: readonly SoulRetention[] = ['durable', 'reconstructible', 'disposable'];
+
+/** The descriptor with its shape checked; null when the answer is not a schema-1 descriptor. */
+export function normalizeSoulEnvironment(raw: unknown): SoulEnvironment | null {
+  if (!isRecord(raw) || raw.schemaVersion !== 1 || !isRecord(raw.engine) || !Array.isArray(raw.components)) return null;
+  const root = record(raw.root);
+  const harnesses = record(raw.harnesses);
+  const runtimes = record(raw.runtimes);
+  const launch = record(raw.launch);
+  const readiness = record(raw.readiness);
+  const migration = record(raw.migration);
+  const retention = record(raw.retention);
+  const marker = root.marker;
+  return {
+    schemaVersion: 1,
+    engine: { version: text(raw.engine.version), contractVersion: count(raw.engine.contractVersion), capabilities: strings(raw.engine.capabilities) },
+    identity: record(raw.identity),
+    root: {
+      soulDir: text(root.soulDir), soulsRoot: text(root.soulsRoot), source: text(root.source), registered: root.registered === true,
+      marker: marker === 'ok' || marker === 'missing' || marker === 'invalid' ? marker : null,
+      copies: strings(root.copies), device: count(root.device),
+    },
+    components: records(raw.components).flatMap((c): SoulEnvironmentComponent[] => {
+      const id = text(c.id);
+      const classification = text(c.classification);
+      if (!id || !classification) return [];
+      const retention = c.retention;
+      return [{ ...c, id, path: text(c.path), classification, present: c.present === true,
+        retention: RETENTIONS.includes(retention as SoulRetention) ? retention as SoulRetention : null }];
+    }),
+    classification: { enum: strings(record(raw.classification).enum), rules: records(record(raw.classification).rules) },
+    harnesses: { selected: text(harnesses.selected), declared: records(harnesses.declared), installed: records(harnesses.installed), launchable: harnesses.launchable === true },
+    runtimes: { declared: record(runtimes.declared), installed: records(runtimes.installed), missing: records(runtimes.missing), unsupported: records(runtimes.unsupported) },
+    providers: record(raw.providers),
+    launch: {
+      supported: launch.supported === true, lane: text(launch.lane), cwd: text(launch.cwd),
+      routing: Object.fromEntries(Object.entries(record(launch.routing)).flatMap(([k, v]) => (typeof v === 'string' ? [[k, v]] : []))),
+      limitations: records(launch.limitations).flatMap((l) => (typeof l.message === 'string' && l.message !== '' ? [{ harness: text(l.harness), message: l.message }] : [])),
+    },
+    readiness: {
+      ready: readiness.ready === true,
+      problems: records(readiness.problems).flatMap((p): SoulEnvironmentProblem[] => {
+        const code = text(p.code);
+        return code && typeof p.message === 'string'
+          ? [{ code, severity: p.severity === 'error' ? 'error' : 'warning', component: text(p.component), message: p.message, action: text(p.action) }] : [];
+      }),
+    },
+    migration: {
+      status: text(migration.status), journal: text(migration.journal),
+      steps: records(migration.steps).flatMap((s) => { const id = text(s.id); return id ? [{ id, status: text(s.status), from: text(s.from), to: text(s.to) }] : []; }),
+    },
+    retention: { durable: strings(retention.durable), reconstructible: strings(retention.reconstructible), disposable: strings(retention.disposable) },
+    errors: records(raw.errors).flatMap((e) => (typeof e.message === 'string' && e.message !== '' ? [{ area: text(e.area), message: e.message }] : [])),
+  };
+}
+
+/** True when the bundled engine lists `capability`; a slice the app adopts is gated on this, not on a version. */
+export function engineCan(env: SoulEnvironment | null, capability: string): boolean {
+  return env?.engine.capabilities.includes(capability) ?? false;
+}
+
+/**
+ * A soul's environment from agent-bot `soul env`. Rejects with a BridgeError;
+ * `soul-env-unsupported` means the bundled agent-bot has no `soul env` (and
+ * is what a plain browser or a test gets).
+ */
+export async function soulEnvironment(agentId: string, invokeImpl: typeof invoke = invoke): Promise<SoulEnvironment> {
+  if (!inApp() && invokeImpl === invoke) throw new BridgeError('soul-env-unsupported', 'not in the app');
+  let raw: unknown;
+  try {
+    raw = await invokeImpl<unknown>('soul_env', { agent: agentId });
+  } catch (error) {
+    throw failureAs(error, 'soul-env-failed');
+  }
+  const result = normalizeSoulEnvironment(raw);
+  if (!result) throw new BridgeError('soul-env-failed', 'agent-bot gave no soul environment');
+  return result;
+}
+
+/** One file `soul revision prepare` staged (#268): the engine's word on it. */
+export interface PreparedRevisionFile {
+  path: string;
+  /** The environment contract's class (`definition`, `generated`, ...); null from the app's own fallback. */
+  classification: string | null;
+  /** As `soul profile` reports it; null for a file the profile does not list. */
+  kind: string | null;
+  /** The definition, never soul.json or bin/: what the owner may edit, when it is text. */
+  editable: boolean;
+  text: boolean;
+  size: number | null;
+  mode: string | null;
+}
+
+/**
+ * A staging of the soul's definition for a Customize edit (#268): the
+ * engine's `soul revision prepare`, which Save finishes (`soul revision
+ * edit --apply`) and Cancel discards. The dialog reads `editable` from the
+ * rows and decides nothing itself.
+ */
+export interface PreparedRevision {
+  agentId: string;
+  soulDir: string | null;
+  /** Null when the bundled engine stages nothing (no `revision-prepare`): Save then stages for itself. */
+  staging: string | null;
+  revision: string | null;
+  parentRevision: string | null;
+  files: PreparedRevisionFile[];
+  /** What the staging leaves out: working state, and the exact generated output. */
+  excluded: { workingState: string[]; generated: string[] };
+  expiresAt: string | null;
+}
+
+/** The staging record with its shape checked; null when the answer is not one. */
+export function normalizePreparedRevision(raw: unknown): PreparedRevision | null {
+  if (!isRecord(raw) || typeof raw.agentId !== 'string' || !Array.isArray(raw.files)) return null;
+  const excluded = record(raw.excluded);
+  return {
+    agentId: raw.agentId,
+    soulDir: text(raw.soulDir),
+    staging: text(raw.staging),
+    revision: text(raw.revision),
+    parentRevision: text(raw.parentRevision),
+    files: records(raw.files).flatMap((f): PreparedRevisionFile[] => {
+      const path = text(f.path);
+      return path ? [{ path, classification: text(f.classification), kind: text(f.kind), editable: f.editable === true, text: f.text === true, size: count(f.size), mode: text(f.mode) }] : [];
+    }),
+    excluded: { workingState: strings(excluded.workingState), generated: strings(excluded.generated) },
+    expiresAt: text(raw.expiresAt),
+  };
+}
+
+/** True when the staging lets the owner edit `path` here: the engine marks it editable text. */
+export function editableInStaging(prepared: PreparedRevision | null, path: string): boolean {
+  return prepared?.files.some((f) => f.path === path && f.editable && f.text) ?? false;
+}
+
+/** Stages the soul for a Customize edit. Rejects with a BridgeError as soulProfile does. */
+export async function prepareRevision(agentId: string, invokeImpl: typeof invoke = invoke): Promise<PreparedRevision> {
+  if (!inApp() && invokeImpl === invoke) throw new BridgeError('soul-revision-unavailable', 'not in the app');
+  let raw: unknown;
+  try {
+    raw = await invokeImpl<unknown>('soul_revision_prepare', { agent: agentId });
+  } catch (error) {
+    throw failureAs(error, 'soul-revision-failed');
+  }
+  const result = normalizePreparedRevision(raw);
+  if (!result) throw new BridgeError('soul-revision-failed', 'agent-bot staged no revision');
+  return result;
+}
+
+/** Removes a staging the dialog gave up on (`soul revision prepare --discard`). */
+export async function discardRevision(staging: string, invokeImpl: typeof invoke = invoke): Promise<void> {
+  if (!inApp() && invokeImpl === invoke) throw new BridgeError('soul-revision-unavailable', 'not in the app');
+  try {
+    await invokeImpl<unknown>('soul_revision_discard', { staging });
+  } catch (error) {
+    throw failureAs(error, 'soul-revision-failed');
+  }
 }
