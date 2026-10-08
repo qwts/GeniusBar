@@ -52,8 +52,10 @@ export function Conversation({ name, entries, composer, onDraft, onSend, dudle, 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="sr-only" aria-live="polite" aria-atomic="true">{announce}</div>
+      {/* As the design: only the log scrolls, and its wheel momentum never
+          reaches the window (#260). min-h-0 lets it shrink to the room left. */}
       {entries.length === 0 ? (
-        <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-6 md:px-8">
           <div className="mx-auto mt-16 flex max-w-sm flex-col items-center gap-3 text-center">
             {dudle && <Dudle spec={dudle} diameter={64} paused={paused} />}
             <p className="m-0 text-sm text-muted-foreground">{t('emptyChat', { name })}</p>
@@ -62,7 +64,7 @@ export function Conversation({ name, entries, composer, onDraft, onSend, dudle, 
       ) : (
         <ol
           role="log"
-          className="m-0 flex flex-1 list-none flex-col gap-4 overflow-y-auto px-4 py-6 md:px-8"
+          className="m-0 flex min-h-0 flex-1 list-none flex-col gap-4 overflow-y-auto overscroll-contain px-4 py-6 md:px-8"
           ref={list}
           aria-label={t('conversationWith', { name })}
         >
@@ -94,7 +96,7 @@ export function Conversation({ name, entries, composer, onDraft, onSend, dudle, 
         </ol>
       )}
       <form
-        className="border-t border-border p-3 md:px-8"
+        className="shrink-0 border-t border-border p-3 md:px-8"
         onSubmit={(e) => {
           e.preventDefault();
           if (ready) onSend();

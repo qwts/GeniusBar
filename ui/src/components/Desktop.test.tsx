@@ -210,11 +210,13 @@ describe('Desktop hide and restore', () => {
     const sub = avatar(/^agent_c,/);
     fireEvent.contextMenu(sub, { clientX: 200, clientY: 150 });
     let menu = screen.getByRole('menu', { name: 'agent_c' });
-    expect([menu.style.left, menu.style.top]).toEqual(['200px', '150px']);
-    expect(menu.className).not.toContain('top-full');
+    expect([menu.style.position, menu.style.left, menu.style.top]).toEqual(['fixed', '200px', '150px']);
+    // Over the body (#262): no card, pane or window the card's size clips it.
+    expect(menu.parentElement).toBe(document.body);
+    expect(screen.getByRole('region', { name: 'luna' }).contains(menu)).toBe(false);
     expect(document.activeElement).toBe(within(menu).getAllByRole('menuitem')[0]);
     fireEvent.keyDown(menu, { key: 'Escape' });
-    // Near the bottom-right corner, the menu's size keeps it on screen.
+    // Near the bottom-right corner, the menu's size keeps it on screen, 8 px in (Radix collisionPadding).
     const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       return this.getAttribute('role') === 'menu'
         ? { width: 128, height: 100, left: 0, top: 0, right: 128, bottom: 100, x: 0, y: 0, toJSON: () => ({}) } as DOMRect
@@ -222,18 +224,47 @@ describe('Desktop hide and restore', () => {
     });
     fireEvent.contextMenu(sub, { clientX: window.innerWidth - 10, clientY: window.innerHeight - 10 });
     menu = screen.getByRole('menu', { name: 'agent_c' });
-    expect([menu.style.left, menu.style.top]).toEqual([`${window.innerWidth - 128}px`, `${window.innerHeight - 100}px`]);
+    expect([menu.style.left, menu.style.top]).toEqual([`${window.innerWidth - 8 - 128}px`, `${window.innerHeight - 8 - 100}px`]);
     fireEvent.keyDown(menu, { key: 'Escape' });
     rect.mockRestore();
-    // Shift+F10 and the ContextMenu key: anchored under the avatar.
+    // Shift+F10 and the ContextMenu key: anchored under the avatar, centred on it.
+    const anchored = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.getAttribute('role') === 'menu') return new DOMRect(0, 0, 128, 100);
+      return this === sub ? new DOMRect(300, 200, 40, 40) : new DOMRect(0, 0, 0, 0);
+    });
     for (const key of [{ key: 'F10', shiftKey: true }, { key: 'ContextMenu' }]) {
       fireEvent.keyDown(sub, key);
       menu = screen.getByRole('menu', { name: 'agent_c' });
-      expect(menu.style.left).toBe('');
-      expect(menu.className).toContain('top-full');
+      expect(menu.getAttribute('data-side')).toBe('bottom');
+      expect([menu.style.left, menu.style.top]).toEqual(['256px', '244px']);
       fireEvent.keyDown(menu, { key: 'Escape' });
       expect(document.activeElement).toBe(sub);
     }
+    anchored.mockRestore();
+  });
+
+  it('flips a menu above its trigger when the window ends under it, and keeps a hover card inside the window (#262)', () => {
+    render(<Live />);
+    const more = screen.getByRole('button', { name: 'More for luna' });
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const role = this.getAttribute('role');
+      if (role === 'menu') return new DOMRect(0, 0, 128, 100);
+      if (role === 'tooltip') return new DOMRect(0, 0, 224, 120);
+      // The trigger sits 20 px above the window's bottom edge.
+      return this === more || this === avatar(/^luna,/) ? new DOMRect(10, window.innerHeight - 50, 30, 30) : new DOMRect(0, 0, 0, 0);
+    });
+    fireEvent.click(more);
+    const menu = screen.getByRole('menu', { name: 'luna' });
+    expect(menu.getAttribute('data-side')).toBe('top');
+    // Aligned to the trigger's right edge (40), shifted in to the padding.
+    expect([menu.style.left, menu.style.top]).toEqual(['8px', `${window.innerHeight - 50 - 4 - 100}px`]);
+    fireEvent.keyDown(menu, { key: 'Escape' });
+    act(() => avatar(/^luna,/).focus());
+    const card = screen.getByRole('tooltip');
+    expect(card.parentElement).toBe(document.body);
+    expect(card.getAttribute('data-side')).toBe('top');
+    expect(card.style.left).toBe('8px');
+    rect.mockRestore();
   });
 
   it('moves through the menu with Up, Down, Home and End, and Escape gives focus back to ⋯ (D6)', () => {

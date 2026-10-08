@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import { Eye, History, Pause, Plus, Search, X, Zap } from 'lucide-react';
+import { useFloating, withinAny } from '../lib/floating';
 import { useI18n } from '../lib/i18n';
 import { menuKeys } from '../lib/keys';
 import { badgeText } from '../model/approvals';
@@ -7,14 +9,14 @@ import { displayHarness, displayName, displayRole, soulKey, type CensusRow, type
 import { teamsOf } from '../model/fleet';
 import { liveState, presenceText, SoulDudle } from './FleetList';
 
-/** Closes on a pointer down outside `ref` while `open`. */
-function useClickAway(ref: RefObject<HTMLElement | null>, open: boolean, close: () => void) {
+/** Closes on a pointer down outside `ref` (and outside `also`, a menu floating beside it) while `open`. */
+function useClickAway(ref: RefObject<HTMLElement | null>, open: boolean, close: () => void, also?: RefObject<HTMLElement | null>) {
   useEffect(() => {
     if (!open) return;
-    const away = (e: PointerEvent) => { if (!ref.current?.contains(e.target as Node)) close(); };
+    const away = (e: PointerEvent) => { if (!withinAny(e.target, ref) && !(also && withinAny(e.target, also))) close(); };
     document.addEventListener('pointerdown', away);
     return () => document.removeEventListener('pointerdown', away);
-  }, [ref, open, close]);
+  }, [ref, open, close, also]);
 }
 
 /**
@@ -64,15 +66,16 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
   const item = useRef<HTMLDivElement>(null);
   const view = useRef<HTMLDivElement>(null);
   const viewButton = useRef<HTMLButtonElement>(null);
-  const viewMenu = useRef<HTMLDivElement>(null);
+  // The View menu floats over the body, kept inside the window (#262).
+  const { ref: viewMenu, style: viewStyle, side: viewSide } = useFloating<HTMLDivElement>(viewButton, { align: 'start' });
   const [viewOpen, setViewOpen] = useState(false);
   // As Radix Menubar: the open View menu takes focus on its first item.
-  useEffect(() => { if (viewOpen) viewMenu.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus(); }, [viewOpen]);
+  useEffect(() => { if (viewOpen) viewMenu.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus(); }, [viewOpen, viewMenu]);
   const [palette, setPalette] = useState(false);
   const closeMenu = () => onOpenChange(false);
   const closeView = () => setViewOpen(false);
   useClickAway(item, open, closeMenu);
-  useClickAway(view, viewOpen, closeView);
+  useClickAway(view, viewOpen, closeView, viewMenu);
   const badge = useId();
   const waiting = badgeText(approvals);
   const described = [waiting && t('bar.approvals', { count: approvals }), working > 0 && t('bar.working', { count: working }), unread > 0 && t('newCount', { count: unread })]
@@ -127,9 +130,9 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
           className={`h-7 rounded px-2 text-xs font-medium hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${viewOpen ? 'bg-accent' : ''}`}>
           {t('menu.view')}
         </button>
-        {viewOpen && (
-          <div ref={viewMenu} role="menu" aria-label={t('menu.view')} onKeyDown={menuKeys}
-            className="absolute top-full left-0 mt-1 min-w-[12rem] rounded-md border border-border bg-popover p-1 shadow-md">
+        {viewOpen && createPortal(
+          <div ref={viewMenu} role="menu" aria-label={t('menu.view')} onKeyDown={menuKeys} data-side={viewSide} style={viewStyle}
+            className="z-50 min-w-[12rem] rounded-md border border-border bg-popover p-1 shadow-md">
             <button type="button" role="menuitem" className={viewItem} onClick={openPalette}>
               <Search className="size-3.5" aria-hidden /> {t('bar.palette')}
               <span className="ml-auto pl-4 text-muted-foreground">⌘K</span>
@@ -143,7 +146,8 @@ export function MenuBar({ open, onOpenChange, tone, title, attention = null, onR
             <button type="button" role="menuitem" className={viewItem} onClick={() => { setViewOpen(false); onReset(); }}>
               {t('menu.resetLayout')}
             </button>
-          </div>
+          </div>,
+          document.body,
         )}
       </div>
       {attention && !open && (

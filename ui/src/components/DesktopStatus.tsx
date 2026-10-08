@@ -2,8 +2,10 @@
 // words its tooltip and hover card use. Display only, from what GeniusBar
 // already reads: the census, the daemon's busy and computer-use lists, the
 // pending approvals and agent-bot's pause state.
-import { useId, useState } from 'react';
+import { useId, useRef, useState, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import type { CensusRow } from '../model/census';
+import { useFloating } from '../lib/floating';
 import type { Translate } from '../lib/i18n';
 
 export type SoulStatus = 'paused' | 'awaiting' | 'working' | 'asleep' | 'idle' | 'offline';
@@ -59,22 +61,30 @@ const tone: Record<SoulStatus, string> = {
 
 /**
  * The status dot with its tooltip. Pointer hover shows the tooltip; the
- * avatar's label and hover card carry the same words for the keyboard.
+ * avatar's label and hover card carry the same words for the keyboard. The
+ * tooltip floats over the body, kept inside the window (#262).
  */
 export function StatusDot({ status, text }: { status: SoulStatus; text: string }) {
   const [tip, setTip] = useState(false);
   const id = useId();
+  const dot = useRef<HTMLSpanElement>(null);
   return (
-    <span className="absolute -bottom-1 -left-1.5" onPointerEnter={() => setTip(true)} onPointerLeave={() => setTip(false)}
+    <span ref={dot} className="absolute -bottom-1 -left-1.5" onPointerEnter={() => setTip(true)} onPointerLeave={() => setTip(false)}
       onMouseEnter={() => setTip(true)} onMouseLeave={() => setTip(false)}>
       <span data-status={status} aria-describedby={tip ? id : undefined}
         className="block size-2.5 rounded-full ring-2 ring-card" style={{ background: tone[status] }} />
-      {tip && (
-        <span id={id} role="tooltip"
-          className="pointer-events-none absolute top-full left-1/2 z-40 mt-1 -translate-x-1/2 rounded bg-popover px-1.5 py-0.5 text-[11px] whitespace-nowrap text-popover-foreground shadow-lg">
-          {text}
-        </span>
-      )}
+      {tip && <StatusTip id={id} anchor={dot} text={text} />}
     </span>
+  );
+}
+
+function StatusTip({ id, anchor, text }: { id: string; anchor: RefObject<HTMLElement | null>; text: string }) {
+  const { ref, style, side } = useFloating<HTMLSpanElement>(anchor);
+  return createPortal(
+    <span ref={ref} id={id} role="tooltip" data-side={side} style={style}
+      className="pointer-events-none z-50 rounded bg-popover px-1.5 py-0.5 text-[11px] whitespace-nowrap text-popover-foreground shadow-lg">
+      {text}
+    </span>,
+    document.body,
   );
 }

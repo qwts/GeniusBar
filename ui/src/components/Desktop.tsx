@@ -1,7 +1,9 @@
-import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode, type Ref, type RefObject } from 'react';
+import { useContext, useEffect, useId, useMemo, useRef, useState, type PointerEvent, type ReactNode, type Ref, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import { Archive, ChevronDown, Eye, EyeOff, History, Monitor, MoreHorizontal, Palette, Plus, Radio, Shield, ShieldOff, Users, X } from 'lucide-react';
 import { displayName, displayRole, roleAndHarness, soulKey, type CensusRow, type SoulNode } from '../model/census';
 import { companionLabel, teamKeys, teamsOf, type Team } from '../model/fleet';
+import { useFloating, type Point } from '../lib/floating';
 import { useI18n } from '../lib/i18n';
 import { escapeStaysInside, menuKeys } from '../lib/keys';
 import { noBadges, type SoulBadges } from '../model/refresh';
@@ -98,7 +100,7 @@ export function Desktop({ forest, layout, paused, unreadOf, selectedKey, onOpen,
   }, [teams, layout, width]);
 
   return (
-    <main ref={ref} className="gb-wallpaper relative min-h-0 flex-1 overflow-auto" aria-label={t('fleet')}>
+    <main ref={ref} className="gb-wallpaper relative min-h-0 flex-1 overflow-auto overscroll-contain" aria-label={t('fleet')}>
       {notice ? (
         <div className="absolute inset-x-0 top-1/3 mx-auto grid max-w-sm justify-items-center gap-3 px-4 text-center text-sm text-muted-foreground">
           {notice}
@@ -253,7 +255,7 @@ function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unread
             <MoreHorizontal className="size-4" aria-hidden />
           </button>
           {more && (leadHidden ? (
-            <MenuBox label={t('team.placeholder')} onClose={closeMore} align="right">
+            <MenuBox label={t('team.placeholder')} onClose={closeMore} align="right" anchor={moreButton}>
               {(first) => (
                 <>
                   <button ref={first} type="button" role="menuitem" className={menuItem}
@@ -269,7 +271,7 @@ function TeamCluster({ team, visible, collapsed, leadHidden, pos, paused, unread
             </MenuBox>
           ) : (
             <SoulMenu soul={team.lead} team={count > 0 ? teamKeys(team) : undefined} onOpen={onOpen} onArchive={onArchive}
-              onClose={closeMore} done={() => setMore(false)} align="right" />
+              onClose={closeMore} done={() => setMore(false)} align="right" anchor={moreButton} />
           ))}
         </div>
         {count > 0 && (
@@ -320,43 +322,32 @@ export function TeamCard({ team, layout, paused, unreadOf, onOpen, badges = noBa
 
 const menuItem = 'flex items-center gap-2 rounded-sm px-2 py-1.5 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-none';
 
-/** Where a right-click happened, in viewport pixels (the contextmenu event's clientX / clientY). */
-type Point = { x: number; y: number };
-
 /**
  * A small menu that takes focus, moves it with Up / Down / Home / End (as
  * Radix ContextMenu), and closes on Escape or when focus leaves it; its
  * owner hands focus back to the trigger. Given `at`, it opens at that
  * pointer position, kept inside the viewport, as Radix ContextMenu does;
- * otherwise it hangs under its trigger.
+ * otherwise it hangs under its `anchor`, flipping above it when the window
+ * ends there. It floats over the body (#262), so neither the card, the
+ * desktop's scrolling pane nor a team window the card's size cuts it off.
  */
-function MenuBox({ label, onClose, align = 'center', at, children }: {
+function MenuBox({ label, onClose, align = 'center', at, anchor, children }: {
   label: string; onClose: () => void; align?: 'center' | 'right'; at?: Point;
+  /** The trigger the menu hangs from when it has no pointer position. */
+  anchor: RefObject<HTMLElement | null>;
   children: (first: RefObject<HTMLButtonElement | null>) => ReactNode;
 }) {
   const first = useRef<HTMLButtonElement>(null);
-  const box = useRef<HTMLDivElement>(null);
-  const [place, setPlace] = useState<{ left: number; top: number } | null>(null);
-  useLayoutEffect(() => {
-    const el = box.current;
-    if (!at || !el) return;
-    // Relative to the positioned wrapper, so a moved card or window still lines up.
-    const origin = el.parentElement?.getBoundingClientRect() ?? { left: 0, top: 0 };
-    const { width, height } = el.getBoundingClientRect();
-    const x = Math.max(0, Math.min(at.x, window.innerWidth - width));
-    const y = Math.max(0, Math.min(at.y, window.innerHeight - height));
-    setPlace({ left: x - origin.left, top: y - origin.top });
-  }, [at]);
-  useEffect(() => { first.current?.focus(); }, [place]);
-  const anchored = align === 'right' ? 'top-full mt-1 right-0' : 'top-full mt-1 left-1/2 -translate-x-1/2';
-  return (
-    <div ref={box} role="menu" aria-label={label}
-      style={at ? { left: place?.left ?? 0, top: place?.top ?? 0, visibility: place ? undefined : 'hidden' } : undefined}
-      className={`absolute z-30 grid min-w-[8rem] rounded-md border border-border bg-popover p-1 text-sm shadow-md ${at ? '' : anchored}`}
+  const { ref, style, side } = useFloating<HTMLDivElement>(anchor, { at, align: align === 'right' ? 'end' : 'center' });
+  useEffect(() => { first.current?.focus(); }, []);
+  return createPortal(
+    <div ref={ref} role="menu" aria-label={label} data-side={side} style={style}
+      className="z-50 grid min-w-[8rem] rounded-md border border-border bg-popover p-1 text-sm shadow-md"
       onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } else menuKeys(e); }}
       onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onClose(); }}>
       {children(first)}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -365,7 +356,7 @@ function MenuBox({ label, onClose, align = 'center', at, children }: {
  * Remove… for one companion: its right-click menu and its team's ⋯. As the
  * design, Hide on a team's lead hides the whole team; Hide team stays.
  */
-function SoulMenu({ soul, team, onOpen, onCustomize, onArchive, onClose, done, align, at }: {
+function SoulMenu({ soul, team, onOpen, onCustomize, onArchive, onClose, done, align, at, anchor }: {
   soul: CensusRow; team?: readonly string[]; onOpen: (soul: CensusRow) => void; onArchive?: (soul: CensusRow) => void;
   /** Opens the Customize dialog (#64); without it the menu has no Customize…. */
   onCustomize?: () => void;
@@ -376,10 +367,12 @@ function SoulMenu({ soul, team, onOpen, onCustomize, onArchive, onClose, done, a
   align?: 'center' | 'right';
   /** A right-click's pointer position: the menu opens there. */
   at?: Point;
+  /** The trigger it hangs under otherwise. */
+  anchor: RefObject<HTMLElement | null>;
 }) {
   const { t } = useI18n();
   return (
-    <MenuBox label={displayName(soul)} onClose={onClose} align={align} at={at}>
+    <MenuBox label={displayName(soul)} onClose={onClose} align={align} at={at} anchor={anchor}>
       {(first) => (
         <>
           <button ref={first} type="button" role="menuitem" className={menuItem}
@@ -496,9 +489,9 @@ function CompanionButton({ soul, size, paused, unread, selected, onOpen, bare = 
           </span>
         )}
       </button>
-      {card.open && <CompanionHoverCard id={cardId} soul={soul} status={state} statusText={said} lead={lead} subagents={subagents} />}
+      {card.open && <CompanionHoverCard id={cardId} anchor={button} soul={soul} status={state} statusText={said} lead={lead} subagents={subagents} />}
       {menu !== false && (
-        <SoulMenu soul={soul} team={team} onOpen={onOpen} onArchive={onArchive} at={menu ?? undefined}
+        <SoulMenu soul={soul} team={team} onOpen={onOpen} onArchive={onArchive} at={menu ?? undefined} anchor={button}
           onCustomize={customizable ? customize : undefined}
           onClose={() => { setMenu(false); button.current?.focus(); }} done={() => setMenu(false)} />
       )}
@@ -515,7 +508,8 @@ const dragRegionOf = (native: boolean) => (native ? { 'data-tauri-drag-region': 
  * A native window's page (#223) with the same chrome: no close dot (the
  * window's own traffic lights float over the header's left 72 px), the
  * header drags the window, and Escape anywhere outside a field or an inner
- * dialog closes it.
+ * dialog closes it. The page clips (never scrolls, #260): only the body's
+ * own panes scroll, so the header stays put whatever gets focus inside.
  */
 function NativeWindow({ head, titleId, onClose, children }: {
   head: ReactNode; titleId: string; onClose: () => void; children: ReactNode;
@@ -532,7 +526,7 @@ function NativeWindow({ head, titleId, onClose, children }: {
     return () => document.removeEventListener('keydown', onKey);
   }, []);
   return (
-    <section ref={root} aria-labelledby={titleId} className="flex h-full flex-col overflow-hidden bg-card">
+    <section ref={root} aria-labelledby={titleId} className="flex h-full flex-col overflow-clip bg-card">
       <div data-tauri-drag-region="" className="flex min-h-10 items-center gap-2 border-b border-border bg-sidebar py-2 pr-3 pl-[72px] select-none">
         {head}
       </div>
@@ -565,7 +559,7 @@ function FloatingWindow({ head, titleId, onClose, children }: {
     <section
       role="dialog"
       aria-labelledby={titleId}
-      className="absolute top-1/2 left-1/2 z-30 flex h-[min(660px,calc(100%-3.5rem))] w-[min(780px,calc(100%-1rem))] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
+      className="absolute top-1/2 left-1/2 z-30 flex h-[min(660px,calc(100%-3.5rem))] w-[min(780px,calc(100%-1rem))] flex-col overflow-clip rounded-xl border border-border bg-card shadow-2xl"
       style={{ transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px))` }}
       // As the design: Escape in the composer, a field or an inner dialog stays there.
       onKeyDown={(e) => { if (e.key === 'Escape' && !escapeStaysInside(e.target, e.currentTarget)) onClose(); }}
@@ -653,7 +647,7 @@ export function AuditWindow({ roster, onClose, native = false, soul = null }: {
         <h2 id={titleId} {...dragRegionOf(native)} className="m-0 mr-auto truncate font-mono text-xs font-semibold text-foreground">{t('auditTitle')}</h2>
       </>
     )}>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <h1 className="m-0 px-4 pt-6 text-lg font-semibold md:px-6">{t('auditTitle')} · <span className="text-muted-foreground">{who}</span></h1>
         <AuditLog agentId={soul?.agentId ?? null} roster={roster} />
       </div>
