@@ -4788,6 +4788,379 @@ mod soul_env_tests {
     }
 }
 
+/// Installs one runtime the soul declares but lacks (#268; agent-bot-identity
+/// #583 slice 3): `soul runtimes install <agentId> --runtime NAME --json`,
+/// answered as printed (`{schemaVersion, agentId, soulDir, platform, root,
+/// cache, ready, runtimes[], harnesses[], invalid[], installed[], skipped[]}`).
+/// There is no plan, confirm or cancel protocol in the engine yet: the
+/// install runs to completion, one call per runtime, and the engine
+/// owner-gates it (its consent dialog, Touch ID) as `soul remove`;
+/// GeniusBar presents no principal. The section offers it only when the
+/// descriptor lists the `runtimes` capability and the action for the
+/// problem; this command checks nothing of that itself. An older bundle
+/// without `soul runtimes` maps to `soul-runtimes-unsupported`.
+#[tauri::command]
+pub async fn soul_runtimes_install<R: Runtime>(
+    app: AppHandle<R>,
+    agent: String,
+    runtime: String,
+) -> Result<Value, BridgeError> {
+    let args = soul_runtimes_install_args(&agent, &runtime)?;
+    let output = run_agent_bot(&app, args, "soul-runtimes-unavailable").await?;
+    parse_soul_runtimes_install(&output.stdout, &output.stderr)
+}
+
+/// An agent id or a runtime / harness name as one argv word: never empty,
+/// never an option, never carrying control characters.
+fn plain_argument(value: &str) -> bool {
+    !value.trim().is_empty() && !value.starts_with('-') && !value.chars().any(char::is_control)
+}
+
+fn soul_runtimes_install_args(
+    agent: &str,
+    runtime: &str,
+) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    if !plain_argument(agent) {
+        return Err(BridgeError::new(
+            "soul-runtimes-invalid",
+            "agent must be an agent id",
+        ));
+    }
+    // The engine accepts `node`, `python`, `go`, `uv` or a harness name;
+    // its own check refuses the rest. Here only the shape is checked.
+    if !plain_argument(runtime)
+        || !runtime
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
+        return Err(BridgeError::new(
+            "soul-runtimes-invalid",
+            "runtime must be a runtime or harness name",
+        ));
+    }
+    Ok(vec![
+        "soul".into(),
+        "runtimes".into(),
+        "install".into(),
+        agent.into(),
+        "--runtime".into(),
+        runtime.into(),
+        "--json".into(),
+    ])
+}
+
+/// True when stderr is an older agent-bot's `soul` usage line, which does
+/// not list the subcommand `listed` (`soul runtimes`, `soul env migrate`).
+fn soul_subcommand_missing(stdout: &[u8], stderr: &[u8], listed: &str) -> bool {
+    let message = last_line(stderr);
+    serde_json::from_str::<Value>(&last_line(stdout)).is_err()
+        && message.contains("usage: agent-bot soul ")
+        && !message.contains(listed)
+}
+
+fn parse_soul_runtimes_install(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    if soul_subcommand_missing(stdout, stderr, "soul runtimes") {
+        return Err(BridgeError::new(
+            "soul-runtimes-unsupported",
+            "this agent-bot cannot install soul runtimes",
+        ));
+    }
+    parse_agent_bot_json(
+        stdout,
+        stderr,
+        "soul-runtimes-failed",
+        "agent-bot soul runtimes: ",
+        "agent-bot did not report the install",
+        |value| {
+            value.get("agentId").is_some_and(Value::is_string)
+                && value.get("installed").is_some_and(Value::is_array)
+        },
+    )
+}
+
+/// Runs one of the engine's environment migrations for the soul (#268;
+/// agent-bot-identity #583 slices 2 and 5): `soul env migrate <agentId>
+/// --adopt-host-signin [--harness NAME] --json` copies the host's sign-in
+/// files for a harness into the soul's tool home (never the keychain, never
+/// a byte reported), and `--space-into-soul --json` moves a linked Agent
+/// Space inside the soul (copied, verified, source retired, never deleted;
+/// refused while the soul runs, `space-migrate-busy`). Answered as printed
+/// (`{schemaVersion, agentId, soulDir, operation, decision, steps[], root}`).
+/// Owner-gated by the engine itself, as `soul remove`. The section offers
+/// each only behind its capability (`tool-homes`, `memory`) and the
+/// problem the engine lists; an older bundle without `soul env migrate`
+/// maps to `soul-env-migrate-unsupported`.
+#[tauri::command]
+pub async fn soul_env_migrate<R: Runtime>(
+    app: AppHandle<R>,
+    agent: String,
+    kind: String,
+    harness: Option<String>,
+) -> Result<Value, BridgeError> {
+    let args = soul_env_migrate_args(&agent, &kind, harness.as_deref())?;
+    let output = run_agent_bot(&app, args, "soul-env-migrate-unavailable").await?;
+    parse_soul_env_migrate(&output.stdout, &output.stderr)
+}
+
+fn soul_env_migrate_args(
+    agent: &str,
+    kind: &str,
+    harness: Option<&str>,
+) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    let invalid = |message: &str| BridgeError::new("soul-env-migrate-invalid", message);
+    if !plain_argument(agent) {
+        return Err(invalid("agent must be an agent id"));
+    }
+    let mut args: Vec<std::ffi::OsString> =
+        vec!["soul".into(), "env".into(), "migrate".into(), agent.into()];
+    match kind {
+        "adopt-host-signin" => {
+            args.push("--adopt-host-signin".into());
+            if let Some(harness) = harness {
+                if !plain_argument(harness)
+                    || !harness
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+                {
+                    return Err(invalid("harness must be a harness name"));
+                }
+                args.push("--harness".into());
+                args.push(harness.into());
+            }
+        }
+        "space-into-soul" => {
+            if harness.is_some() {
+                return Err(invalid("the space move takes no harness"));
+            }
+            args.push("--space-into-soul".into());
+        }
+        _ => return Err(invalid("kind must be adopt-host-signin or space-into-soul")),
+    }
+    args.push("--json".into());
+    Ok(args)
+}
+
+fn parse_soul_env_migrate(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    if soul_subcommand_missing(stdout, stderr, "soul env migrate") {
+        return Err(BridgeError::new(
+            "soul-env-migrate-unsupported",
+            "this agent-bot cannot migrate a soul environment",
+        ));
+    }
+    parse_agent_bot_json(
+        stdout,
+        stderr,
+        "soul-env-migrate-failed",
+        "agent-bot soul env migrate: ",
+        "agent-bot did not report the migration",
+        |value| {
+            value.get("operation").is_some_and(Value::is_string)
+                && value.get("steps").is_some_and(Value::is_array)
+        },
+    )
+}
+
+#[cfg(test)]
+mod soul_env_operations_tests {
+    use super::*;
+
+    /// agent-bot 0.10.52's `soul runtimes install agent_p --runtime node
+    /// --json` after a successful install (paths shortened).
+    const INSTALLED: &[u8] = br#"{"schemaVersion":1,"agentId":"agent_p","soulDir":"/Users/me/souls/luna.soul","platform":"darwin-arm64","root":"/Users/me/souls/luna.soul/.soul-state/runtimes","cache":"/Users/me/.cache/agent-bot/downloads","ready":true,"runtimes":[{"name":"node","declared":"24","requiredBy":[],"version":"24.11.1","source":"catalog","status":"installed","reason":null,"path":"/Users/me/souls/luna.soul/.soul-state/runtimes/node/24.11.1","bin":"bin","lastError":null,"via":null}],"harnesses":[],"invalid":[],"installed":["node"],"skipped":[]}
+"#;
+    /// The same engine's `soul` usage line from 0.10.45, which has neither
+    /// `soul runtimes` nor `soul env migrate`.
+    const OLD_USAGE: &[u8] =
+        b"agent-bot: usage: agent-bot soul cold-wake <agentId> [on|off|show] | soul show <agentId|name> [--json] | soul profile <agentId|name> [--json] [--file RELATIVE_PATH] | soul env <agentId|name> [--json]\n";
+
+    #[test]
+    fn builds_the_install_arguments_one_runtime_at_a_time() {
+        assert_eq!(
+            soul_runtimes_install_args("agent_p", "node").unwrap(),
+            vec![
+                "soul",
+                "runtimes",
+                "install",
+                "agent_p",
+                "--runtime",
+                "node",
+                "--json"
+            ]
+        );
+        assert_eq!(
+            soul_runtimes_install_args("agent_p", "opencode").unwrap()[5],
+            "opencode"
+        );
+        for (agent, runtime) in [
+            ("", "node"),
+            ("--json", "node"),
+            ("a\nb", "node"),
+            ("agent_p", ""),
+            ("agent_p", "--principal-stdin"),
+            ("agent_p", "node python"),
+            ("agent_p", "no\u{0}de"),
+        ] {
+            assert_eq!(
+                soul_runtimes_install_args(agent, runtime).unwrap_err().code,
+                "soul-runtimes-invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn passes_the_install_report_through_as_printed() {
+        let report = parse_soul_runtimes_install(INSTALLED, b"").unwrap();
+        assert_eq!(report["installed"], json!(["node"]));
+        assert_eq!(report["runtimes"][0]["status"], "installed");
+        assert_eq!(report, serde_json::from_slice::<Value>(INSTALLED).unwrap());
+        // The engine's coded refusal, with its message, as the UI's failure line.
+        assert_eq!(
+            parse_soul_runtimes_install(
+                b"{\"error\":{\"code\":\"runtime-download-failed\",\"message\":\"agent_p node: could not download https://nodejs.org/x (ENOTFOUND); check the network and retry\",\"runtime\":\"node\",\"action\":\"agent-bot soul runtimes install agent_p --runtime node\"}}\n",
+                b""
+            )
+            .unwrap_err(),
+            BridgeError::new(
+                "runtime-download-failed",
+                "agent_p node: could not download https://nodejs.org/x (ENOTFOUND); check the network and retry"
+            )
+        );
+        assert_eq!(
+            parse_soul_runtimes_install(
+                b"",
+                b"agent-bot soul runtimes: the owner did not approve\n"
+            )
+            .unwrap_err(),
+            BridgeError::new("soul-runtimes-failed", "the owner did not approve")
+        );
+        // A read-only `soul runtimes` answer is not an install report.
+        assert_eq!(
+            parse_soul_runtimes_install(
+                b"{\"schemaVersion\":1,\"agentId\":\"agent_p\",\"runtimes\":[]}\n",
+                b""
+            )
+            .unwrap_err(),
+            BridgeError::new(
+                "soul-runtimes-failed",
+                "agent-bot did not report the install"
+            )
+        );
+        assert_eq!(
+            parse_soul_runtimes_install(b"", OLD_USAGE)
+                .unwrap_err()
+                .code,
+            "soul-runtimes-unsupported"
+        );
+    }
+
+    #[test]
+    fn builds_the_migrate_arguments_for_each_operation() {
+        assert_eq!(
+            soul_env_migrate_args("agent_p", "adopt-host-signin", Some("codex")).unwrap(),
+            vec![
+                "soul",
+                "env",
+                "migrate",
+                "agent_p",
+                "--adopt-host-signin",
+                "--harness",
+                "codex",
+                "--json"
+            ]
+        );
+        assert_eq!(
+            soul_env_migrate_args("agent_p", "adopt-host-signin", None).unwrap(),
+            vec![
+                "soul",
+                "env",
+                "migrate",
+                "agent_p",
+                "--adopt-host-signin",
+                "--json"
+            ]
+        );
+        assert_eq!(
+            soul_env_migrate_args("agent_p", "space-into-soul", None).unwrap(),
+            vec![
+                "soul",
+                "env",
+                "migrate",
+                "agent_p",
+                "--space-into-soul",
+                "--json"
+            ]
+        );
+        for (agent, kind, harness) in [
+            ("", "space-into-soul", None),
+            ("-x", "space-into-soul", None),
+            ("agent_p", "export", None),
+            ("agent_p", "space-into-soul", Some("codex")),
+            ("agent_p", "adopt-host-signin", Some("")),
+            ("agent_p", "adopt-host-signin", Some("--json")),
+            ("agent_p", "adopt-host-signin", Some("co dex")),
+        ] {
+            assert_eq!(
+                soul_env_migrate_args(agent, kind, harness)
+                    .unwrap_err()
+                    .code,
+                "soul-env-migrate-invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn passes_the_migration_report_or_the_engines_refusal() {
+        let adopted = parse_soul_env_migrate(
+            br#"{"schemaVersion":1,"agentId":"agent_p","soulDir":"/Users/me/souls/luna.soul","operation":"adopt-host-signin","decision":"adopted","steps":[{"id":"adopt-host-signin:codex","status":"done","from":"/Users/me/.codex","to":"/Users/me/souls/luna.soul/.soul-state/tools/codex","at":"2026-10-07T10:00:00.000Z","note":"copied auth.json","files":[{"path":"auth.json","kind":"sign-in","status":"copied"}]}],"root":"/Users/me/souls/luna.soul/.soul-state/tools"}
+"#,
+            b"",
+        )
+        .unwrap();
+        assert_eq!(adopted["decision"], "adopted");
+        assert_eq!(adopted["steps"][0]["files"][0]["status"], "copied");
+        let moved = parse_soul_env_migrate(
+            br#"{"schemaVersion":1,"agentId":"agent_p","soulDir":"/s","operation":"space-into-soul","decision":"migrated","steps":[{"id":"space-into-soul","status":"done","from":"/Users/me/space/luna","to":"/s/.soul-state/space","at":"2026-10-07T10:00:00.000Z","note":null}],"root":"/s/.soul-state/space"}
+"#,
+            b"",
+        )
+        .unwrap();
+        assert_eq!(moved["steps"][0]["status"], "done");
+        assert_eq!(
+            parse_soul_env_migrate(
+                b"{\"error\":{\"code\":\"space-migrate-busy\",\"message\":\"agent_p is running (a turn in flight or a warm harness); stop it before moving its Agent Space\",\"action\":\"agent-bot soul stop agent_p\"}}\n",
+                b""
+            )
+            .unwrap_err(),
+            BridgeError::new(
+                "space-migrate-busy",
+                "agent_p is running (a turn in flight or a warm harness); stop it before moving its Agent Space"
+            )
+        );
+        assert_eq!(
+            parse_soul_env_migrate(
+                b"",
+                b"agent-bot soul env migrate: the owner did not approve\n"
+            )
+            .unwrap_err(),
+            BridgeError::new("soul-env-migrate-failed", "the owner did not approve")
+        );
+        assert_eq!(
+            parse_soul_env_migrate(b"", OLD_USAGE).unwrap_err().code,
+            "soul-env-migrate-unsupported"
+        );
+        // A bundle that has the command but refuses its arguments still has it.
+        assert_eq!(
+            parse_soul_env_migrate(
+                b"{\"error\":{\"code\":\"soul-env-migrate-failed\",\"message\":\"usage: agent-bot soul env migrate <agentId|name> --adopt-host-signin [--harness NAME] | --space-into-soul [--json] [--principal-stdin]\"}}\n",
+                b""
+            )
+            .unwrap_err()
+            .code,
+            "soul-env-migrate-failed"
+        );
+    }
+}
+
 /// The owner's edits from the Customize dialog's Save (#64): the soul's
 /// manifest name, description and appearance, and the text of its editable
 /// Context files, keyed by their path in the package.

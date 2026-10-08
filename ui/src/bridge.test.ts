@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BridgeError, call, openDesktop, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, exportAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRemovalPlan, normalizeRemovalEffects, removalPlan, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, normalizeAppearance, savedBrief, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported, normalizeSoulComputerUse, soulComputerUse, soulComputerUseSupported, liveComputerUse, listSoulTemplates, normalizeSoulTemplates, normalizeSoulProfile, soulProfile, soulProfileFile, popupVisible, normalizeSoulEnvironment, soulEnvironment, engineCan, normalizePreparedRevision, prepareRevision, discardRevision, editableInStaging } from './bridge';
+import { BridgeError, call, openDesktop, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, exportAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRemovalPlan, normalizeRemovalEffects, removalPlan, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, normalizeAppearance, savedBrief, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported, normalizeSoulComputerUse, soulComputerUse, soulComputerUseSupported, liveComputerUse, listSoulTemplates, normalizeSoulTemplates, normalizeSoulProfile, soulProfile, soulProfileFile, popupVisible, normalizeSoulEnvironment, soulEnvironment, engineCan, normalizePreparedRevision, prepareRevision, discardRevision, editableInStaging, normalizeRuntimeInstall, installSoulRuntime, normalizeEnvironmentMigration, migrateSoulEnvironment } from './bridge';
 
 describe('bridge', () => {
   it('invokes the shell command with the method and params', async () => {
@@ -943,5 +943,61 @@ describe('revision staging (#268)', () => {
     await expect(discardRevision(raw.staging, gone)).rejects.toMatchObject({ code: 'staging-missing' });
     await expect(prepareRevision('agent_p')).rejects.toMatchObject({ code: 'soul-revision-unavailable' });
     await expect(discardRevision(raw.staging)).rejects.toMatchObject({ code: 'soul-revision-unavailable' });
+  });
+});
+
+describe('soul runtimes install and soul env migrate (#268)', () => {
+  const report = {
+    schemaVersion: 1, agentId: 'agent_p', soulDir: '/s', platform: 'darwin-arm64', root: '/s/.soul-state/runtimes', cache: '/c', ready: true,
+    runtimes: [{ name: 'node', declared: '24', requiredBy: [], version: '24.11.1', source: 'catalog', status: 'installed', reason: null, path: '/s/.soul-state/runtimes/node/24.11.1', bin: 'bin', lastError: null, via: null }],
+    harnesses: [{ name: 'opencode', kind: 'archive', version: '1.2.3', status: 'missing', lastError: { code: 'runtime-download-failed', message: 'could not download', at: '2026-10-07T10:00:00.000Z' } }],
+    invalid: [], installed: ['node'], skipped: [],
+  };
+
+  it('normalizes the install report: names, statuses and last errors, nothing else', () => {
+    expect(normalizeRuntimeInstall(report)).toEqual({
+      agentId: 'agent_p', ready: true, installed: ['node'], skipped: [],
+      runtimes: [{ name: 'node', status: 'installed', version: '24.11.1', lastError: null }],
+      harnesses: [{ name: 'opencode', status: 'missing', version: '1.2.3', lastError: { code: 'runtime-download-failed', message: 'could not download' } }],
+    });
+    expect(normalizeRuntimeInstall({ agentId: 'agent_p', installed: [], runtimes: [{ name: '' }, 'x'], skipped: ['uv'] })).toEqual({ agentId: 'agent_p', ready: null, installed: [], skipped: ['uv'], runtimes: [], harnesses: [] });
+    // A read-only `soul runtimes` answer, or no answer, is not an install report.
+    expect(normalizeRuntimeInstall({ agentId: 'agent_p', runtimes: [] })).toBeNull();
+    expect(normalizeRuntimeInstall(null)).toBeNull();
+  });
+
+  it('installs one runtime through the bridge, one call per runtime', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); return report; }) as never;
+    await expect(installSoulRuntime('agent_p', 'node', fake)).resolves.toMatchObject({ installed: ['node'] });
+    expect(calls).toEqual([['soul_runtimes_install', { agent: 'agent_p', runtime: 'node' }]]);
+    const refusing = (async () => { throw { code: 'runtime-checksum-mismatch', message: 'the download is corrupt' }; }) as never;
+    await expect(installSoulRuntime('agent_p', 'node', refusing)).rejects.toMatchObject({ code: 'runtime-checksum-mismatch', message: 'the download is corrupt' });
+    const silent = (async () => ({ agentId: 'agent_p' })) as never;
+    await expect(installSoulRuntime('agent_p', 'node', silent)).rejects.toMatchObject({ code: 'soul-runtimes-failed' });
+    await expect(installSoulRuntime('agent_p', 'node')).rejects.toMatchObject({ code: 'soul-runtimes-unavailable' });
+  });
+
+  it('normalizes a migration report: operation, decision and the journalled steps', () => {
+    const raw = { schemaVersion: 1, agentId: 'agent_p', soulDir: '/s', operation: 'adopt-host-signin', decision: 'adopted', root: '/s/.soul-state/tools',
+      steps: [{ id: 'adopt-host-signin:codex', status: 'done', from: '/Users/me/.codex', to: '/s/.soul-state/tools/codex', at: 'x', note: 'copied auth.json', files: [{ path: 'auth.json', kind: 'sign-in', status: 'copied' }] }, { status: 'done' }] };
+    expect(normalizeEnvironmentMigration(raw)).toEqual({ agentId: 'agent_p', operation: 'adopt-host-signin', decision: 'adopted',
+      steps: [{ id: 'adopt-host-signin:codex', status: 'done', note: 'copied auth.json', from: '/Users/me/.codex', to: '/s/.soul-state/tools/codex' }] });
+    expect(normalizeEnvironmentMigration({ agentId: 'agent_p', operation: 'space-into-soul', steps: [] })).toEqual({ agentId: 'agent_p', operation: 'space-into-soul', decision: null, steps: [] });
+    expect(normalizeEnvironmentMigration({ agentId: 'agent_p', decision: 'adopted' })).toBeNull();
+  });
+
+  it('runs each migration through the bridge with its kind and harness', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); return { agentId: 'agent_p', operation: 'space-into-soul', decision: 'migrated', steps: [{ id: 'space-into-soul', status: 'done' }] }; }) as never;
+    await expect(migrateSoulEnvironment('agent_p', 'space-into-soul', null, fake)).resolves.toMatchObject({ decision: 'migrated' });
+    await migrateSoulEnvironment('agent_p', 'adopt-host-signin', 'codex', fake);
+    expect(calls).toEqual([
+      ['soul_env_migrate', { agent: 'agent_p', kind: 'space-into-soul', harness: null }],
+      ['soul_env_migrate', { agent: 'agent_p', kind: 'adopt-host-signin', harness: 'codex' }],
+    ]);
+    const busy = (async () => { throw { code: 'space-migrate-busy', message: 'agent_p is running' }; }) as never;
+    await expect(migrateSoulEnvironment('agent_p', 'space-into-soul', null, busy)).rejects.toMatchObject({ code: 'space-migrate-busy' });
+    await expect(migrateSoulEnvironment('agent_p', 'space-into-soul')).rejects.toMatchObject({ code: 'soul-env-migrate-unavailable' });
   });
 });
