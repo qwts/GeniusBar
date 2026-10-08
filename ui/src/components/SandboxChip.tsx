@@ -6,6 +6,7 @@ import { useI18n, type Translate } from '../lib/i18n';
 import { menuKeys } from '../lib/keys';
 import { displayName, type CensusRow } from '../model/census';
 import { useSandbox, type SandboxOverride, type SandboxSoul } from './Sandbox';
+import { SandboxAccountDialog } from './SandboxAccountDialog';
 
 /** "Runs as …": the sandbox account with its kind, or the owner's own account. */
 export function runsAsText(row: SandboxSoul, t: Translate): string {
@@ -20,13 +21,17 @@ export function runsAsText(row: SandboxSoul, t: Translate): string {
  * again. Absent while agent-bot has no `sandbox` or no row for the soul.
  * As Radix DropdownMenu: the open menu focuses its first item, Up / Down /
  * Home / End move between the items, Escape hands focus back to the pill.
- * The menu floats over the body, kept inside the window (#262).
+ * The menu floats over the body, kept inside the window (#262). A sandboxed
+ * soul's menu ends with "Edit account…" (#66 handoff), which opens the
+ * account dialog for this soul; the pill takes focus first, so the dialog
+ * hands it back there.
  */
 export function SandboxChip({ soul }: { soul: CensusRow }) {
   const { t } = useI18n();
   const sb = useSandbox();
   const { reload } = sb;
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const { ref: menu, style, side } = useFloating<HTMLDivElement>(button, { align: 'end' });
@@ -93,9 +98,20 @@ export function SandboxChip({ soul }: { soul: CensusRow }) {
               {label}
             </button>
           ))}
+          {on && (
+            <>
+              <div role="separator" className="-mx-1 my-1 h-px bg-muted" />
+              <button type="button" role="menuitem" aria-haspopup="dialog"
+                onClick={() => { setOpen(false); button.current?.focus(); setEditing(true); }}
+                className="flex w-full items-center rounded-sm py-1.5 pr-2 pl-8 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none">
+                {t('sandbox.account.edit')}
+              </button>
+            </>
+          )}
         </div>,
         document.body,
       )}
+      {editing && <SandboxAccountDialog soul={row} onClose={() => setEditing(false)} />}
       {saving && <span className="sr-only" role="status">{t('sandbox.saving')}</span>}
     </div>
   );

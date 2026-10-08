@@ -1,15 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Check, Circle, Copy, Loader2, Shield } from 'lucide-react';
 import { useI18n, type Translate } from '../lib/i18n';
-import type { MessageKey } from '../locales/en';
 import { useSandbox, type SandboxPairing, type SandboxSop, type SandboxStatus, type SandboxStep } from './Sandbox';
+import { RUN_TEXT, SandboxAccountDialog } from './SandboxAccountDialog';
 import { Select } from './Select';
-
-const RUN_TEXT: Record<string, MessageKey> = {
-  'owner-admin': 'sandbox.run.admin',
-  owner: 'sandbox.run.owner',
-  account: 'sandbox.run.account',
-};
+import { secondaryButton } from './ui';
 
 export function sandboxStatusText(status: SandboxStatus, t: Translate): string {
   const account = status.account;
@@ -38,6 +33,7 @@ export function SandboxCard() {
   const { t } = useI18n();
   const sb = useSandbox();
   const { reload } = sb;
+  const [editing, setEditing] = useState(false);
   useEffect(() => { reload(); }, [reload]);
   if (sb.hidden) return null;
   const status = sb.status;
@@ -75,6 +71,14 @@ export function SandboxCard() {
               : <Circle className="size-3" aria-hidden />}
             {sandboxStatusText(status, t)}
           </p>
+          {/* The design's "Runs as" row with Edit account… (#66 handoff): GeniusBar's default account, the dialog's subject. */}
+          <div className="flex items-center gap-2">
+            <p className="m-0 min-w-0 flex-1 text-muted-foreground">{t('sandbox.runsAs', { user: status.account })}</p>
+            <button type="button" aria-haspopup="dialog" onClick={() => setEditing(true)} disabled={sb.saving !== null} className={secondaryButton}>
+              {t('sandbox.account.edit')}
+            </button>
+          </div>
+          {editing && <SandboxAccountDialog soul={null} onClose={() => setEditing(false)} />}
           {status.sop && sopText(status.sop, t) && <p className="m-0 text-[11px] text-muted-foreground">{sopText(status.sop, t)}</p>}
           {steps.length > 0 && (
             <SandboxSteps steps={steps} account={status.account} pending={sb.pending ?? []} saving={sb.saving}
