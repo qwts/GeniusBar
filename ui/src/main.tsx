@@ -17,6 +17,7 @@ import { useLaunch } from './useLaunch';
 import { useSetup } from './useSetup';
 import { useSnapshot, type SnapshotOptions } from './useSnapshot';
 import { useUpdates } from './useUpdates';
+import { usePreferences } from './state/preferences';
 import '@fontsource/ibm-plex-sans/latin-400.css';
 import '@fontsource/ibm-plex-sans/latin-500.css';
 import '@fontsource/ibm-plex-sans/latin-600.css';
@@ -84,9 +85,11 @@ function Live({ snapshot }: { snapshot: SnapshotOptions | null }) {
   const [mode, setMode] = useState<AppMode>('tray');
   useEffect(() => { invoke<AppMode>('app_mode').then(setMode, () => {}); }, []);
   // A `.soul` dropped on the popup (#98): the tray popup opens the launch
-  // window with it; --window, a snapshot, or a shell without windows shows
-  // it here, as Finder's "Open with GeniusBar" does.
-  const nativeLaunch = mode === 'tray' && inApp() && !snapshot;
+  // window with it when "Open conversations in their own window" is on
+  // (#264); otherwise, --window, a snapshot, or a shell without windows
+  // shows it here, as Finder's "Open with GeniusBar" does.
+  const { ownWindows } = usePreferences();
+  const nativeLaunch = mode === 'tray' && inApp() && !snapshot && ownWindows;
   const dropPackage = useCallback((path: string) => {
     void routeDroppedPackage(path, {
       open: nativeLaunch ? openSurface : null,
