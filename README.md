@@ -193,6 +193,11 @@ in the tray menu. With them, the app checks at startup and from the tray's
 
 ## Testing the UI
 
+The [test plan](docs/test-plan.md) tracks prioritized regression scenarios,
+existing coverage, and the automated or agent-driven checks still to build.
+Use it when changing a workflow or preparing a release; record run results in
+CI artifacts or release issues, linked to the tested commit.
+
 The menubar itself is invisible to computer-use agents and CI (status items
 are not capturable without Screen Recording permission), so two launch
 flags expose the same popup content: `--window` shows it in a regular window
