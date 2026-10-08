@@ -238,7 +238,7 @@ export const en = {
   'launch.err.brief': 'The brief is longer than {max} characters.',
   'launch.err.parent': "The chosen parent isn't in the active fleet.",
   'launch.err.parentSelf': 'A companion cannot be its own parent. Choose another, or Independent.',
-  'launch.err.parentUncarried': "GeniusBar's launch path doesn't carry a parent yet, so it would start independent. Choose Independent, or ask that companion to start it as a teammate.",
+  'launch.err.parentUncarried': "This engine doesn't carry a parent at launch (agent-bot without launch-parent), so it would start independent. Choose Independent, or ask that companion to start it as a teammate.",
   'harness.defaultTitle': 'Default harness',
   'harness.none': 'None — ask every time',
   'harness.defaultHint': 'New agents use this unless you pick another.',

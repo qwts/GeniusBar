@@ -234,9 +234,10 @@ export interface LaunchDraft {
   /** The parents the form offers; a chosen one outside it is refused. */
   parents: readonly Pick<CensusRow, 'agentId'>[];
   /**
-   * Whether this app's launch path carries a parent to the daemon. Until
-   * it does, a companion parent is refused here rather than dropped on the
-   * way and the soul started independent in silence.
+   * Whether the launch path carries a parent to the daemon: the engine's
+   * `launch-parent` capability, read by the form. Without it a companion
+   * parent is refused here rather than dropped on the way and the soul
+   * started independent in silence.
    */
   parentCarried: boolean;
 }

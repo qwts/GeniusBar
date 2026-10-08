@@ -489,6 +489,29 @@ describe('LaunchForm model and parent (#261)', () => {
     expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ parent: 'agent_other', target: { package: '/souls/helper.soul' } }));
   });
 
+  it('carries the parent when the chosen companion\'s engine lists launch-parent, and refuses it when it does not', async () => {
+    const env = (capabilities: string[]) => ({ engine: { version: '0.10.53', contractVersion: 1, capabilities }, providers: { declared: [], secrets: [], invalid: [] } } as unknown as SoulEnvironment);
+    const asked: string[] = [];
+    const launcher = launcherIn({ phase: 'idle' });
+    const { unmount } = render(form(launcher, { initialPackagePath: '/souls/helper.soul', roster,
+      loadEnvironment: async (id) => { asked.push(id); return env(['env', 'launch-parent']); } }));
+    advanced();
+    fireEvent.change(parentSelect(), { target: { value: 'agent_other' } });
+    await waitFor(() => expect(asked).toEqual(['agent_other']));
+    fireEvent.submit(screen.getByRole('form'));
+    expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ parent: 'agent_other' }));
+    unmount();
+    const older = launcherIn({ phase: 'idle' });
+    const askedOlder: string[] = [];
+    render(form(older, { initialPackagePath: '/souls/helper.soul', roster, loadEnvironment: async (id) => { askedOlder.push(id); return env(['env', 'providers']); } }));
+    advanced();
+    fireEvent.change(parentSelect(), { target: { value: 'agent_other' } });
+    await waitFor(() => expect(askedOlder).toEqual(['agent_other']));
+    fireEvent.submit(screen.getByRole('form'));
+    expect(older.launch).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toContain("This engine doesn't carry a parent at launch");
+  });
+
   it('offers no companion the launch path cannot carry: the choice stays, the list says so, nothing is sent', () => {
     const launcher = launcherIn({ phase: 'idle' });
     render(form(launcher, { initialPackagePath: '/souls/helper.soul', roster }));
@@ -498,7 +521,7 @@ describe('LaunchForm model and parent (#261)', () => {
     expect(launcher.launch).not.toHaveBeenCalled();
     const alert = screen.getByRole('alert');
     expect(alert.textContent).toContain('Fix these before launching:');
-    expect(alert.textContent).toContain("GeniusBar's launch path doesn't carry a parent yet, so it would start independent.");
+    expect(alert.textContent).toContain("This engine doesn't carry a parent at launch (agent-bot without launch-parent), so it would start independent.");
     expect(document.activeElement).toBe(alert);
     expect(parentSelect().value).toBe('agent_other');
     fireEvent.change(parentSelect(), { target: { value: '__none' } });

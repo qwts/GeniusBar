@@ -14,7 +14,7 @@ import { SoulSourceContext, type SoulSource } from './SoulNotices';
 afterEach(cleanup);
 vi.mock('../bridge', async (original) => {
   const real = await original<typeof import('../bridge')>();
-  return { BridgeError: real.BridgeError, computerUseSupported: real.computerUseSupported,
+  return { BridgeError: real.BridgeError, computerUseSupported: real.computerUseSupported, engineCan: real.engineCan,
     runtimeMetrics: vi.fn(), soulComms: vi.fn(), setSoulComms: vi.fn() };
 });
 beforeEach(() => {
