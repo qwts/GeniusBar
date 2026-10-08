@@ -283,13 +283,13 @@ describe('App setup', () => {
 
   it('lets the first companion start with agent comms off (#71)', () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
-    const starter = { package: '/App/souls/starter.soul', account: 'friend', name: 'Starter', harnesses: ['claude'], devTools: true };
+    const starter = { package: '/App/souls/starter.soul', account: 'friend', name: 'Genius', harnesses: ['claude'], devTools: true };
     render(<App census={[]} connection={sampleConnection} launcher={launcher} starter={starter} isStatic />);
     const comms = screen.getByRole('switch', { name: 'Agent comms' }) as HTMLInputElement;
     expect(comms.checked).toBe(true);
     fireEvent.click(comms);
-    fireEvent.submit(screen.getByRole('form', { name: 'Start with Starter' }));
-    expect(launcher.launch).toHaveBeenCalledWith({ account: 'friend', target: { package: '/App/souls/starter.soul' }, harness: 'claude', name: 'Starter', comms: false });
+    fireEvent.submit(screen.getByRole('form', { name: 'Start with Genius' }));
+    expect(launcher.launch).toHaveBeenCalledWith({ account: 'friend', target: { package: '/App/souls/starter.soul' }, harness: 'claude', name: 'Genius', comms: false });
   });
 
   it('opens the companion, not a new launch, for an installed soul opened from Finder (#80)', () => {
@@ -371,23 +371,23 @@ describe('App setup', () => {
 
   it('offers the starter soul on an empty roster and launches it with its default harness', () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
-    const starter = { package: '/App/souls/starter.soul', account: 'friend', name: 'Starter', harnesses: ['claude', 'codex'], devTools: true };
+    const starter = { package: '/App/souls/starter.soul', account: 'friend', name: 'Genius', harnesses: ['claude', 'codex'], devTools: true };
     const { rerender } = render(<App census={[]} connection={sampleConnection} launcher={launcher} starter={starter} isStatic />);
     expect((screen.getByLabelText('Harness') as HTMLInputElement).value).toBe('claude');
-    fireEvent.click(screen.getByRole('button', { name: 'Start with Starter' }));
-    expect(launcher.launch).toHaveBeenCalledWith({ account: 'friend', target: { package: '/App/souls/starter.soul' }, harness: 'claude', name: 'Starter', comms: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Start with Genius' }));
+    expect(launcher.launch).toHaveBeenCalledWith({ account: 'friend', target: { package: '/App/souls/starter.soul' }, harness: 'claude', name: 'Genius', comms: true });
     const failed: LaunchApi = { ...launcher, state: { phase: 'failed', requestId: 'r1', agentId: null, detail: 'harness not installed' } };
     rerender(<App census={[]} connection={sampleConnection} launcher={failed} starter={starter} isStatic />);
     expect(screen.getByRole('alert').textContent).toMatch(/harness not installed/);
   });
 
   it('after the starter launches, stays open while the roster fills and signs in to the harness', async () => {
-    const starter = { package: '/App/souls/starter.soul', account: 'friend', name: 'Starter', harnesses: ['claude'], devTools: true };
+    const starter = { package: '/App/souls/starter.soul', account: 'friend', name: 'Genius', harnesses: ['claude'], devTools: true };
     const idle: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     let signedIn = false;
     const auth = vi.fn(async (action: 'status' | 'login') => { if (action === 'login') signedIn = true; return { loggedIn: signedIn }; });
     const { rerender } = render(<App census={[]} connection={sampleConnection} launcher={idle} starter={starter} harnessAuth={auth} isStatic />);
-    fireEvent.click(screen.getByRole('button', { name: 'Start with Starter' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start with Genius' }));
     const launched: LaunchApi = { ...idle, state: { phase: 'launched', requestId: 'r1', agentId: 'agent_s' } };
     rerender(<App census={sampleCensus} connection={sampleConnection} launcher={launched} starter={starter} harnessAuth={auth} isStatic />);
     const signIn = await screen.findByRole('button', { name: 'Sign in to Claude' });
@@ -401,24 +401,24 @@ describe('App setup', () => {
 
   it('asks for Apple developer tools before the starter can launch', async () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
-    const starter = { package: '/App/souls/starter.soul', account: 'friend', name: 'Starter', harnesses: ['claude'], devTools: false };
+    const starter = { package: '/App/souls/starter.soul', account: 'friend', name: 'Genius', harnesses: ['claude'], devTools: false };
     const devTools = { install: vi.fn(async () => {}), recheck: vi.fn() };
     const { rerender } = render(<App census={[]} connection={sampleConnection} launcher={launcher} starter={starter} devTools={devTools} isStatic />);
-    expect(screen.queryByRole('button', { name: 'Start with Starter' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Start with Genius' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     expect(devTools.install).toHaveBeenCalled();
     expect(await screen.findByText(/Waiting for the installer/)).toBeTruthy();
     rerender(<App census={[]} connection={sampleConnection} launcher={launcher} starter={{ ...starter, devTools: true }} devTools={devTools} isStatic />);
-    expect(screen.getByRole('button', { name: 'Start with Starter' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Start with Genius' })).toBeTruthy();
   });
 
   it('keeps the plain empty text when the starter soul is not offered', () => {
     render(<App census={[]} connection={sampleConnection} isStatic />);
-    expect(screen.queryByRole('form', { name: 'Start with Starter' })).toBeNull();
+    expect(screen.queryByRole('form', { name: 'Start with Genius' })).toBeNull();
     expect(screen.getByText('No companions yet. Launch one to get started.')).toBeTruthy();
   });
 
-  it('adds a companion from the footer +: the launch dialog with Starter preselected (#97)', async () => {
+  it('adds a companion from the footer +: the launch dialog with Genius preselected (#97)', async () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
     const bundledFirst = { ...sampleTemplates, templates: [sampleTemplates.templates[2], ...sampleTemplates.templates.slice(0, 2)] };
     render(<App census={sampleCensus} connection={sampleConnection} launcher={launcher} templateLister={async () => bundledFirst} isStatic />);
@@ -427,8 +427,8 @@ describe('App setup', () => {
     fireEvent.click(add);
     const dialog = screen.getByRole('dialog', { name: 'Launch a new companion' });
     const souls = await within(dialog).findByRole('radiogroup', { name: 'Soul' });
-    expect(within(souls).getAllByRole('radio').map((r) => r.textContent)).toEqual(['Starter', 'Coder', 'Researcher', 'Custom soul']);
-    expect(within(souls).getByRole('radio', { name: 'Starter' }).getAttribute('aria-checked')).toBe('true');
+    expect(within(souls).getAllByRole('radio').map((r) => r.textContent)).toEqual(['Genius', 'Coder', 'Researcher', 'Custom soul']);
+    expect(within(souls).getByRole('radio', { name: 'Genius' }).getAttribute('aria-checked')).toBe('true');
   });
 
   it('keeps "Launch soul…" for a package in the footer ⋯ menu (#97)', () => {
@@ -455,7 +455,7 @@ describe('App setup', () => {
     expect(act).toHaveBeenCalledOnce();
     // While the update needs action, the footer check hides; the ⋯ keeps only About (#290).
     fireEvent.click(screen.getByRole('button', { name: 'More' }));
-    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['About GeniusBar…']);
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['About GeniusBar…', 'App guide']);
     cleanup();
     render(<App connection={sampleConnection} updates={{ ...updates, status: { state: 'idle', version: null } }} isStatic />);
     fireEvent.click(screen.getByRole('button', { name: 'More' }));

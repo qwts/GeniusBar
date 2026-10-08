@@ -106,7 +106,7 @@ describe('LaunchForm role (agent-bot-identity#535)', () => {
   });
 });
 
-const starter: CensusRow = { account: 'user', agentId: 'agent_s', name: 'Starter', harness: 'claude', parent: null, presence: 'left', unacked: 0, lastWake: null };
+const starter: CensusRow = { account: 'user', agentId: 'agent_s', name: 'Genius', harness: 'claude', parent: null, presence: 'left', unacked: 0, lastWake: null };
 
 describe('LaunchForm relaunching an existing companion (#79)', () => {
   it('has no Name field and sends no name', () => {
@@ -188,7 +188,7 @@ describe('LaunchForm soul templates (#65)', () => {
   it('offers each template, then "Custom soul", with the first chosen', async () => {
     render(form(launcherIn({ phase: 'idle' }), { harnesses: ['claude', 'opencode'], listTemplates: listed }));
     await picker();
-    expect(radios().map((r) => r.textContent)).toEqual(['Coder', 'Researcher', 'Starter', 'Custom soul']);
+    expect(radios().map((r) => r.textContent)).toEqual(['Coder', 'Researcher', 'Genius', 'Custom soul']);
     expect(checked()).toBe('Coder');
     expect(screen.getByText('Writes and reviews code in your repositories.')).toBeTruthy();
     expect(screen.queryByLabelText('Path to soul, ending with .soul')).toBeNull();
@@ -209,7 +209,7 @@ describe('LaunchForm soul templates (#65)', () => {
     const launcher = launcherIn({ phase: 'idle' });
     render(form(launcher, { harnesses: ['claude', 'opencode'], listTemplates: listed }));
     await picker();
-    fireEvent.click(screen.getByRole('radio', { name: 'Starter' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Genius' }));
     expect((screen.getByLabelText('Harness') as HTMLSelectElement).value).toBe('claude');
     fireEvent.change(screen.getByLabelText('Harness'), { target: { value: 'muse' } });
     fireEvent.click(screen.getByRole('radio', { name: 'Researcher' }));

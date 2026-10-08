@@ -8,6 +8,10 @@
     "codex"
   ],
   "template": true,
-  "revision": "sha256:bcff1883529a5654c1be55da78a36beca24a8cea4e79037dc3c471994c5be327",
+  "maintained": [
+    "docs/guide/",
+    "skills/"
+  ],
+  "revision": "sha256:5ceb683d13ca89f9a9f69832d560f0fda23a2fb4e4631185212b8497aea350f2",
   "parentRevision": null
 }

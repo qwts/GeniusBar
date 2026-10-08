@@ -5,6 +5,7 @@ import { ApprovalCounts, ApprovalsList } from './components/ApprovalsList';
 import { ArchiveDialog, ArchivedNotice, archivedNotice, liveArchiver, type Archiver } from './components/ArchiveDialog';
 import { currentWindow, inApp, listSoulTemplates, liveComputerUse, openSurface, popupVisible, setPopupAutohide, soulStopSupported, stopSoul, syncPerimeter, syncTeamWindows, type ComputerUseSwitch, type RemovedSoul, type SurfaceRequest, type TeamWindowSpec, shellLog } from './bridge';
 import { FooterMenu } from './components/FooterMenu';
+import { GuideDialog } from './components/GuideDialog';
 import { CompanionSession, ComputerUseContext, InfoButton, type SessionTab } from './components/CompanionSession';
 import { AuditWindow, CompanionWindow, Desktop } from './components/Desktop';
 import { FloatingDudle, type Stopper } from './components/FloatingDudle';
@@ -350,7 +351,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const canLaunchPackage = Boolean(launcher && !showSetup && !launchingPackage);
   // Only the tray popup opens the desktop; the desktop is already open.
   const openDesktop = mode === 'tray' ? onOpenDesktop : undefined;
-  // The launch dialog: soul templates first (Starter preselected), then a
+  // The launch dialog: soul templates first (Genius preselected), then a
   // Custom soul path. The footer + (#97) and the palette open it as "add a
   // companion"; the ⋯ menu keeps it as "Launch soul…" for a package.
   const launchHere = () => { setSelectedKey(null); setLaunchingPackage(true); setMenuOpen(false); };
@@ -412,9 +413,28 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     aboutReturn.current?.focus();
     aboutReturn.current = null;
   };
+  // The App guide (#287): from the footer ⋯ in both modes, the setup and
+  // first-launch screens, and About, which closes as the guide opens; the
+  // guide then returns focus to what opened About. Genius's chat banner
+  // opens its own copy (ChatTab), so pop-out windows have it too.
+  const [guideOpen, setGuideOpen] = useState(false);
+  const guideReturn = useRef<HTMLElement | null>(null);
+  const openGuide = () => { guideReturn.current = focusReturnOf(document.activeElement); setGuideOpen(true); };
+  const closeGuide = () => {
+    setGuideOpen(false);
+    guideReturn.current?.focus();
+    guideReturn.current = null;
+  };
+  const guideFromAbout = () => {
+    guideReturn.current = aboutReturn.current;
+    aboutReturn.current = null;
+    setAboutOpen(false);
+    setGuideOpen(true);
+  };
   const aboutUi = aboutOpen && aboutWith && (
-    <AboutDialog source={aboutWith} brokerReachable={connection.bridgeConnected && !connection.brokerUnreachable} onClose={closeAbout} />
+    <AboutDialog source={aboutWith} brokerReachable={connection.bridgeConnected && !connection.brokerUnreachable} onClose={closeAbout} onGuide={guideFromAbout} />
   );
+  const guideUi = guideOpen && <GuideDialog onClose={closeGuide} />;
 
   const open = (soul: CensusRow) => {
     const key = soulKey(soul);
@@ -486,13 +506,12 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
           {refresh && <button type="button" className={setupLink} onClick={refresh}>{t('refresh')}</button>}
           <span className="flex shrink-0 items-center gap-0.5">
             <LanguageSelect />
-            {(openDesktop || cliTools || openAbout) && (
-              <FooterMenu items={[
-                openDesktop && { label: t('openDesktop'), run: openDesktop },
-                cliTools && { label: t('cli.action'), run: () => setPanel('cli') },
-                openAbout && { label: t('about.menu'), run: openAbout },
-              ]} />
-            )}
+            <FooterMenu items={[
+              openDesktop && { label: t('openDesktop'), run: openDesktop },
+              cliTools && { label: t('cli.action'), run: () => setPanel('cli') },
+              openAbout && { label: t('about.menu'), run: openAbout },
+              { label: t('guide.title'), run: openGuide },
+            ]} />
           </span>
         </div>
       ) : (
@@ -514,21 +533,20 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
               <Plus className="size-3.5" aria-hidden />
             </button>
           )}
-          {(openDesktop || native || canLaunchPackage || cliTools || canCheckUpdates || onRemoveServices || onRefresh || openAbout) && (
-            <FooterMenu items={[
-              openDesktop && { label: t('openDesktop'), run: openDesktop },
-              native && { label: t('desktopWindows'), checked: desktopOn, run: () => layoutActions.setDesktopWindows(!desktopOn) },
-              native && { label: t('ownWindows'), checked: prefs.ownWindows, run: () => preferenceActions.setOwnWindows(!prefs.ownWindows) },
-              native && { label: t('closeOnClickOut'), checked: prefs.closeOnClickOut, run: () => preferenceActions.setCloseOnClickOut(!prefs.closeOnClickOut) },
-              canCheckUpdates && { label: t('checkUpdates'), run: checkUpdates },
-              openAbout && { label: t('about.menu'), run: openAbout },
-              canLaunchPackage && { label: t('launchPackage'), run: launchPackage },
-              cliTools && { label: t('cli.action'), run: () => setPanel('cli') },
-              (refresh || (onRemoveServices && !setup?.running)) && 'separator',
-              refresh && { label: t('refresh'), run: refresh },
-              onRemoveServices && !setup?.running && { label: t('remove.action'), run: () => setPanel('remove'), destructive: true },
-            ]} />
-          )}
+          <FooterMenu items={[
+            openDesktop && { label: t('openDesktop'), run: openDesktop },
+            native && { label: t('desktopWindows'), checked: desktopOn, run: () => layoutActions.setDesktopWindows(!desktopOn) },
+            native && { label: t('ownWindows'), checked: prefs.ownWindows, run: () => preferenceActions.setOwnWindows(!prefs.ownWindows) },
+            native && { label: t('closeOnClickOut'), checked: prefs.closeOnClickOut, run: () => preferenceActions.setCloseOnClickOut(!prefs.closeOnClickOut) },
+            canCheckUpdates && { label: t('checkUpdates'), run: checkUpdates },
+            openAbout && { label: t('about.menu'), run: openAbout },
+            { label: t('guide.title'), run: openGuide },
+            canLaunchPackage && { label: t('launchPackage'), run: launchPackage },
+            cliTools && { label: t('cli.action'), run: () => setPanel('cli') },
+            (refresh || (onRemoveServices && !setup?.running)) && 'separator',
+            refresh && { label: t('refresh'), run: refresh },
+            onRemoveServices && !setup?.running && { label: t('remove.action'), run: () => setPanel('remove'), destructive: true },
+          ]} />
         </span>
       </div>
       )}
@@ -562,7 +580,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const setupMenu = setup && onSetup && (
     <>
       <SetupHeader connection={connection} running={setup.running} error={footer?.isError ? footer.text : null} />
-      <SetupPanel setup={setup} onSetup={onSetup} existing={existingServices} onAbout={openAbout} />
+      <SetupPanel setup={setup} onSetup={onSetup} existing={existingServices} onAbout={openAbout} onGuide={openGuide} />
       {updates && setupUpdateShows(updates.status, checkedUpdates) && <UpdateNotice status={updates.status} onAction={updates.act} checked={checkedUpdates} />}
       {iconFooter(true)}
     </>
@@ -575,7 +593,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
       {showStarter && starter && launcher && (
         // The menu's card look (as the sandbox and default-harness cards); no Lovable screen.
         <section className="grid gap-2 border-b border-border p-3 text-xs" aria-label={t('firstCompanion')}>
-          <FirstLaunch starter={starter} launcher={launcher} auth={harnessAuth} devTools={devTools} onStart={() => setStarterOpen(true)} onAbout={openAbout} />
+          <FirstLaunch starter={starter} launcher={launcher} auth={harnessAuth} devTools={devTools} onStart={() => setStarterOpen(true)} onAbout={openAbout} onGuide={openGuide} />
           {starterOpen && launcher.state.phase !== 'requesting' && launcher.state.phase !== 'pending' && (
             <div className={actions}>
               <button type="button" className={secondaryButton} onClick={() => setStarterOpen(false)}>{t('close')}</button>
@@ -643,6 +661,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
           {launchModal}
           {archiveUi}
           {aboutUi}
+          {guideUi}
         </main>
       </SurfaceOpenerContext.Provider>
     );
@@ -698,6 +717,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
       {launchModal}
       {archiveUi}
       {aboutUi}
+      {guideUi}
     </div>
   );
 }

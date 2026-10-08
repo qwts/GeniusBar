@@ -4,7 +4,7 @@ import type { LaunchApi } from '../useLaunch';
 import { DEV_TOOLS_POLL_MS, FirstLaunch, type Starter } from './FirstLaunch';
 
 const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
-const missing: Starter = { package: '/App/souls/starter.soul', account: 'friend', name: 'Starter', harnesses: ['claude'], devTools: false, devToolsInstalling: false };
+const missing: Starter = { package: '/App/souls/starter.soul', account: 'friend', name: 'Genius', harnesses: ['claude'], devTools: false, devToolsInstalling: false };
 
 // Lets the install promise settle inside act.
 const flush = () => act(async () => {});
@@ -18,7 +18,7 @@ describe('FirstLaunch command line tools step (#101)', () => {
     const devTools = { install: vi.fn(async () => {}), recheck: vi.fn() };
     render(<FirstLaunch starter={missing} launcher={launcher} devTools={devTools} />);
     expect(screen.getByText('GeniusBar needs Apple’s free command-line tools (for git). This takes a few minutes, once.')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Start with Starter' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Start with Genius' })).toBeNull();
     expect(devTools.install).not.toHaveBeenCalled();
   });
 
@@ -44,7 +44,7 @@ describe('FirstLaunch command line tools step (#101)', () => {
     await tick();
     expect(devTools.recheck).toHaveBeenCalledTimes(2);
     rerender(<FirstLaunch starter={{ ...missing, devTools: true }} launcher={launcher} devTools={devTools} />);
-    expect(screen.getByRole('button', { name: 'Start with Starter' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Start with Genius' })).toBeTruthy();
     await tick();
     expect(devTools.recheck).toHaveBeenCalledTimes(2);
   });
@@ -94,9 +94,9 @@ describe('FirstLaunch look (P14)', () => {
   it('draws the starter with the token classes, its Start as the primary button', () => {
     const ready: Starter = { ...missing, devTools: true };
     render(<FirstLaunch starter={ready} launcher={launcher} />);
-    const form = screen.getByRole('form', { name: 'Start with Starter' });
+    const form = screen.getByRole('form', { name: 'Start with Genius' });
     expect(form.className.split(' ')).not.toContain('first-launch');
     expect(form.querySelector('.small, .muted, .error, .detail-actions')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Start with Starter' }).className).toContain('bg-primary');
+    expect(screen.getByRole('button', { name: 'Start with Genius' }).className).toContain('bg-primary');
   });
 });

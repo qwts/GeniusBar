@@ -47,7 +47,7 @@ describe('About GeniusBar (#290)', () => {
     const source = sourceOf();
     render(<App census={sampleCensus} connection={sampleConnection} isStatic about={source} onRefresh={vi.fn()} updates={{ status: { state: 'idle', version: null }, act: vi.fn() }} />);
     fireEvent.click(more());
-    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Check for Updates…', 'About GeniusBar…', 'Refresh']);
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Check for Updates…', 'About GeniusBar…', 'App guide', 'Refresh']);
     fireEvent.click(screen.getByRole('menuitem', { name: 'About GeniusBar…' }));
     const dialog = screen.getByRole('dialog', { name: 'About GeniusBar' });
     expect(document.activeElement).toBe(dialog);
@@ -156,7 +156,6 @@ describe('About GeniusBar (#290)', () => {
     fireEvent.click(within(links).getByRole('button', { name: 'Report a problem' }));
     expect(urls[1]).toBe('https://github.com/qwts/GeniusBar/issues/new/choose');
     expect((await within(dialog).findByRole('alert')).textContent).toBe('Could not open the browser: the browser could not be opened');
-    expect(within(links).queryByRole('button', { name: /guide/i })).toBeNull();
     expect(dialog.querySelector('a[href]')).toBeNull();
   });
 
@@ -187,7 +186,7 @@ describe('About GeniusBar (#290)', () => {
     cleanup();
     render(<App census={sampleCensus} connection={sampleConnection} isStatic about={null} onRefresh={vi.fn()} />);
     fireEvent.click(more());
-    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Refresh']);
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['App guide', 'Refresh']);
   });
 
   it('speaks Spanish with the rest of the app', async () => {
@@ -204,7 +203,7 @@ describe('About GeniusBar (#290)', () => {
 
   it('offers About from the first launch', () => {
     const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
-    const starter: Starter = { package: '/App/souls/starter.soul', account: 'friend', name: 'Starter', harnesses: ['claude'], devTools: true };
+    const starter: Starter = { package: '/App/souls/starter.soul', account: 'friend', name: 'Genius', harnesses: ['claude'], devTools: true };
     const onAbout = vi.fn();
     render(<FirstLaunch starter={starter} launcher={launcher} onAbout={onAbout} />);
     fireEvent.click(screen.getByRole('button', { name: 'About GeniusBar' }));

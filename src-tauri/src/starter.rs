@@ -1,5 +1,6 @@
-//! The starter soul (R4): the package GeniusBar ships so a first launch
-//! needs nothing but a click. The web view learns where it is, which
+//! The starter soul (R4), Genius since #287 (the package keeps its
+//! `starter.soul` folder and identifiers): the package GeniusBar ships so a
+//! first launch needs nothing but a click. The web view learns where it is, which
 //! account to launch it in, and which harnesses it prefers. It also learns
 //! whether Apple's command line tools are installed: soul homes are git
 //! worktrees and Claude Code runs git, and a stock Mac's /usr/bin/git is
@@ -28,7 +29,7 @@ pub struct Starter {
 }
 
 /// Metadata read from the soul manifest. Launching a package uses the same
-/// manifest reader as the bundled Starter, so an opened package is checked
+/// manifest reader as the bundled Genius, so an opened package is checked
 /// by the format GeniusBar already accepts.
 #[derive(Debug, PartialEq)]
 pub struct SoulPackage {
@@ -39,7 +40,7 @@ pub struct SoulPackage {
 pub fn read_soul_package(package: &Path) -> Result<SoulPackage, String> {
     let text = std::fs::read_to_string(package.join("soul.json")).map_err(|e| e.to_string())?;
     let manifest: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-    let name = manifest["name"].as_str().unwrap_or("Starter").to_owned();
+    let name = manifest["name"].as_str().unwrap_or("Genius").to_owned();
     let harnesses = manifest["preferredHarnesses"]
         .as_array()
         .map(|list| {
@@ -174,7 +175,7 @@ mod tests {
         let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("../souls/starter.soul");
         let starter = read_starter(&package, "friend", false).unwrap();
         assert_eq!(starter.account, "friend");
-        assert_eq!(starter.name, "Starter");
+        assert_eq!(starter.name, "Genius");
         assert!(!starter.dev_tools);
         assert!(!starter.dev_tools_installing);
         assert_eq!(
@@ -212,7 +213,7 @@ mod tests {
         assert_eq!(
             read_soul_package(&package).unwrap(),
             SoulPackage {
-                name: "Starter".into(),
+                name: "Genius".into(),
                 harnesses: vec!["claude".into(), "codex".into()]
             }
         );
