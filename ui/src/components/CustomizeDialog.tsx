@@ -2,11 +2,11 @@ import { useContext, useEffect, useId, useRef, useState, type ReactNode } from '
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { X } from 'lucide-react';
-import { BridgeError, inApp, type SoulProfileFileEntry } from '../bridge';
+import { BridgeError, editableInStaging, inApp, type SoulProfileFileEntry } from '../bridge';
 import { displayName, type CensusRow } from '../model/census';
 import { harnessLabel, MAX_ROLE, soulHarnessLabel } from '../model/launch';
 import { useI18n, type Translate } from '../lib/i18n';
-import { ProfileSourceContext, useSoulProfile } from '../useSoulProfile';
+import { ProfileSourceContext, useRevisionStaging, useSoulProfile } from '../useSoulProfile';
 import { derivedHue } from '../model/dudle';
 import { radioGroupKeys } from '../lib/radioGroup';
 import { tabStep } from '../lib/keys';
@@ -44,6 +44,12 @@ export interface RevisionEditRequest {
    * absent leaves it.
    */
   edit: { name?: string; description?: string; appearance?: { hue: number } | null; role?: string; skills?: { disabled: string[] }; files: Record<string, string> };
+  /**
+   * The staging the dialog prepared (#268, `soul revision prepare`), which
+   * the edit is written into and finished; null when the engine staged
+   * nothing, and the bridge stages for itself.
+   */
+  staging: string | null;
 }
 
 /** The design's colour swatches, in degrees. */
@@ -53,11 +59,11 @@ export const SWATCHES: readonly number[] = [0, 30, 60, 120, 170, 210, 250, 280, 
 export type SaveRevision = (agentId: string, request: RevisionEditRequest) => Promise<{ revision: string }>;
 
 /** agent-bot's `soul revision edit`, through the bridge (#64). */
-const saveRevision: SaveRevision = async (agentId, { expectedRevision, reason, edit }) => {
+const saveRevision: SaveRevision = async (agentId, { expectedRevision, reason, edit, staging }) => {
   if (!inApp()) throw new BridgeError('soul-revision-unavailable', 'not in the app');
   let raw: unknown;
   try {
-    raw = await invoke<unknown>('soul_revision_edit', { agent: agentId, expectedRevision, reason, edit });
+    raw = await invoke<unknown>('soul_revision_edit', { agent: agentId, expectedRevision, reason, edit, staging });
   } catch (failure) {
     const e = failure as { code?: unknown; message?: unknown };
     throw new BridgeError(typeof e?.code === 'string' ? e.code : 'soul-revision-failed',
@@ -68,33 +74,19 @@ const saveRevision: SaveRevision = async (agentId, { expectedRevision, reason, e
   return { revision };
 };
 
-/** soul-builder's output (agent-bot's generated harness paths): rebuilt, never edited. */
-const GENERATED = ['.claude/', '.codex/', '.cursor/', '.opencode/', '.devin/', '.gemini/',
-  '.github/copilot-instructions.md', '.mcp.json', 'CLAUDE.md', 'GEMINI.md', 'opencode.json'];
-const GENERATED_MARKER = '<!-- agent-bot soul-builder: generated -->';
-
-/**
- * A file the owner may edit here, as the bridge checks it again: the soul's
- * instructions, AGENTS.md and its skills, as text. Never soul.json (its
- * name and description are the Profile fields), harness settings,
- * working state or a generated file.
- */
-export function editableFile(file: SoulProfileFileEntry): boolean {
-  return file.text && ['soul', 'context', 'skill'].includes(file.kind) && file.path !== 'soul.json'
-    && !file.path.startsWith('.soul-state/')
-    && !GENERATED.some((g) => (g.endsWith('/') ? file.path.startsWith(g) : file.path === g));
-}
-
 type Drafts = Record<string, { original: string; current: string }>;
 
 /**
  * The design's Customize… dialog (Lovable `EditDialog`, #64): Profile
  * (name, role, description, colour) and Context (the SOP, skills, credentials and
  * the files the harness loads), from agent-bot `soul profile`, read each
- * time it opens. Name, description and colour, and the soul's own instruction and
- * skill files, can be edited; Save records them as one owner-approved
- * revision of the soul's package (agent-bot `soul revision edit`, which asks
- * the owner itself), with a one-line reason. Role is edited too: `soul
+ * time it opens. Name, description and colour can be edited, and the files
+ * the engine's staging marks editable text (`soul revision prepare`, #268:
+ * the definition, never soul.json or bin/; the dialog decides nothing
+ * itself); Save writes them into that staging and records it as one
+ * owner-approved revision of the soul's package (agent-bot `soul revision
+ * edit --apply`, which asks the owner itself), with a one-line reason;
+ * closing without saving discards the staging. Role is edited too: `soul
  * profile` has none, so it starts from the census row's role (agent-bot's
  * population list, agent-bot-identity #535). The other files open in a
  * read-only viewer.
@@ -132,6 +124,7 @@ function CustomizeBody({ soul, onClose, save, onReload, state, page = false }: {
   const ids = useId();
   const titleId = `${ids}-title`;
   const { profile, loading, error } = useSoulProfile(soul.agentId, true);
+  const { prepared, error: stagingError, renew } = useRevisionStaging(soul.agentId, true);
   const [tab, setTab] = useState<Tab>('profile');
   // The Context tab's left pane selection (Lovable's file list); the SOP first.
   const [pane, setPane] = useState<Pane>({ section: 'sop' });
@@ -190,7 +183,11 @@ function CustomizeBody({ soul, onClose, save, onReload, state, page = false }: {
     setSaving(true);
     edited();
     try {
-      const record = await save(profile.agentId, { expectedRevision: profile.profile.revision, reason: reason.trim(), edit });
+      // The staging was taken from the current head; the profile's revision
+      // stands in without one.
+      const record = await save(profile.agentId, {
+        expectedRevision: prepared?.revision ?? profile.profile.revision, reason: reason.trim(), edit, staging: prepared?.staging ?? null,
+      });
       setResult(record.revision);
       setSaved((s) => ({ name: edit.name ?? s.name, description: edit.description ?? s.description,
         hue: edit.appearance === undefined ? s.hue : edit.appearance?.hue ?? null,
@@ -203,6 +200,9 @@ function CustomizeBody({ soul, onClose, save, onReload, state, page = false }: {
       setSaveError({ code: typeof e?.code === 'string' ? e.code : 'soul-revision-failed', message: typeof e?.message === 'string' ? e.message : String(failure) });
     } finally {
       setSaving(false);
+      // Recorded or refused, the bridge consumed the staging: a fresh one
+      // for the next Save (the drafts stay).
+      renew();
     }
   };
 
@@ -266,7 +266,7 @@ function CustomizeBody({ soul, onClose, save, onReload, state, page = false }: {
             disabled={disabled} editable={editable}
             onSkill={(name, on) => { setDraft((d) => ({ ...d, skillsDisabled: on ? disabled.filter((n) => n !== name) : [...disabled, name] })); edited(); }}
             edited={new Set(changedFiles.map(([path]) => path))}>
-            {viewing && (profile.files.some((f) => f.path === viewing && editableFile(f))
+            {viewing && (editableInStaging(prepared, viewing)
               ? <FileEditor key={viewing} agentId={soul.agentId} path={viewing} draft={files[viewing]}
                 onLoad={(contents) => setFiles((all) => (all[viewing] ? all : { ...all, [viewing]: { original: contents, current: contents } }))}
                 onChange={(contents) => { setFiles((all) => ({ ...all, [viewing]: { original: all[viewing]?.original ?? contents, current: contents } })); edited(); }} />
@@ -278,6 +278,9 @@ function CustomizeBody({ soul, onClose, save, onReload, state, page = false }: {
             {e.area ? t('edit.error', { area: e.area, message: e.message }) : e.message}
           </p>
         ))}
+        {profile && stagingError && (
+          <p className="m-0 text-[11px] text-muted-foreground">{t('edit.error', { area: 'revision', message: stagingError })}</p>
+        )}
       </div>
       {editable && (
         <div className="grid gap-1">
@@ -619,8 +622,7 @@ function FileViewer({ agentId, path }: { agentId: string; path: string }) {
 
 /**
  * One editable file, from `soul profile --file` the first time it opens;
- * after that the dialog's draft. A file that carries soul-builder's mark
- * stays read-only (the bridge refuses it too).
+ * after that the dialog's draft.
  */
 function FileEditor({ agentId, path, draft, onLoad, onChange }: {
   agentId: string; path: string; draft: { current: string } | undefined;
@@ -646,14 +648,13 @@ function FileEditor({ agentId, path, draft, onLoad, onChange }: {
     );
     return () => { current = false; };
   }, [agentId, path, source, loaded]);
-  const generated = draft?.current.includes(GENERATED_MARKER) ?? false;
   return (
     <>
       {error && <p className="m-0 p-3 text-xs text-destructive" role="alert">{t('edit.fileFailed', { path, message: error })}</p>}
       {!error && !draft && <p className="m-0 p-3 text-xs text-muted-foreground" role="status">{t('edit.opening')}</p>}
       {draft && (
         // As the design's pane Textarea: borderless, filling the right pane.
-        <textarea aria-label={path} value={draft.current} spellCheck={false} readOnly={generated}
+        <textarea aria-label={path} value={draft.current} spellCheck={false}
           onChange={(e) => onChange(e.target.value)}
           className="m-0 h-full min-h-0 w-full flex-1 resize-none overflow-auto rounded-none border-0 bg-transparent p-3 font-mono text-xs text-foreground" />
       )}

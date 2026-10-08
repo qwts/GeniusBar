@@ -1,6 +1,6 @@
 // The fixed fake census and health from R1's snapshot test, for tests and
 // for previewing the popup before the bridge (#7) supplies real rows.
-import type { SoulColdWake, SoulMode, SoulModel, SoulPopulation, SoulProfile, SoulTemplateList } from '../bridge';
+import type { PreparedRevision, SoulColdWake, SoulMode, SoulModel, SoulPopulation, SoulProfile, SoulTemplateList } from '../bridge';
 import type { AuditRecord } from './audit';
 import type { CensusRow } from './census';
 import type { PauseEntry } from './pause';
@@ -263,6 +263,27 @@ export const sampleProfile: SoulProfile = {
     override: { path: 'agent-sop.toml', workflows: ['workflows/release.toml'] },
   },
   errors: [{ area: 'skills', message: 'skills/draft/SKILL.md is not UTF-8 text' }],
+};
+
+/**
+ * `soul revision prepare` for sampleProfile's soul (#268): the engine's word
+ * on what the Customize dialog may edit. soul.json goes through the Profile
+ * fields; the generated CLAUDE.md and the harness settings are not staged.
+ */
+export const samplePreparedRevision: PreparedRevision = {
+  agentId: 'agent_p',
+  soulDir: '/Users/user/Souls/Luna.soul',
+  staging: '/Users/user/Souls/Luna.soul/.soul-state/tmp/revision-44430c4f-05a7-417b-9c3f-36bb4bc2a2eb',
+  revision: '2026.10.1',
+  parentRevision: null,
+  files: [
+    { path: 'skills/triage/SKILL.md', classification: 'definition', kind: 'skill', editable: true, text: true, size: 540, mode: '100644' },
+    { path: 'skills/triage/diagram.png', classification: 'definition', kind: 'skill', editable: true, text: false, size: 20480, mode: '100644' },
+    { path: 'soul.json', classification: 'definition', kind: 'soul', editable: false, text: true, size: 412, mode: '100644' },
+    { path: 'soul.md', classification: 'definition', kind: 'soul', editable: true, text: true, size: 214, mode: '100644' },
+  ],
+  excluded: { workingState: ['worktrees', '.soul-state'], generated: ['.claude/settings.json', 'CLAUDE.md'] },
+  expiresAt: '2026-10-08T09:12:00.000Z',
 };
 
 export const sampleProfileFiles: Readonly<Record<string, string>> = {

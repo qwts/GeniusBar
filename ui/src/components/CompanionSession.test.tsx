@@ -5,7 +5,7 @@ import { BridgeError, runtimeMetrics, setSoulComms, soulComms, type ComputerUseS
 import { buildSoulForest } from '../model/census';
 import { emptyComposer } from '../model/chat';
 import type { LaunchRequest } from '../model/launch';
-import { sampleCensus, sampleProfile } from '../model/fixtures';
+import { sampleCensus, samplePreparedRevision, sampleProfile } from '../model/fixtures';
 import { ProfileSourceContext, type ProfileSource } from '../useSoulProfile';
 import { CommsRow, CompanionDetails, CompanionSession, ComputerUseContext, ComputerUseRow, ModelRow, ModeRow, WakeRow } from './CompanionSession';
 import { CompanionWindow } from './Desktop';
@@ -952,7 +952,7 @@ describe('Computer use row (#122, agent-bot soul computer-use)', () => {
 });
 
 describe('Customize… in the ⓘ sheet (#64)', () => {
-  const profiles = (profile: ProfileSource['profile']): ProfileSource => ({ profile: vi.fn(profile), file: vi.fn() });
+  const profiles = (profile: ProfileSource['profile']): ProfileSource => ({ profile: vi.fn(profile), file: vi.fn(), prepare: vi.fn(async () => samplePreparedRevision), discard: vi.fn(async () => {}) });
   const sheet = async (s: ProfileSource | null) => {
     const { InfoButton } = await import('./CompanionSession');
     render(<ProfileSourceContext.Provider value={s}><InfoButton soul={luna} /></ProfileSourceContext.Provider>);
