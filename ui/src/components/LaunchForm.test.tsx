@@ -2,8 +2,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { I18nProvider } from '../lib/i18n';
 import type { CensusRow } from '../model/census';
-import { BridgeError, type SoulTemplateList } from '../bridge';
-import { sampleTemplates } from '../model/fixtures';
+import { BridgeError, type SoulEnvironment, type SoulTemplateList } from '../bridge';
+import { sampleCensus, sampleTemplates } from '../model/fixtures';
 import type { LaunchState } from '../model/launch';
 import type { LaunchApi } from '../useLaunch';
 import { LaunchForm } from './LaunchForm';
@@ -452,5 +452,117 @@ describe('LaunchForm: who the companion runs as (#66)', () => {
     rerender(form({ ...idle, state: { phase: 'failed', requestId: 'r1', agentId: null, detail: 'refused', sandbox: { resolution: 'unrestricted', account: 'owner' } } },
       { initialPackagePath: '/souls/helper.soul' }));
     expect(screen.getByRole('alert').textContent).toContain('Runs as owner (unrestricted)');
+  });
+});
+
+describe('LaunchForm model and parent (#261)', () => {
+  const [luna, child, gone] = sampleCensus;
+  const other: CensusRow = { ...luna, agentId: 'agent_other', name: 'nova', role: 'Researcher', parent: null };
+  const roster = [luna, child, gone, other];
+  const advanced = () => fireEvent.click(screen.getByRole('button', { name: 'Advanced: provider, model and parent' }));
+  const parentSelect = () => screen.getByRole('combobox', { name: 'Parent' }) as HTMLSelectElement;
+  const parentOptions = () => [...parentSelect().querySelectorAll('option')].map((o) => o.textContent);
+
+  it('sends parent null for Independent, which is the default, and keeps model out when none is chosen', () => {
+    const launcher = launcherIn({ phase: 'idle' });
+    render(form(launcher, { initialPackagePath: '/souls/helper.soul', roster }));
+    advanced();
+    expect(screen.getByRole('button', { name: 'Advanced: provider, model and parent' }).getAttribute('aria-expanded')).toBe('true');
+    expect(parentSelect().value).toBe('__none');
+    expect(parentOptions()[0]).toBe('Independent — no parent, starts its own team');
+    fireEvent.submit(screen.getByRole('form'));
+    expect(launcher.launch).toHaveBeenCalledOnce();
+    const request = vi.mocked(launcher.launch).mock.calls[0][0];
+    expect(request.parent).toBeNull();
+    expect(request).not.toHaveProperty('model');
+  });
+
+  it('sends the chosen companion as parent once the launch path carries it', () => {
+    const launcher = launcherIn({ phase: 'idle' });
+    render(form(launcher, { initialPackagePath: '/souls/helper.soul', roster, parentCarried: true }));
+    advanced();
+    expect(parentOptions()).toEqual([
+      'Independent — no parent, starts its own team', 'luna · codex', 'agent_c · unknown harness', 'old · unknown harness', 'nova · Researcher · codex']);
+    fireEvent.change(parentSelect(), { target: { value: 'agent_other' } });
+    expect(screen.getByText("Joins that companion's team. The engine confirms the parent it used.")).toBeTruthy();
+    fireEvent.submit(screen.getByRole('form'));
+    expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ parent: 'agent_other', target: { package: '/souls/helper.soul' } }));
+  });
+
+  it('offers no companion the launch path cannot carry: the choice stays, the list says so, nothing is sent', () => {
+    const launcher = launcherIn({ phase: 'idle' });
+    render(form(launcher, { initialPackagePath: '/souls/helper.soul', roster }));
+    advanced();
+    fireEvent.change(parentSelect(), { target: { value: 'agent_other' } });
+    fireEvent.submit(screen.getByRole('form'));
+    expect(launcher.launch).not.toHaveBeenCalled();
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain('Fix these before launching:');
+    expect(alert.textContent).toContain("GeniusBar's launch path doesn't carry a parent yet, so it would start independent.");
+    expect(document.activeElement).toBe(alert);
+    expect(parentSelect().value).toBe('agent_other');
+    fireEvent.change(parentSelect(), { target: { value: '__none' } });
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.submit(screen.getByRole('form'));
+    expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ parent: null }));
+  });
+
+  it('excludes the relaunched soul and its descendants from the parents, and keeps its own parent for a child', () => {
+    render(form(launcherIn({ phase: 'idle' }), { soul: luna, roster }));
+    advanced();
+    expect(parentOptions()).toEqual(['Independent — no parent, starts its own team', 'old · unknown harness', 'nova · Researcher · codex']);
+    cleanup();
+    const launcher = launcherIn({ phase: 'idle' });
+    render(form(launcher, { soul: child, roster, defaultHarness: 'claude' }));
+    advanced();
+    expect(parentOptions()).toEqual(['Independent — no parent, starts its own team', 'luna · codex', 'old · unknown harness', 'nova · Researcher · codex']);
+    expect(parentSelect().value).toBe('agent_p');
+    // Its own parent asks the daemon for nothing new, so the relaunch goes through unchanged.
+    fireEvent.submit(screen.getByRole('form'));
+    expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ target: { soul: 'agent_c' }, parent: 'agent_p' }));
+  });
+
+  it('lists every problem before launching, focused and announced, and launches nothing', () => {
+    const launcher = launcherIn({ phase: 'idle' });
+    render(form(launcher, { initialPackagePath: '/souls/helper.soul', copyOf: { name: 'luna', agentId: 'agent_p' }, harnesses: [], defaultHarness: null }));
+    fireEvent.submit(screen.getByRole('form'));
+    expect(launcher.launch).not.toHaveBeenCalled();
+    const alert = screen.getByRole('alert');
+    expect(document.activeElement).toBe(alert);
+    expect([...alert.querySelectorAll('li')].map((li) => li.textContent)).toEqual(['Enter a name.', 'Pick a harness, or set a GeniusBar default.']);
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Luna II' } });
+    expect([...screen.getByRole('alert').querySelectorAll('li')].map((li) => li.textContent)).toEqual(['Pick a harness, or set a GeniusBar default.']);
+  });
+
+  it('keeps the chosen model and parent after a refused launch, shown in the engine\'s words', () => {
+    const idle = launcherIn({ phase: 'idle' });
+    const { rerender } = render(form(idle, { initialPackagePath: '/souls/helper.soul', roster, parentCarried: true }));
+    advanced();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Model' }), { target: { value: '__other' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Model ID' }), { target: { value: 'my-org/custom' } });
+    fireEvent.change(parentSelect(), { target: { value: 'agent_other' } });
+    fireEvent.submit(screen.getByRole('form'));
+    expect(idle.launch).toHaveBeenCalledWith(expect.objectContaining({ model: 'my-org/custom', parent: 'agent_other' }));
+    rerender(form({ ...idle, state: { phase: 'error', requestId: null, text: 'refused: model my-org/custom is not offered by codex' } }, { initialPackagePath: '/souls/helper.soul', roster, parentCarried: true }));
+    expect(screen.getByRole('alert').textContent).toBe('refused: model my-org/custom is not offered by codex');
+    expect(screen.getByTestId('model-stored').textContent).toBe('Stored model: my-org/custom');
+    expect(parentSelect().value).toBe('agent_other');
+  });
+
+  it('shows the provider read-only: declared by the soul for the harness, the harness\'s own, or the template\'s choice', async () => {
+    const env = (declared: { harness: string; id: string }[], capabilities = ['env', 'providers']) =>
+      ({ engine: { version: '0.10.51', contractVersion: 1, capabilities }, providers: { declared, secrets: [], invalid: [] } } as unknown as SoulEnvironment);
+    const { unmount } = render(form(launcherIn({ phase: 'idle' }), { soul: luna, roster, loadEnvironment: async () => env([{ harness: 'codex', id: 'openrouter' }]) }));
+    advanced();
+    expect(await screen.findByText('openrouter · declared by its soul.json for codex; not picked per launch.')).toBeTruthy();
+    expect(screen.queryByRole('combobox', { name: 'Provider' })).toBeNull();
+    unmount();
+    render(form(launcherIn({ phase: 'idle' }), { soul: luna, roster, loadEnvironment: async () => env([]) }));
+    advanced();
+    expect(await screen.findByText("None declared for codex — the harness's own provider; not picked per launch.")).toBeTruthy();
+    cleanup();
+    render(form(launcherIn({ phase: 'idle' }), { initialPackagePath: '/souls/helper.soul', roster }));
+    advanced();
+    expect(screen.getByText("Chosen by the soul's template (soul.json harnesses.claude.provider), not per launch; the engine refuses another.")).toBeTruthy();
   });
 });

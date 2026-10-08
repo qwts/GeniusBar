@@ -11,7 +11,9 @@ import {
   launchSandbox,
   launchParams,
   launchProblem,
+  launchDraftErrors,
   normalPackagePath,
+  parentChoices,
   MAX_BRIEF,
   MAX_HARNESS,
   MAX_MODEL,
@@ -20,6 +22,7 @@ import {
   type LaunchRequest,
   type LaunchState,
 } from './launch';
+import type { CensusRow } from './census';
 
 const soul: LaunchRequest = { account: 'user', target: { soul: 'agent_1' }, harness: 'codex', name: '' };
 const pkg: LaunchRequest = { account: 'user', target: { package: '/souls/p' }, harness: 'codex', name: ' Helper ' };
@@ -196,5 +199,56 @@ describe('launch sandbox: who the companion runs as (#66)', () => {
         .toEqual({ phase: 'launched', requestId: 'launch_1', agentId: 'agent_9' });
     }
     expect(launchSandbox({ resolution: 'unrestricted', account: ' owner ', extra: true })).toEqual({ resolution: 'unrestricted', account: 'owner' });
+  });
+});
+
+describe('launch parent (#261)', () => {
+  const root: CensusRow = { account: 'user', agentId: 'agent_root', name: 'Root', harness: 'claude', parent: null, presence: 'joined', unacked: 0, lastWake: null };
+  const kid: CensusRow = { ...root, agentId: 'agent_kid', name: 'Kid', parent: 'agent_root' };
+  const grandkid: CensusRow = { ...root, agentId: 'agent_grandkid', name: 'Grandkid', parent: 'agent_kid' };
+  const other: CensusRow = { ...root, agentId: 'agent_other', name: 'Other', parent: null };
+  const gone: CensusRow = { ...root, agentId: 'agent_gone', name: 'Gone', parent: null };
+  const roster = [root, kid, grandkid, other, gone];
+
+  it('sends parent null for Independent, the trimmed id for a companion, and nothing when unstated', () => {
+    expect(launchParams({ ...pkg, parent: null }).parent).toBeNull();
+    expect(launchParams({ ...pkg, parent: ' agent_root ' }).parent).toBe('agent_root');
+    expect('parent' in launchParams(pkg)).toBe(false);
+  });
+
+  it('refuses a blank or self parent before sending', () => {
+    expect(launchProblem({ ...pkg, parent: null })).toBeNull();
+    expect(launchProblem({ ...pkg, parent: ' ' })).toBe('Choose a parent companion, or Independent.');
+    expect(launchProblem({ ...soul, parent: 'agent_1' })).toBe('A companion cannot be its own parent. Choose another, or Independent.');
+    expect(launchProblem({ ...soul, parent: 'agent_2' })).toBeNull();
+  });
+
+  it('offers every companion but the archived, the soul itself and its descendants', () => {
+    expect(parentChoices(roster, null).map((s) => s.agentId)).toEqual(['agent_root', 'agent_kid', 'agent_grandkid', 'agent_other', 'agent_gone']);
+    expect(parentChoices(roster, null, new Set(['agent_gone'])).map((s) => s.agentId)).toEqual(['agent_root', 'agent_kid', 'agent_grandkid', 'agent_other']);
+    expect(parentChoices(roster, root, new Set(['agent_gone'])).map((s) => s.agentId)).toEqual(['agent_other']);
+    expect(parentChoices(roster, kid).map((s) => s.agentId)).toEqual(['agent_root', 'agent_other', 'agent_gone']);
+    // A parent cycle in the census ends the walk rather than looping.
+    const loopA: CensusRow = { ...root, agentId: 'a', parent: 'b' };
+    const loopB: CensusRow = { ...root, agentId: 'b', parent: 'a' };
+    expect(parentChoices([loopA, loopB, other], loopA).map((s) => s.agentId)).toEqual(['agent_other']);
+  });
+
+  it('lists every problem before launching, and refuses a companion parent the launch path cannot carry', () => {
+    const draft = {
+      soul: null, copy: false, customPackage: true, packagePath: '/souls/p.soul', name: 'Helper', account: 'user', harness: 'claude',
+      model: null, brief: '', parent: null, parents: [root, other], parentCarried: false,
+    };
+    expect(launchDraftErrors(draft)).toEqual([]);
+    expect(launchDraftErrors({ ...draft, copy: true, name: '', packagePath: '', account: '', harness: '', model: 'x'.repeat(121), brief: 'y'.repeat(4001) }).map((e) => e.code))
+      .toEqual(['name', 'package', 'account', 'harness', 'modelLong', 'brief']);
+    expect(launchDraftErrors({ ...draft, parent: 'agent_root' }).map((e) => e.code)).toEqual(['parentUncarried']);
+    expect(launchDraftErrors({ ...draft, parent: 'agent_root', parentCarried: true })).toEqual([]);
+    expect(launchDraftErrors({ ...draft, parent: 'agent_gone', parentCarried: true }).map((e) => e.code)).toEqual(['parent']);
+    expect(launchDraftErrors({ ...draft, soul: kid, parent: 'agent_kid', parentCarried: true }).map((e) => e.code)).toEqual(['parentSelf']);
+    // A relaunched child keeping its own parent asks for nothing new.
+    expect(launchDraftErrors({ ...draft, soul: kid, parent: 'agent_root' })).toEqual([]);
+    // Custom model ids pass: the harness knows what it runs.
+    expect(launchDraftErrors({ ...draft, model: 'my-org/custom' })).toEqual([]);
   });
 });

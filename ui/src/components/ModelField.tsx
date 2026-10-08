@@ -2,7 +2,7 @@ import { useContext, useEffect, useState } from 'react';
 import type { ModelChoice } from '../bridge';
 import type { CensusRow } from '../model/census';
 import { MAX_MODEL } from '../model/launch';
-import { useI18n } from '../lib/i18n';
+import { useI18n, type Translate } from '../lib/i18n';
 import { Select } from './Select';
 import { SoulSourceContext } from './SoulNotices';
 
@@ -39,6 +39,27 @@ export function useHarnessModels(roster: readonly CensusRow[], harness: string):
   return state.key === key && state.harness === id ? state.models : [];
 }
 
+/** The longest option label drawn; the full text stays in the option's title and the Stored line. */
+const MAX_LABEL = 56;
+
+/** A harness's own "(recommended)" or "(default)" suffix, which the design's wording carries instead. */
+const RECOMMENDED_SUFFIX = /\s*\((recommended|default)\)\s*$/i;
+
+/**
+ * A listed model's option text (#284): the harness's recommended entry is
+ * "{label} (harness's recommended) · {id}", any other its name (its id when
+ * the harness named it so). Long labels end in an ellipsis; `title` holds
+ * the whole text, the id and the harness's description.
+ */
+export function modelOptionLabel(choice: ModelChoice, t: Translate): { text: string; title: string } {
+  const full = choice.recommended
+    ? t('model.recommended', { label: choice.name.replace(RECOMMENDED_SUFFIX, '') || choice.modelId, id: choice.modelId })
+    : choice.name;
+  const text = full.length > MAX_LABEL ? `${full.slice(0, MAX_LABEL - 1)}…` : full;
+  const title = [full.includes(choice.modelId) ? full : `${full} · ${choice.modelId}`, choice.description].filter(Boolean).join(' — ');
+  return { text, title };
+}
+
 interface ModelSelectProps {
   /** The chosen model; null is the harness default. */
   value: string | null;
@@ -57,8 +78,12 @@ interface ModelSelectProps {
 
 /**
  * The model control, drawn as the launch form's Harness select: "Harness
- * default", the harness's own list, then "Other…" with free text. A chosen
- * model the list lacks stays as an option of its own.
+ * default (inherit — nothing stored)", the harness's own list (its
+ * recommended entry named as such, with its exact id), then "Other…" with
+ * free text. A chosen model the list lacks stays as an option of its own.
+ * Under it, what is stored and what runs (#284): the stored value as it is,
+ * and the effective model, which no engine field reports today, so it reads
+ * Unknown rather than a guess. The same copy in Launch and Details.
  */
 export function ModelSelect({ value, choices, label, disabled = false, commit, onChange, className = '' }: ModelSelectProps) {
   const { t } = useI18n();
@@ -89,9 +114,12 @@ export function ModelSelect({ value, choices, label, disabled = false, commit, o
           const model = next === DEFAULT ? null : next;
           if (commit === 'live' || model !== value) onChange(model);
         }}>
-        <option value={DEFAULT}>{t('model.default')}</option>
-        {choices.map((m) => <option key={m.modelId} value={m.modelId} title={m.description ?? undefined}>{m.name}</option>)}
-        {!listed && value !== null && <option value={value}>{value}</option>}
+        <option value={DEFAULT} title={t('model.storedNone')}>{t('model.default')}</option>
+        {choices.map((m) => {
+          const { text, title } = modelOptionLabel(m, t);
+          return <option key={m.modelId} value={m.modelId} title={title}>{text}</option>;
+        })}
+        {!listed && value !== null && <option value={value} title={value}>{value.length > MAX_LABEL ? `${value.slice(0, MAX_LABEL - 1)}…` : value}</option>}
         <option value={OTHER}>{t('model.other')}</option>
       </Select>
       {other && (
@@ -113,6 +141,10 @@ export function ModelSelect({ value, choices, label, disabled = false, commit, o
           )}
         </span>
       )}
+      <span className="block break-all font-mono text-[11px] text-muted-foreground" data-testid="model-stored">
+        {value === null ? t('model.storedNone') : t('model.stored', { value })}
+      </span>
+      <span className="block font-sans text-[11px] text-muted-foreground" data-testid="model-effective">{t('model.effectiveUnknown')}</span>
     </span>
   );
 }

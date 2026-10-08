@@ -74,6 +74,20 @@ test('launch forwards a string role and drops any other role (agent-bot-identity
   assert.equal('role' in seen[2], false);
 });
 
+test('launch forwards a null or string parent and drops any other parent (#261)', async () => {
+  const seen = [];
+  const h = harness({ launch: async (args) => { seen.push(args); return { requestId: 'r', status: 'pending' }; } });
+  await h.handle(JSON.stringify({ id: 1, method: 'launch', params: { account: 'me', package: '/p.soul', harness: 'claude', parent: null } }));
+  await h.handle(JSON.stringify({ id: 2, method: 'launch', params: { account: 'me', package: '/p.soul', harness: 'claude', parent: 'agent_1' } }));
+  await h.handle(JSON.stringify({ id: 3, method: 'launch', params: { account: 'me', soul: 'agent_1', harness: 'claude' } }));
+  await h.handle(JSON.stringify({ id: 4, method: 'launch', params: { account: 'me', soul: 'agent_1', harness: 'claude', parent: { op: 'admin' } } }));
+  assert.equal('parent' in seen[0], true);
+  assert.equal(seen[0].parent, null);
+  assert.equal(seen[1].parent, 'agent_1');
+  assert.equal('parent' in seen[2], false);
+  assert.equal('parent' in seen[3], false);
+});
+
 test('rejects malformed and unknown requests without calling the client', async () => {
   const h = harness({ census: async () => assert.fail('called') });
   await h.handle('not json');

@@ -125,9 +125,9 @@ describe('CompanionDetails', () => {
     it('relaunching keeps the soul setting: no switch until it is known, then it follows it', async () => {
       const { LaunchForm } = await import('./LaunchForm');
       const launcher = { state: { phase: 'idle' as const }, launch: vi.fn(async () => {}), reset: vi.fn() };
-      const { rerender } = render(<LaunchForm launcher={launcher} accounts={['user']} harnesses={[]} soul={child} />);
+      const { rerender } = render(<LaunchForm launcher={launcher} accounts={['user']} harnesses={[]} soul={child} defaultHarness="claude" />);
       expect(screen.queryByRole('switch')).toBeNull();
-      rerender(<LaunchForm launcher={launcher} accounts={['user']} harnesses={[]} soul={child} initialComms={false} />);
+      rerender(<LaunchForm launcher={launcher} accounts={['user']} harnesses={[]} soul={child} defaultHarness="claude" initialComms={false} />);
       expect((screen.getByRole('switch', { name: 'Agent comms' }) as HTMLInputElement).checked).toBe(false);
       fireEvent.submit(screen.getByRole('form'));
       expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ comms: false }));
@@ -268,7 +268,7 @@ describe('the read-only Details tab (N10)', () => {
     expect(field('Wake on new messages')).toBe('Off');
     expect(field('Execution mode')).toBe('Auto-Pilot');
     expect(field('Computer use')).toBe('Off');
-    expect(field('Model choice')).toBe('Harness default');
+    expect(field('Model choice')).toBe('Harness default (inherit — nothing stored)');
     expect(screen.queryAllByRole('switch')).toEqual([]);
     expect(screen.queryAllByRole('combobox')).toEqual([]);
     fireEvent.click(screen.getByRole('button', { name: 'Details' }));
@@ -694,24 +694,28 @@ describe('the model picker (#128)', () => {
     unmount();
     render(withSource(source({ model: vi.fn(async () => ({ ...listed, model: null })) }), <CompanionDetails soul={luna} />));
     await screen.findByText('Model choice', { selector: 'dt' });
-    expect(field('Model choice')).toBe('Harness default');
+    expect(field('Model choice')).toBe('Harness default (inherit — nothing stored)');
   });
 
   it('offers the default, the harness list and Other… in the sheet row, with the hint', async () => {
     const s = source();
     render(withSource(s, <ModelRow soul={luna} />));
     const select = await screen.findByRole('combobox', { name: 'Model for luna' }) as HTMLSelectElement;
-    expect(options(select)).toEqual(['Harness default', 'Opus', 'Sonnet', 'Other…']);
+    expect(options(select)).toEqual(['Harness default (inherit — nothing stored)', 'Opus', 'Sonnet', 'Other…']);
     expect(select.value).toBe('opus');
-    expect((select.querySelector('option[value="opus"]') as HTMLOptionElement).title).toBe('Most capable');
+    expect((select.querySelector('option[value="opus"]') as HTMLOptionElement).title).toBe('Opus · opus — Most capable');
+    expect(screen.getByTestId('model-stored').textContent).toBe('Stored model: opus');
+    expect(screen.getByTestId('model-effective').textContent).toBe('Effective model: Unknown until the harness reports it');
     expect(screen.getByText("Applies on luna's next turn.")).toBeTruthy();
   });
 
   it('keeps a chosen model the list lacks, and says when the harness has listed nothing', async () => {
     render(withSource(source({ model: vi.fn(async () => ({ model: 'my-model', available: null, listedAt: null })) }), <ModelRow soul={luna} />));
     const select = await screen.findByRole('combobox', { name: 'Model for luna' }) as HTMLSelectElement;
-    expect(options(select)).toEqual(['Harness default', 'my-model', 'Other…']);
+    expect(options(select)).toEqual(['Harness default (inherit — nothing stored)', 'my-model', 'Other…']);
     expect(select.value).toBe('my-model');
+    expect(screen.getByTestId('model-stored').textContent).toBe('Stored model: my-model');
+    expect(screen.getByTestId('model-effective').textContent).toBe('Effective model: Unknown until the harness reports it');
     expect(screen.getByText('The harness lists its models after the first turn.')).toBeTruthy();
   });
 
@@ -742,6 +746,9 @@ describe('the model picker (#128)', () => {
     fireEvent.change(select, { target: { value: 'sonnet' } });
     expect((await screen.findByRole('alert')).textContent).toBe('Model unchanged: the owner did not approve');
     expect(select.value).toBe('opus');
+    // The prior confirmed model stays the stored one (#284); nothing guesses an effective model.
+    expect(screen.getByTestId('model-stored').textContent).toBe('Stored model: opus');
+    expect(screen.getByTestId('model-effective').textContent).toBe('Effective model: Unknown until the harness reports it');
   });
 
   it('takes any model id through Other…, on Enter or Use', async () => {
@@ -794,9 +801,10 @@ describe('the model picker (#128)', () => {
           : listed)),
       });
       render(withSource(s, <LaunchForm launcher={launcher()} accounts={['user']} harnesses={[]} soul={luna} roster={roster} />));
+      fireEvent.click(screen.getByRole('button', { name: 'Advanced: provider, model and parent' }));
       const select = screen.getByRole('combobox', { name: 'Model' });
-      expect(options(select)).toEqual(['Harness default', 'Other…']);
-      await waitFor(() => expect(options(select)).toEqual(['Harness default', 'Opus', 'Sonnet', 'Haiku', 'Other…']));
+      expect(options(select)).toEqual(['Harness default (inherit — nothing stored)', 'Other…']);
+      await waitFor(() => expect(options(select)).toEqual(['Harness default (inherit — nothing stored)', 'Opus', 'Sonnet', 'Haiku', 'Other…']));
       expect(vi.mocked(s.model).mock.calls.map(([id]) => id).sort()).toEqual(['agent_p', 'agent_s']);
     });
 
@@ -804,6 +812,7 @@ describe('the model picker (#128)', () => {
       const { LaunchForm } = await import('./LaunchForm');
       const l = launcher();
       render(withSource(source(), <LaunchForm launcher={l} accounts={['user']} harnesses={[]} soul={luna} roster={roster} />));
+      fireEvent.click(screen.getByRole('button', { name: 'Advanced: provider, model and parent' }));
       fireEvent.submit(screen.getByRole('form'));
       expect(l.launch.mock.calls[0][0]).not.toHaveProperty('model');
       const select = screen.getByRole('combobox', { name: 'Model' });
@@ -817,6 +826,7 @@ describe('the model picker (#128)', () => {
       const { LaunchForm } = await import('./LaunchForm');
       const l = launcher();
       render(withSource(source(), <LaunchForm launcher={l} accounts={['user']} harnesses={[]} soul={luna} roster={roster} />));
+      fireEvent.click(screen.getByRole('button', { name: 'Advanced: provider, model and parent' }));
       fireEvent.change(screen.getByRole('combobox', { name: 'Model' }), { target: { value: '__other' } });
       fireEvent.change(screen.getByRole('textbox', { name: 'Model ID' }), { target: { value: ' my-model ' } });
       fireEvent.submit(screen.getByRole('form'));
@@ -831,7 +841,8 @@ describe('the model picker (#128)', () => {
       const { LaunchForm } = await import('./LaunchForm');
       const s = source({ model: vi.fn(async () => null) });
       render(withSource(s, <LaunchForm launcher={launcher()} accounts={['user']} harnesses={[]} />));
-      expect(options(screen.getByRole('combobox', { name: 'Model' }))).toEqual(['Harness default', 'Other…']);
+      fireEvent.click(screen.getByRole('button', { name: 'Advanced: provider, model and parent' }));
+      expect(options(screen.getByRole('combobox', { name: 'Model' }))).toEqual(['Harness default (inherit — nothing stored)', 'Other…']);
       expect(s.model).not.toHaveBeenCalled();
     });
   });

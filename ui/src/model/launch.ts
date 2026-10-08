@@ -3,7 +3,7 @@
 // daemon exactly once; nothing here retries a launch.
 //
 // Contract, from agent-comms docs/principal-client.md (Request a daemon
-// launch): launch({ account, soul | package, harness, name?, comms?, model? }) returns
+// launch): launch({ account, soul | package, harness, name?, comms?, model?, brief?, role?, parent? }) returns
 // { requestId, status: 'pending' }; launchStatus(requestId) returns the same
 // shape until status is 'launched' or 'failed'.
 
@@ -45,6 +45,12 @@ export interface LaunchRequest {
    * role in its soul.json. Blank sends nothing.
    */
   role?: string;
+  /**
+   * The soul's parent (#261): null is independent, a root soul that starts
+   * its own team; an agent id names the companion it joins under. Omitted
+   * says nothing, which older callers do. Never the soul itself.
+   */
+  parent?: string | null;
 }
 
 /** agent-comms' bound on a launch role, in characters after trimming. */
@@ -131,6 +137,10 @@ export function launchProblem(request: LaunchRequest): string | null {
   if (request.harness.length > MAX_HARNESS) return `The harness name is longer than ${MAX_HARNESS} characters.`;
   if (request.name.length > MAX_NAME) return `The name is longer than ${MAX_NAME} characters.`;
   if ((request.model ?? '').trim().length > MAX_MODEL) return `The model is longer than ${MAX_MODEL} characters.`;
+  if (typeof request.parent === 'string') {
+    if (request.parent.trim() === '' || request.parent.length > MAX_NAME || CONTROL.test(request.parent)) return 'Choose a parent companion, or Independent.';
+    if ('soul' in request.target && request.target.soul === request.parent) return 'A companion cannot be its own parent. Choose another, or Independent.';
+  }
   if (briefText(request.brief).length > MAX_BRIEF) return `The brief is longer than ${MAX_BRIEF} characters.`;
   if (BRIEF_CONTROL.test(briefText(request.brief))) return 'Remove control characters from the brief (lines and tabs are fine).';
   const fields = [request.account, request.harness, request.name, request.model ?? '',
@@ -158,8 +168,8 @@ function briefText(brief: string | undefined): string {
  * A `{soul}` launch never carries a name: relaunching a companion must not
  * rename it (#79), so the form's name is dropped there as a second guard.
  */
-export function launchParams(request: LaunchRequest): Record<string, string | boolean> {
-  const params: Record<string, string | boolean> = { account: request.account, harness: request.harness.trim() };
+export function launchParams(request: LaunchRequest): Record<string, string | boolean | null> {
+  const params: Record<string, string | boolean | null> = { account: request.account, harness: request.harness.trim() };
   if ('package' in request.target) params.package = normalPackagePath(request.target.package);
   else params.soul = request.target.soul;
   if ('package' in request.target && request.name.trim() !== '') params.name = request.name.trim();
@@ -170,7 +180,103 @@ export function launchParams(request: LaunchRequest): Record<string, string | bo
   if (brief) params.brief = brief;
   const role = request.role?.trim();
   if ('package' in request.target && role) params.role = role;
+  if (request.parent !== undefined) params.parent = request.parent === null ? null : request.parent.trim();
   return params;
+}
+
+/**
+ * The companions a launch may name as its parent (#261): the roster
+ * (which `withoutArchived` has already cleared of archived souls; `archived`
+ * drops any more), minus the launched soul itself and its descendants, so no
+ * cycle can be asked for. Roots and children alike qualify; the engine is
+ * the authority and refuses what it cannot do.
+ */
+export function parentChoices(roster: readonly CensusRow[], self: Pick<CensusRow, 'agentId'> | null | undefined,
+  archived: ReadonlySet<string> = new Set()): CensusRow[] {
+  const excluded = new Set<string>(archived);
+  if (self) {
+    excluded.add(self.agentId);
+    // Descendants, by walking the roster's parent claims; a cycle ends when nothing new is found.
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const soul of roster) {
+        if (soul.parent !== null && excluded.has(soul.parent) && !excluded.has(soul.agentId)) {
+          excluded.add(soul.agentId);
+          grew = true;
+        }
+      }
+    }
+  }
+  const seen = new Set<string>();
+  return roster.filter((soul) => {
+    if (excluded.has(soul.agentId) || seen.has(soul.agentId)) return false;
+    seen.add(soul.agentId);
+    return true;
+  });
+}
+
+/** What the launch form checks before it sends (#261), one line per problem. */
+export interface LaunchDraft {
+  /** The soul being relaunched, when any. */
+  soul: CensusRow | null;
+  /** True when the package is a copy of a companion, which must be named (#110). */
+  copy: boolean;
+  /** True when the form launches a custom package path rather than a template or a soul. */
+  customPackage: boolean;
+  packagePath: string;
+  name: string;
+  account: string;
+  harness: string;
+  model: string | null;
+  brief: string;
+  parent: string | null;
+  /** The parents the form offers; a chosen one outside it is refused. */
+  parents: readonly Pick<CensusRow, 'agentId'>[];
+  /**
+   * Whether this app's launch path carries a parent to the daemon. Until
+   * it does, a companion parent is refused here rather than dropped on the
+   * way and the soul started independent in silence.
+   */
+  parentCarried: boolean;
+}
+
+/** One line of the list, as a locale key and its variables; the form words it. */
+export interface LaunchDraftError {
+  code: 'name' | 'nameLong' | 'package' | 'packageLong' | 'account' | 'harness' | 'harnessLong' | 'modelLong' | 'modelControl' | 'brief' | 'parent' | 'parentSelf' | 'parentUncarried';
+  vars?: Record<string, string | number>;
+}
+
+/**
+ * The design's "Fix these before launching:" list, checked entirely before
+ * creation; the engine checks again and its refusal is shown as it is.
+ * Custom harness and model ids pass: the harness, not this app, knows what
+ * it runs.
+ */
+export function launchDraftErrors(draft: LaunchDraft): LaunchDraftError[] {
+  const errors: LaunchDraftError[] = [];
+  const name = draft.name.trim();
+  if (!draft.soul && draft.copy && name === '') errors.push({ code: 'name' });
+  if (name.length > MAX_NAME) errors.push({ code: 'nameLong', vars: { max: MAX_NAME } });
+  if (!draft.soul && draft.customPackage) {
+    const path = normalPackagePath(draft.packagePath);
+    if (path.trim() === '') errors.push({ code: 'package' });
+    else if (path.length > MAX_PACKAGE) errors.push({ code: 'packageLong', vars: { max: MAX_PACKAGE } });
+  }
+  if (draft.account.trim() === '') errors.push({ code: 'account' });
+  if (draft.harness.trim() === '') errors.push({ code: 'harness' });
+  else if (draft.harness.length > MAX_HARNESS) errors.push({ code: 'harnessLong', vars: { max: MAX_HARNESS } });
+  const model = draft.model?.trim() ?? '';
+  if (model.length > MAX_MODEL) errors.push({ code: 'modelLong', vars: { max: MAX_MODEL } });
+  else if (CONTROL.test(model)) errors.push({ code: 'modelControl' });
+  if (briefText(draft.brief).length > MAX_BRIEF) errors.push({ code: 'brief', vars: { max: MAX_BRIEF } });
+  if (draft.parent !== null) {
+    if (draft.soul && draft.parent === draft.soul.agentId) errors.push({ code: 'parentSelf' });
+    else if (!draft.parents.some((p) => p.agentId === draft.parent)) errors.push({ code: 'parent' });
+    // Keeping a relaunched child's own parent asks the daemon for nothing new.
+    else if (!draft.parentCarried && draft.parent !== draft.soul?.parent) errors.push({ code: 'parentUncarried' });
+  }
+  return errors;
 }
 
 /**
