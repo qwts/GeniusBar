@@ -3161,34 +3161,108 @@ mod soul_model_tests {
 }
 
 /// Archives a soul (GeniusBar #94), from agent-bot's `soul remove <agentId>
-/// --json`: `{agentId, name, handle, wake, comms, retired, archived}`.
+/// [--scope soul|team] --json`: `{agentId, name, handle, wake, comms,
+/// retired, archived}`, followed (agent-bot-identity #625, GeniusBar #283)
+/// by `plan` and `effects {scope, archived[], independent[], notArchived[]}`.
 /// Nothing is deleted: the soul stops waking, leaves agent-comms, is retired
 /// and its folder moves to the souls folder's `.archive`. agent-bot refuses
 /// while the soul runs (`soul-running`) and owner-gates the rest (its
-/// consent dialog, Touch ID); GeniusBar never asks itself.
+/// consent dialog, Touch ID); GeniusBar never asks itself. `scope` is
+/// passed on only when given, so an older engine sees the call it knows.
 #[tauri::command]
 pub async fn soul_remove<R: Runtime>(
     app: AppHandle<R>,
     agent: String,
+    scope: Option<String>,
 ) -> Result<Value, BridgeError> {
-    let args = soul_remove_args(&agent)?;
+    let args = soul_remove_args(&agent, scope.as_deref(), false)?;
     let output = run_agent_bot(&app, args, "soul-remove-unavailable").await?;
     parse_soul_remove(&output.stdout, &output.stderr)
 }
 
-fn soul_remove_args(agent: &str) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+/// The exact souls a remove would touch (GeniusBar #283), from agent-bot's
+/// `soul remove <agentId> --plan [--scope soul|team] --json`: `{schemaVersion
+/// 1, scope, agentId, capabilities {plan, team, independent, restore,
+/// delete}, archived[], independent[], unchanged[]}`, each entry `{agentId,
+/// name, displayName, status, harness, parentId, running, depth}`. Read-only:
+/// no owner gate, nothing changes. Null when the bundled engine has no
+/// `--plan` (before agent-bot-identity #625: it answers its usage line, and
+/// changes nothing either); the UI then shows only what it knows and never
+/// infers the team's fate itself.
+#[tauri::command]
+pub async fn soul_remove_plan<R: Runtime>(
+    app: AppHandle<R>,
+    agent: String,
+    scope: Option<String>,
+) -> Result<Value, BridgeError> {
+    let args = soul_remove_args(&agent, scope.as_deref(), true)?;
+    let output = run_agent_bot(&app, args, "soul-remove-unavailable").await?;
+    parse_soul_remove_plan(&output.stdout, &output.stderr)
+}
+
+fn soul_remove_args(
+    agent: &str,
+    scope: Option<&str>,
+    plan: bool,
+) -> Result<Vec<std::ffi::OsString>, BridgeError> {
     if agent.trim().is_empty() || agent.starts_with('-') || agent.chars().any(char::is_control) {
         return Err(BridgeError::new(
             "soul-remove-invalid",
             "agent must be an agent id",
         ));
     }
-    Ok(vec![
-        "soul".into(),
-        "remove".into(),
-        agent.into(),
-        "--json".into(),
-    ])
+    if scope.is_some_and(|s| s != "soul" && s != "team") {
+        return Err(BridgeError::new(
+            "soul-remove-invalid",
+            "scope must be soul or team",
+        ));
+    }
+    let mut args: Vec<std::ffi::OsString> = vec!["soul".into(), "remove".into(), agent.into()];
+    if plan {
+        args.push("--plan".into());
+    }
+    if let Some(scope) = scope {
+        args.push("--scope".into());
+        args.push(scope.into());
+    }
+    args.push("--json".into());
+    Ok(args)
+}
+
+/// True when the engine answered a usage line that does not know `--plan`:
+/// agent-bot before #625 takes `--plan` for a stray argument and prints its
+/// `soul remove` usage (as a JSON error with `--json`), and an older one
+/// still prints the `soul` usage line on stderr. A usage line naming
+/// `--plan` is a real mistake and stays an error.
+fn soul_remove_plan_missing(stdout: &[u8], stderr: &[u8]) -> bool {
+    let unaware =
+        |message: &str| message.contains("usage: agent-bot soul") && !message.contains("--plan");
+    match serde_json::from_str::<Value>(&last_line(stdout)) {
+        Ok(value) => value
+            .get("error")
+            .and_then(|error| error.get("message"))
+            .and_then(Value::as_str)
+            .is_some_and(unaware),
+        Err(_) => unaware(&last_line(stderr)),
+    }
+}
+
+fn parse_soul_remove_plan(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    if soul_remove_plan_missing(stdout, stderr) {
+        return Ok(Value::Null);
+    }
+    parse_agent_bot_json(
+        stdout,
+        stderr,
+        "soul-remove-plan-failed",
+        "agent-bot soul remove: ",
+        "agent-bot gave no removal plan",
+        |value| {
+            value.get("schemaVersion").and_then(Value::as_u64) == Some(1)
+                && value.get("agentId").and_then(Value::as_str).is_some()
+                && value.get("archived").is_some_and(Value::is_array)
+        },
+    )
 }
 
 fn parse_soul_remove(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
@@ -3232,15 +3306,90 @@ mod soul_remove_tests {
     #[test]
     fn builds_soul_remove_arguments() {
         assert_eq!(
-            soul_remove_args("agent_1").unwrap(),
+            soul_remove_args("agent_1", None, false).unwrap(),
             vec!["soul", "remove", "agent_1", "--json"]
+        );
+        assert_eq!(
+            soul_remove_args("agent_1", Some("team"), false).unwrap(),
+            vec!["soul", "remove", "agent_1", "--scope", "team", "--json"]
+        );
+        assert_eq!(
+            soul_remove_args("agent_1", None, true).unwrap(),
+            vec!["soul", "remove", "agent_1", "--plan", "--json"]
+        );
+        assert_eq!(
+            soul_remove_args("agent_1", Some("soul"), true).unwrap(),
+            vec!["soul", "remove", "agent_1", "--plan", "--scope", "soul", "--json"]
         );
         for agent in ["", "  ", "--json", "-x", "a\nb"] {
             assert_eq!(
-                soul_remove_args(agent).unwrap_err().code,
+                soul_remove_args(agent, None, false).unwrap_err().code,
                 "soul-remove-invalid"
             );
         }
+        for scope in ["", "fleet", "--plan"] {
+            assert_eq!(
+                soul_remove_args("agent_1", Some(scope), true)
+                    .unwrap_err()
+                    .message,
+                "scope must be soul or team"
+            );
+        }
+    }
+
+    /// agent-bot-identity #625's `soul remove luna --plan --scope team --json`
+    /// for a lead with a nested, offline descendant.
+    const PLAN: &[u8] = br#"{"schemaVersion":1,"scope":"team","agentId":"agent_p","capabilities":{"plan":true,"team":true,"independent":true,"restore":false,"delete":false},"archived":[{"agentId":"agent_p","name":"luna","displayName":"luna","status":"active","harness":"codex","parentId":null,"running":false,"depth":0},{"agentId":"agent_c","name":"ember","displayName":"ember","status":"active","harness":null,"parentId":"agent_p","running":false,"depth":1},{"agentId":"agent_s","name":"sprocket","displayName":"Sprocket","status":"active","harness":null,"parentId":"agent_c","running":null,"depth":2}],"independent":[],"unchanged":[]}
+"#;
+
+    #[test]
+    fn parses_removal_plans_and_nulls_an_engine_without_them() {
+        let plan = parse_soul_remove_plan(PLAN, b"").unwrap();
+        assert_eq!(plan["archived"][2]["displayName"], "Sprocket");
+        assert_eq!(plan["capabilities"]["restore"], false);
+        // agent-bot 0.10.51 takes `--plan` for a stray argument: its usage
+        // line, as a JSON error, before any owner gate.
+        assert_eq!(
+            parse_soul_remove_plan(
+                b"{\"error\":{\"code\":\"soul-remove-failed\",\"message\":\"usage: agent-bot soul remove <agentId|name> [--json] [--principal-stdin]\"}}\n",
+                b"agent-bot soul remove: usage: agent-bot soul remove <agentId|name> [--json] [--principal-stdin]\n"
+            )
+            .unwrap(),
+            Value::Null
+        );
+        // An even older one prints the `soul` usage line, without JSON.
+        assert_eq!(
+            parse_soul_remove_plan(
+                b"",
+                b"agent-bot: usage: agent-bot soul cold-wake <agentId> [on|off|show] | soul remove <agentId|name> [--json]\n"
+            )
+            .unwrap(),
+            Value::Null
+        );
+        // An engine that knows `--plan` and still prints usage made a real complaint.
+        assert_eq!(
+            parse_soul_remove_plan(
+                b"{\"error\":{\"code\":\"soul-remove-failed\",\"message\":\"--scope must be one of soul, team\\nusage: agent-bot soul remove <agentId|name> [--scope soul|team] [--plan] [--json] [--principal-stdin]\"}}\n",
+                b""
+            )
+            .unwrap_err()
+            .code,
+            "soul-remove-failed"
+        );
+        assert_eq!(
+            parse_soul_remove_plan(
+                b"{\"error\":{\"code\":\"soul-remove-failed\",\"message\":\"no population record for agent_x\"}}\n",
+                b"agent-bot soul remove: no population record for agent_x\n"
+            ),
+            Err(BridgeError::new(
+                "soul-remove-failed",
+                "no population record for agent_x"
+            ))
+        );
+        assert_eq!(
+            parse_soul_remove_plan(b"{\"agentId\":\"agent_1\"}\n", b"").unwrap_err(),
+            BridgeError::new("soul-remove-plan-failed", "agent-bot gave no removal plan")
+        );
     }
 
     #[test]

@@ -44,7 +44,7 @@ import { AuditSourceContext, type AuditSource } from './components/AuditLog';
 import { SoulSourceContext, type SoulSource } from './components/SoulNotices';
 import type { CensusRow } from './model/census';
 import { emptyChat, emptyComposer, mergeIncoming, type ChatState } from './model/chat';
-import { inboxMessage, sampleApprovals, sampleAudit, sampleBadges, sampleCensus, sampleColdWake, sampleConnection, sampleFloating, sampleModels, sampleModes, sampleOpenedPackages, samplePaused, samplePopulation, sampleSessionEntries, samplePreparedRevision, sampleProfile, sampleProfileFiles, sampleTemplates } from './model/fixtures';
+import { inboxMessage, sampleApprovals, sampleAudit, sampleBadges, sampleCensus, sampleColdWake, sampleConnection, sampleFloating, sampleModels, sampleModes, sampleOpenedPackages, samplePaused, samplePopulation, sampleRemovalPlan, sampleSessionEntries, samplePreparedRevision, sampleProfile, sampleProfileFiles, sampleTemplates } from './model/fixtures';
 import type { Pauser } from './usePause';
 import type { TemplateLister } from './useSoulTemplates';
 import { BridgeError } from './bridge';
@@ -162,14 +162,22 @@ function Preview() {
     approvals: { records, local: new Map() },
     decide: async (proposalId) => setRecords((r) => r.filter((p) => p.proposalId !== proposalId)),
   };
-  // Archive (#94) on the fixtures: luna is running, so it is locked; others go.
+  // Archive (#94, #283) on the fixtures: agent_c is running, so it is locked
+  // and blocks luna's team; luna's plan shows its nested team; others go.
   const [souls, setSouls] = useState(census);
   const archiver = useMemo<Archiver>(() => ({
-    running: async (agentId) => agentId === 'agent_p',
-    remove: async (agentId) => {
+    running: async (agentId) => agentId === 'agent_c',
+    plan: async (agentId, scope) => sampleRemovalPlan(agentId, scope),
+    remove: async (agentId, scope = 'soul') => {
       await new Promise((resolve) => setTimeout(resolve, 600));
-      setSouls((list) => list.filter((s) => s.agentId !== agentId));
-      return { agentId, name: null, comms: 'left', archived: [{ from: `/souls/${agentId}`, to: `/souls/.archive/${agentId}` }] };
+      const plan = sampleRemovalPlan(agentId, scope);
+      const gone = new Set(plan.archived.map((e) => e.agentId));
+      setSouls((list) => list.filter((s) => !gone.has(s.agentId)).map((s) => (s.parent && gone.has(s.parent) ? { ...s, parent: null } : s)));
+      const named = ({ agentId: id, name, displayName }: { agentId: string; name: string | null; displayName: string }) => ({ agentId: id, name, displayName });
+      return {
+        agentId, name: null, comms: 'left', archived: [{ from: `/souls/${agentId}`, to: `/souls/.archive/${agentId}` }],
+        effects: { scope, archived: plan.archived.map((e) => ({ agentId: e.agentId, name: e.displayName, comms: 'left' })), independent: plan.independent.map((e) => ({ ...named(e), formerParentId: agentId })), notArchived: [] },
+      };
     },
   }), []);
   // The perimeter's Stop (#122) on the fixtures: the daemon drops the soul from

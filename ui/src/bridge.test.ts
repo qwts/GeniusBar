@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BridgeError, call, openDesktop, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, exportAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, normalizeAppearance, savedBrief, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported, normalizeSoulComputerUse, soulComputerUse, soulComputerUseSupported, liveComputerUse, listSoulTemplates, normalizeSoulTemplates, normalizeSoulProfile, soulProfile, soulProfileFile, popupVisible, normalizeSoulEnvironment, soulEnvironment, engineCan, normalizePreparedRevision, prepareRevision, discardRevision, editableInStaging } from './bridge';
+import { BridgeError, call, openDesktop, daemonStatus, decideApproval, harnessSignedIn, harnessSignIn, inApp, listApprovals, listAudit, exportAudit, normalizeDaemonStatus, normalizePopulationList, populationList, normalizeRemovedSoul, normalizeRemovalPlan, normalizeRemovalEffects, removalPlan, normalizeRuntimeMetrics, normalizeSoulColdWake, normalizeSoulComms, normalizeSoulMode, normalizeSoulModel, normalizeSoulPopulation, normalizeAppearance, savedBrief, setSoulColdWake, setSoulComms, setSoulMode, setSoulModel, servicesInstalled, soulAsides, soulColdWake, soulComms, soulMode, soulModel, soulPopulation, removeSoul, normalizeSoulStop, soulStopSupported, stopSoul, normalizeSoulPause, pauseSoul, resumeSoul, soulPauseSupported, normalizeSoulComputerUse, soulComputerUse, soulComputerUseSupported, liveComputerUse, listSoulTemplates, normalizeSoulTemplates, normalizeSoulProfile, soulProfile, soulProfileFile, popupVisible, normalizeSoulEnvironment, soulEnvironment, engineCan, normalizePreparedRevision, prepareRevision, discardRevision, editableInStaging } from './bridge';
 
 describe('bridge', () => {
   it('invokes the shell command with the method and params', async () => {
@@ -375,7 +375,7 @@ describe('archive a soul (#94)', () => {
       return { agentId: 'agent_1', name: 'luna', handle: 'luna', wake: 'off', comms: 'left', retired: true,
         archived: [{ from: '/souls/luna', to: '/souls/.archive/luna' }, { from: 3 }] };
     }) as never;
-    await expect(removeSoul('agent_1', fake)).resolves.toEqual({
+    await expect(removeSoul('agent_1', null, fake)).resolves.toEqual({
       agentId: 'agent_1', name: 'luna', comms: 'left', archived: [{ from: '/souls/luna', to: '/souls/.archive/luna' }],
     });
     expect(calls).toEqual([['soul_remove', { agent: 'agent_1' }]]);
@@ -383,10 +383,69 @@ describe('archive a soul (#94)', () => {
 
   it('rejects with agent-bot’s reason, keeping its code', async () => {
     const running = (async () => { throw { code: 'soul-running', message: 'agent_1 is running; stop it before removing it' }; }) as never;
-    await expect(removeSoul('agent_1', running)).rejects.toMatchObject({ code: 'soul-running', message: 'agent_1 is running; stop it before removing it' });
+    await expect(removeSoul('agent_1', null, running)).rejects.toMatchObject({ code: 'soul-running', message: 'agent_1 is running; stop it before removing it' });
     // An older bundle answers without retiring.
-    await expect(removeSoul('agent_1', (async () => ({ agentId: 'agent_1' })) as never)).rejects.toBeInstanceOf(BridgeError);
+    await expect(removeSoul('agent_1', null, (async () => ({ agentId: 'agent_1' })) as never)).rejects.toBeInstanceOf(BridgeError);
     expect(normalizeRemovedSoul({ agentId: 'a', retired: false })).toBeNull();
+  });
+});
+
+describe('removal plan and scope (#283)', () => {
+  /** agent-bot-identity #625's team plan for luna, with a nested offline descendant. */
+  const plan = {
+    schemaVersion: 1, scope: 'team', agentId: 'agent_p',
+    capabilities: { plan: true, team: true, independent: true, restore: false, delete: false },
+    archived: [
+      { agentId: 'agent_p', name: 'luna', displayName: 'luna', status: 'active', harness: 'codex', parentId: null, running: false, depth: 0 },
+      { agentId: 'agent_c', name: null, displayName: 'agent_c', status: 'active', harness: null, parentId: 'agent_p', running: false, depth: 1 },
+      { agentId: 'agent_s', name: 'sprocket', displayName: 'Sprocket', status: 'active', harness: null, parentId: 'agent_c', running: null, depth: 2 },
+    ],
+    independent: [], unchanged: [{ agentId: 'agent_r', name: 'rusty', displayName: 'rusty', status: 'retired', harness: null, parentId: 'agent_p', running: false, depth: 1 }],
+  };
+
+  it('normalizes a plan, filling what the engine left out, and rejects what is not one', () => {
+    const normalized = normalizeRemovalPlan(plan)!;
+    expect(normalized.archived.map((e) => [e.displayName, e.depth, e.running])).toEqual([['luna', 0, false], ['agent_c', 1, false], ['Sprocket', 2, null]]);
+    expect(normalized.unchanged[0].status).toBe('retired');
+    expect(normalized.capabilities).toEqual({ plan: true, team: true, independent: true, restore: false, delete: false });
+    expect(normalizeRemovalPlan({ ...plan, capabilities: undefined, independent: [{ agentId: 'x' }, { name: 'no id' }, 3] })!.independent)
+      .toEqual([{ agentId: 'x', name: null, displayName: 'x', status: null, harness: null, parentId: null, running: null, depth: 0 }]);
+    expect(normalizeRemovalPlan({ ...plan, capabilities: undefined })!.capabilities.team).toBe(false);
+    for (const bad of [null, {}, { ...plan, schemaVersion: 2 }, { ...plan, scope: 'fleet' }, { ...plan, archived: 'luna' }]) expect(normalizeRemovalPlan(bad)).toBeNull();
+  });
+
+  it('asks the shell for the plan with its scope, and reads null as an engine without --plan', async () => {
+    const calls: unknown[] = [];
+    const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); return plan; }) as never;
+    await expect(removalPlan('agent_p', 'team', fake)).resolves.toMatchObject({ scope: 'team', agentId: 'agent_p' });
+    expect(calls).toEqual([['soul_remove_plan', { agent: 'agent_p', scope: 'team' }]]);
+    await expect(removalPlan('agent_p', 'soul', (async () => null) as never)).resolves.toBeNull();
+    await expect(removalPlan('agent_p', 'soul', (async () => ({ agentId: 'agent_p' })) as never)).rejects.toMatchObject({ code: 'soul-remove-plan-failed' });
+    const refused = (async () => { throw { code: 'soul-remove-failed', message: 'no population record for agent_p' }; }) as never;
+    await expect(removalPlan('agent_p', 'soul', refused)).rejects.toMatchObject({ code: 'soul-remove-failed', message: 'no population record for agent_p' });
+  });
+
+  it('sends the scope only when given, and keeps the effects an engine reports', async () => {
+    const calls: unknown[] = [];
+    const result = {
+      agentId: 'agent_p', name: 'luna', handle: 'luna', wake: 'off', comms: 'left', retired: true, archived: [], plan,
+      effects: {
+        scope: 'team',
+        archived: [{ agentId: 'agent_s', name: 'Sprocket', comms: 'left', retired: true }, { agentId: 'agent_c', name: null, comms: 'not left: hub down', retired: true }, { agentId: 'agent_p', name: 'luna', comms: 'left', retired: true }],
+        independent: [{ agentId: 'agent_i', name: 'ivy', displayName: 'Ivy', formerParentId: 'agent_p' }], notArchived: [],
+      },
+    };
+    const fake = (async (cmd: string, args: unknown) => { calls.push([cmd, args]); return result; }) as never;
+    const removed = await removeSoul('agent_p', 'team', fake);
+    expect(calls).toEqual([['soul_remove', { agent: 'agent_p', scope: 'team' }]]);
+    expect(removed.effects).toEqual({
+      scope: 'team',
+      archived: [{ agentId: 'agent_s', name: 'Sprocket', comms: 'left' }, { agentId: 'agent_c', name: null, comms: 'not left: hub down' }, { agentId: 'agent_p', name: 'luna', comms: 'left' }],
+      independent: [{ agentId: 'agent_i', name: 'ivy', displayName: 'Ivy', formerParentId: 'agent_p' }], notArchived: [],
+    });
+    expect(normalizeRemovedSoul({ agentId: 'a', retired: true })).not.toHaveProperty('effects');
+    expect(normalizeRemovalEffects({ scope: 'soul', notArchived: [{ agentId: 'agent_z' }] })).toEqual({ scope: 'soul', archived: [], independent: [], notArchived: [{ agentId: 'agent_z', name: null, displayName: 'agent_z' }] });
+    expect(normalizeRemovalEffects({ archived: [] })).toBeNull();
   });
 });
 

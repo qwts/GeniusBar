@@ -1,6 +1,6 @@
 // The fixed fake census and health from R1's snapshot test, for tests and
 // for previewing the popup before the bridge (#7) supplies real rows.
-import type { PreparedRevision, SoulColdWake, SoulMode, SoulModel, SoulPopulation, SoulProfile, SoulTemplateList } from '../bridge';
+import type { PreparedRevision, RemovalPlan, RemovalPlanEntry, RemovalScope, SoulColdWake, SoulMode, SoulModel, SoulPopulation, SoulProfile, SoulTemplateList } from '../bridge';
 import type { AuditRecord } from './audit';
 import type { CensusRow } from './census';
 import type { PauseEntry } from './pause';
@@ -292,3 +292,27 @@ export const sampleProfileFiles: Readonly<Record<string, string>> = {
   '.claude/settings.json': '{\n  "permissions": {\n    "defaultMode": "default"\n  }\n}\n',
   'skills/triage/SKILL.md': '---\nname: triage\ndescription: Sort new issues by area and urgency.\n---\n\nRead the issue, label it, and say who should take it.\n',
 };
+
+/**
+ * agent-bot's removal plans for the preview (#283; agent-bot-identity #625):
+ * luna leads agent_c, which leads Sprocket, offline and nested two deep.
+ * Archiving only luna makes agent_c independent and leaves Sprocket under
+ * it; archiving the team takes all three, and agent_c running blocks that.
+ * Every other soul stands alone. The engine computes this; nothing here
+ * infers a team from the census.
+ */
+export function sampleRemovalPlan(agentId: string, scope: RemovalScope): RemovalPlan {
+  const capabilities = { plan: true, team: true, independent: true, restore: false, delete: false };
+  const entry = (id: string, name: string | null, displayName: string, depth: number, running: boolean | null, parentId: string | null = null, harness: string | null = null): RemovalPlanEntry =>
+    ({ agentId: id, name, displayName, status: 'active', harness, parentId, running, depth });
+  if (agentId !== 'agent_p') {
+    const soul = sampleCensus.find((s) => s.agentId === agentId);
+    return { schemaVersion: 1, scope, agentId, capabilities, archived: [entry(agentId, soul?.name ?? null, soul?.name ?? agentId, 0, false, soul?.parent ?? null, soul?.harness ?? null)], independent: [], unchanged: [] };
+  }
+  const luna = entry('agent_p', 'luna', 'luna', 0, false, null, 'codex');
+  const child = entry('agent_c', null, 'agent_c', 1, true, 'agent_p');
+  const sprocket = entry('agent_s', 'sprocket', 'Sprocket', 2, false, 'agent_c');
+  return scope === 'team'
+    ? { schemaVersion: 1, scope, agentId, capabilities, archived: [luna, child, sprocket], independent: [], unchanged: [] }
+    : { schemaVersion: 1, scope, agentId, capabilities, archived: [luna], independent: [child], unchanged: [sprocket] };
+}

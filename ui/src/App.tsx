@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { ExternalLink, History, Plus, Volume2, VolumeX, X } from 'lucide-react';
 import { AboutDialog, focusReturnOf, liveAbout, type AboutSource } from './components/AboutDialog';
 import { ApprovalCounts, ApprovalsList } from './components/ApprovalsList';
-import { ArchiveDialog, ArchivedNotice, liveArchiver, type Archiver } from './components/ArchiveDialog';
+import { ArchiveDialog, ArchivedNotice, archivedNotice, liveArchiver, type Archiver } from './components/ArchiveDialog';
 import { currentWindow, inApp, listSoulTemplates, liveComputerUse, openSurface, popupVisible, setPopupAutohide, soulStopSupported, stopSoul, syncPerimeter, syncTeamWindows, type ComputerUseSwitch, type RemovedSoul, type SurfaceRequest, type TeamWindowSpec, shellLog } from './bridge';
 import { FooterMenu } from './components/FooterMenu';
 import { CompanionSession, ComputerUseContext, InfoButton, type SessionTab } from './components/CompanionSession';
@@ -390,8 +390,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
     layoutActions.setHidden(soulKey(soul), false);
     setArchiving(null);
     if (selectedKey === soulKey(soul)) setSelectedKey(null);
-    setArchivedText(result.comms === 'left' ? t('bar.archived', { name })
-      : t('bar.archivedPending', { name, reason: result.comms.replace(/^not left: /, '') }));
+    setArchivedText(archivedNotice(t, name, result));
     onRefresh?.();
   };
   const archiveUi = (

@@ -535,10 +535,109 @@ export interface RemovedSoul {
   /** 'left', or 'not left: <reason>' when the hub could not be told yet. */
   comms: string;
   archived: { from: string; to: string }[];
+  /** What the remove did to the team (#283), from an engine that says; absent from an older one. */
+  effects?: RemovalEffects;
+}
+
+/** What a remove covers (#283): the soul alone, or it and every active soul it leads. */
+export type RemovalScope = 'soul' | 'team';
+
+/** One soul in a removal plan, as the engine describes it; `depth` is its distance from the soul asked about. */
+export interface RemovalPlanEntry {
+  agentId: string;
+  name: string | null;
+  displayName: string;
+  status: string | null;
+  harness: string | null;
+  parentId: string | null;
+  /** Null when the daemon could not be asked. */
+  running: boolean | null;
+  depth: number;
+}
+
+/**
+ * The exact souls a remove would touch (#283; agent-bot-identity #625), from
+ * `soul remove <agentId> --plan [--scope soul|team] --json`, breadth-first.
+ * Counts are these lists' lengths and nothing else is implied; the
+ * capability flags say what the engine does, so the UI promises no restore
+ * or deletion it does not have.
+ */
+export interface RemovalPlan {
+  schemaVersion: 1;
+  scope: RemovalScope;
+  agentId: string;
+  capabilities: { plan: boolean; team: boolean; independent: boolean; restore: boolean; delete: boolean };
+  archived: RemovalPlanEntry[];
+  /** Souls whose parent is cleared: they stay active, led by nobody. */
+  independent: RemovalPlanEntry[];
+  unchanged: RemovalPlanEntry[];
+}
+
+/** What a remove did (#283): each archived soul's own result, the souls made independent, and what was left when it stopped. */
+export interface RemovalEffects {
+  scope: RemovalScope;
+  archived: { agentId: string; name: string | null; comms: string }[];
+  independent: { agentId: string; name: string | null; displayName: string; formerParentId: string | null }[];
+  notArchived: { agentId: string; name: string | null; displayName: string }[];
+}
+
+const removalScope = (value: unknown): RemovalScope | null => (value === 'soul' || value === 'team' ? value : null);
+const nameOf = (value: unknown): string | null => (typeof value === 'string' && value !== '' ? value : null);
+
+function normalizeRemovalEntry(raw: unknown): RemovalPlanEntry | null {
+  if (!isRecord(raw) || typeof raw.agentId !== 'string' || raw.agentId === '') return null;
+  const name = nameOf(raw.name);
+  return {
+    agentId: raw.agentId,
+    name,
+    displayName: nameOf(raw.displayName) ?? name ?? raw.agentId,
+    status: nameOf(raw.status),
+    harness: nameOf(raw.harness),
+    parentId: nameOf(raw.parentId),
+    running: typeof raw.running === 'boolean' ? raw.running : null,
+    depth: typeof raw.depth === 'number' && Number.isInteger(raw.depth) && raw.depth >= 0 ? raw.depth : 0,
+  };
+}
+
+const removalEntries = (value: unknown): RemovalPlanEntry[] =>
+  (Array.isArray(value) ? value.map(normalizeRemovalEntry).filter((e): e is RemovalPlanEntry => e !== null) : []);
+
+/** The plan with its shape checked; null when the answer is not a schema-1 plan. */
+export function normalizeRemovalPlan(raw: unknown): RemovalPlan | null {
+  if (!isRecord(raw) || raw.schemaVersion !== 1 || typeof raw.agentId !== 'string' || !Array.isArray(raw.archived)) return null;
+  const scope = removalScope(raw.scope);
+  if (!scope) return null;
+  const flags = isRecord(raw.capabilities) ? raw.capabilities : {};
+  const flag = (key: string) => flags[key] === true;
+  return {
+    schemaVersion: 1,
+    scope,
+    agentId: raw.agentId,
+    capabilities: { plan: flag('plan'), team: flag('team'), independent: flag('independent'), restore: flag('restore'), delete: flag('delete') },
+    archived: removalEntries(raw.archived),
+    independent: removalEntries(raw.independent),
+    unchanged: removalEntries(raw.unchanged),
+  };
+}
+
+export function normalizeRemovalEffects(raw: unknown): RemovalEffects | null {
+  if (!isRecord(raw)) return null;
+  const scope = removalScope(raw.scope);
+  if (!scope) return null;
+  const named = (value: unknown) => (Array.isArray(value) ? value.filter(isRecord).filter((e) => typeof e.agentId === 'string' && e.agentId !== '') : []);
+  return {
+    scope,
+    archived: named(raw.archived).map((e) => ({ agentId: e.agentId as string, name: nameOf(e.name), comms: typeof e.comms === 'string' ? e.comms : 'left' })),
+    independent: named(raw.independent).map((e) => ({
+      agentId: e.agentId as string, name: nameOf(e.name), displayName: nameOf(e.displayName) ?? nameOf(e.name) ?? (e.agentId as string), formerParentId: nameOf(e.formerParentId),
+    })),
+    notArchived: named(raw.notArchived).map((e) => ({ agentId: e.agentId as string, name: nameOf(e.name), displayName: nameOf(e.displayName) ?? nameOf(e.name) ?? (e.agentId as string) })),
+  };
 }
 
 export function normalizeRemovedSoul(raw: unknown): RemovedSoul | null {
   if (!isRecord(raw) || typeof raw.agentId !== 'string' || raw.retired !== true) return null;
+  const effects = normalizeRemovalEffects(raw.effects);
   return {
     agentId: raw.agentId,
     name: typeof raw.name === 'string' && raw.name !== '' ? raw.name : null,
@@ -547,26 +646,46 @@ export function normalizeRemovedSoul(raw: unknown): RemovedSoul | null {
       ? raw.archived.filter((a): a is { from: string; to: string } => isRecord(a) && typeof a.from === 'string' && typeof a.to === 'string')
         .map(({ from, to }) => ({ from, to }))
       : [],
+    ...(effects ? { effects } : {}),
   };
 }
 
 /**
  * Archives a soul. agent-bot refuses while it runs (`soul-running`) and asks
  * the owner (its consent dialog, Touch ID); a refusal rejects with its
- * reason, and the soul stays.
+ * reason, and the soul stays. `scope` (#283) is sent only when given: without
+ * it the call is the single remove every engine knows.
  */
-export async function removeSoul(agentId: string, invokeImpl: typeof invoke = invoke): Promise<RemovedSoul> {
+export async function removeSoul(agentId: string, scope: RemovalScope | null = null, invokeImpl: typeof invoke = invoke): Promise<RemovedSoul> {
   let raw: unknown;
   try {
-    raw = await invokeImpl<unknown>('soul_remove', { agent: agentId });
+    raw = await invokeImpl<unknown>('soul_remove', scope ? { agent: agentId, scope } : { agent: agentId });
   } catch (error) {
-    const e = error as { code?: unknown; message?: unknown };
-    throw new BridgeError(typeof e?.code === 'string' ? e.code : 'soul-remove-failed',
-      typeof e?.message === 'string' ? e.message : String(error));
+    throw failureAs(error, 'soul-remove-failed');
   }
   const removed = normalizeRemovedSoul(raw);
   if (!removed) throw new BridgeError('soul-remove-failed', 'agent-bot did not archive the companion');
   return removed;
+}
+
+/**
+ * What archiving `agentId` with `scope` would touch (#283), read-only. Null
+ * when the bundled engine has no `--plan` (the shell answers null for its
+ * usage line): the dialog then shows the single soul and says nothing about
+ * its team, never guessing. Anything else that fails rejects with the
+ * engine's reason.
+ */
+export async function removalPlan(agentId: string, scope: RemovalScope, invokeImpl: typeof invoke = invoke): Promise<RemovalPlan | null> {
+  let raw: unknown;
+  try {
+    raw = await invokeImpl<unknown>('soul_remove_plan', { agent: agentId, scope });
+  } catch (error) {
+    throw failureAs(error, 'soul-remove-plan-failed');
+  }
+  if (raw === null || raw === undefined) return null;
+  const plan = normalizeRemovalPlan(raw);
+  if (!plan) throw new BridgeError('soul-remove-plan-failed', 'agent-bot gave no removal plan');
+  return plan;
 }
 
 /** The daemon as `agent-bot daemon status --json` reports it, for the desktop's badges (#122). */
