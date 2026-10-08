@@ -3,20 +3,23 @@
 // `soul env` descriptor says about the soul's root, components, harnesses,
 // runtimes, sign-in, providers, secrets and retained memory, rendered as
 // reported and never inferred from the filesystem. Every button is gated on
-// `engine.capabilities`; the engine runs the install, the migrations and
-// the clean itself and owner-gates them (Touch ID), as `soul remove` does.
+// `engine.capabilities`; the engine runs the install, the migrations, the
+// clean, the life export and the import itself and owner-gates them (Touch
+// ID), as `soul remove` does.
 import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, CheckCircle2, CircleSlash, Info, WifiOff, X } from 'lucide-react';
 import {
-  installSoulRuntime, migrateSoulEnvironment, soulEnvClean, soulEnvironment,
-  type EnvironmentMigration, type EnvironmentMigrationStep, type MigrationKind, type RuntimeInstall, type SoulCleanRow, type SoulEnvironment, type SoulEnvironmentClean,
+  installSoulRuntime, migrateSoulEnvironment, soulEnvClean, soulEnvExport, soulEnvImport, soulEnvironment,
+  type EnvironmentMigration, type EnvironmentMigrationStep, type ImportIdentity, type MigrationKind, type RuntimeInstall, type SoulCleanRow, type SoulEnvironment, type SoulEnvironmentClean,
+  type SoulEnvironmentExport, type SoulEnvironmentImport, type SoulLifeWorkspace,
 } from '../bridge';
 import { displayName, type CensusRow } from '../model/census';
 import {
-  cleanGroups, componentRows, environmentActions, environmentState, failedStep, formatBytes, harnessRows, historySummary, installOutcome, installProgress, installReducer, installSummary,
+  classificationRows, cleanGroups, componentRows, defaultExportPath, environmentActions, environmentState, exportSummary, failedStep, formatBytes, harnessRows, historySummary, importChoices,
+  installOutcome, installProgress, installReducer, installSummary, linkedWorkspaces, manifestClassifications, manifestPointers,
   memoryContinuity, migrationStepStatus, nextStep, planInstall, providerRows, refusalOf, runtimeRows, secretRows, toolSignIns,
-  type EngineRun, type EnvironmentRead, type EnvironmentState, type InstallEvent, type InstallRun, type InstallableRow, type SignInState,
+  type ClassificationRow, type EngineRun, type EnvironmentRead, type EnvironmentState, type InstallEvent, type InstallRun, type InstallableRow, type SignInState,
 } from '../model/environment';
 import { useI18n, type Translate } from '../lib/i18n';
 
@@ -32,6 +35,10 @@ export interface EnvironmentSource {
   migrate: (agentId: string, kind: MigrationKind, harness: string | null, plan?: boolean) => Promise<EnvironmentMigration>;
   /** `soul env clean <soul> [--plan] [--component ID] --json`: the plan is read-only, the apply owner-gated by the engine. */
   clean: (agentId: string, options: { plan: boolean; components: string[] | null }) => Promise<SoulEnvironmentClean>;
+  /** `soul env export <soul> [--to FILE] [--plan] --json`: the plan is the manifest, read-only; the write is owner-gated by the engine. */
+  exportLife: (agentId: string, options: { plan: boolean; to: string | null }) => Promise<SoulEnvironmentExport>;
+  /** `soul env import FILE [--replace | --fork] [--name NAME] [--plan] --json`: the plan reads the manifest only; the apply is owner-gated by the engine. */
+  importLife: (archive: string, options: { plan: boolean; identity: ImportIdentity; name: string | null }) => Promise<SoulEnvironmentImport>;
 }
 
 // A source that throws instead of rejecting still settles as a rejection.
@@ -42,6 +49,8 @@ export const EnvironmentSourceContext = createContext<EnvironmentSource>({
   installRuntime: (agentId, runtime) => settled(() => installSoulRuntime(agentId, runtime)),
   migrate: (agentId, kind, harness, plan = false) => settled(() => migrateSoulEnvironment(agentId, kind, harness, undefined, plan)),
   clean: (agentId, options) => settled(() => soulEnvClean(agentId, options)),
+  exportLife: (agentId, options) => settled(() => soulEnvExport(agentId, options)),
+  importLife: (archive, options) => settled(() => soulEnvImport(archive, options)),
 });
 
 const messageOf = (failure: unknown): string => {
@@ -217,29 +226,34 @@ function InstallPlanDialog({ name, run, onConfirm, onRetry, onClose }: {
  * than its dialog: closing an in-progress view hides it without stopping
  * the engine, and the result still lands (and the descriptor is read
  * again). `shown` is the soul on screen; a result for another soul is
- * dropped.
+ * dropped. `A` is what the run carries to the engine (nothing for a clean;
+ * the export's destination; the import's archive and identity decision):
+ * the last arguments given are what Retry uses unless it is given others.
  */
-function useEngineRun<T>(agentId: string, shown: RefObject<string>, read: () => Promise<T>, apply: () => Promise<T>, after: () => void) {
+function useEngineRun<T, A = void>(agentId: string, shown: RefObject<string>, read: (args: A) => Promise<T>, apply: (args: A) => Promise<T>, after: () => void) {
   const [run, setRun] = useState<EngineRun<T> | null>(null);
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const latest = useRef<EngineRun<T> | null>(null);
+  const given = useRef<A>(undefined as A);
   const set = useCallback((next: EngineRun<T> | null) => { latest.current = next; if (shown.current === agentId) setRun(next); }, [agentId, shown]);
-  const plan = useCallback(async () => {
+  const plan = useCallback(async (args: A) => {
+    given.current = args;
     set({ phase: 'planning', plan: null, result: null, error: null });
     try {
-      const planned = await read();
+      const planned = await read(args);
       set({ phase: 'plan', plan: planned, result: null, error: null });
     } catch (failure) {
       set({ phase: 'finished', plan: null, result: null, error: refusalOf(failure) });
     }
   }, [read, set]);
-  const confirm = useCallback(async () => {
+  const confirm = useCallback(async (args: A = given.current) => {
     const current = latest.current;
     if (!current || current.phase === 'running') return;
+    given.current = args;
     set({ ...current, phase: 'running', result: null, error: null });
     try {
-      const result = await apply();
+      const result = await apply(args);
       set({ ...current, phase: 'finished', result, error: null });
     } catch (failure) {
       set({ ...current, phase: 'finished', result: null, error: refusalOf(failure) });
@@ -247,11 +261,13 @@ function useEngineRun<T>(agentId: string, shown: RefObject<string>, read: () => 
     if (shown.current === agentId) after();
   }, [agentId, after, apply, set, shown]);
   // Retry re-reads a plan that could not be read, else runs the apply again (the engine plans afresh itself).
-  const retry = useCallback(() => { if (latest.current?.plan) void confirm(); else void plan(); }, [confirm, plan]);
-  const start = useCallback(() => { setOpen(true); if (latest.current?.phase !== 'running') void plan(); }, [plan]);
+  const retry = useCallback((args: A = given.current) => { if (latest.current?.plan) void confirm(args); else void plan(args); }, [confirm, plan]);
+  const start = useCallback((args: A) => { setOpen(true); if (latest.current?.phase !== 'running') void plan(args); }, [plan]);
+  // Opens without planning: the import asks for the archive first.
+  const show = useCallback(() => { setOpen(true); }, []);
   const close = useCallback(() => { setOpen(false); if (latest.current?.phase !== 'running') set(null); trigger.current?.focus(); }, [set]);
   const reset = useCallback(() => { latest.current = null; setRun(null); setOpen(false); }, []);
-  return { run, open, trigger, start, confirm, retry, close, reset };
+  return { run, open, trigger, start, show, plan, confirm, retry, close, reset };
 }
 
 /** An engine refusal, with the command it names shown as text the owner may run; the app never runs it. */
@@ -414,6 +430,276 @@ function CompleteDialog({ name, run, onConfirm, onRetry, onClose }: {
   );
 }
 
+const input = 'min-h-8 w-full rounded-md border border-border bg-background px-2 text-sm font-mono [overflow-wrap:anywhere]';
+
+function ClassificationRows({ rows, t }: { rows: ClassificationRow[]; t: Translate }) {
+  return (
+    <ul className="m-0 grid list-none gap-0.5 p-0 pl-3 text-xs">
+      {rows.map((row) => <li key={row.classification} className={mono}>{t('env.life.row', { classification: row.classification, files: row.files, bytes: formatBytes(row.bytes) })}</li>)}
+    </ul>
+  );
+}
+
+/** A linked workspace as the manifest or the import lists it: the repository stays where it is; the pointer, the patch and the untracked files travel. */
+function WorkspaceRows({ rows, t }: { rows: (SoulLifeWorkspace & { imported?: string | null })[]; t: Translate }) {
+  return (
+    <ul className="m-0 grid list-none gap-0.5 p-0 pl-3 text-xs">
+      {rows.map((w) => (
+        <li key={w.name} className="grid gap-y-0.5">
+          <span className={mono}>{w.name} → {w.target ?? '—'}</span>
+          <span className="text-muted-foreground">
+            {[w.branch ? `${w.branch}${w.head ? ` ${w.head.slice(0, 12)}` : ''}` : null, w.patch ? t('env.life.patch') : null, t('env.life.untracked', { count: w.untracked ?? 0 })].filter(Boolean).join(' · ')}
+          </span>
+          {w.note && <span className="text-muted-foreground">{w.note}</span>}
+          {w.imported && <span className="text-muted-foreground">{t('env.import.workspaceHint', { imported: w.imported })}</span>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function PointerRows({ rows }: { rows: { relative: string; target: string | null }[] }) {
+  return (
+    <ul className="m-0 grid list-none gap-0.5 p-0 pl-3 text-xs">
+      {rows.map((p) => <li key={p.relative} className={mono}>{p.relative} → {p.target ?? '—'}</li>)}
+    </ul>
+  );
+}
+
+/** The destination can be picked again after a refusal about it (`export-target-exists`, `export-target-inside-root`). */
+const TARGET_REFUSALS = new Set(['export-target-exists', 'export-target-inside-root']);
+
+/**
+ * The export dialog: the engine's manifest, read-only (what travels by
+ * classification, what is left out and why, linked workspaces as pointers,
+ * the memory's location, the revision journal), the destination, confirm,
+ * the owner-gated write, then the file written with the engine's counts,
+ * or its refusal (`soul-running` names the stop command, shown and never
+ * run; a destination refusal keeps the field so another path can be tried).
+ * The manifest holds paths, counts and hashes, never a file's contents, and
+ * the dialog repeats the engine.
+ */
+function ExportDialog({ name, run, to, onTo, onConfirm, onRetry, onClose }: {
+  name: string; run: EngineRun<SoulEnvironmentExport>; to: string; onTo: (to: string) => void; onConfirm: () => void; onRetry: () => void; onClose: () => void;
+}) {
+  const { t } = useI18n();
+  const ids = useId();
+  const confirm = useRef<HTMLButtonElement>(null);
+  const retry = useRef<HTMLButtonElement>(null);
+  const running = run.phase === 'running';
+  const plan = run.phase === 'plan' ? run.plan : null;
+  const result = run.phase === 'finished' ? run.result : null;
+  const failed = run.error !== null;
+  const pickAgain = failed && run.plan !== null && TARGET_REFUSALS.has(run.error?.code ?? '');
+  useEffect(() => { if (run.phase === 'plan') confirm.current?.focus(); }, [run.phase]);
+  useEffect(() => { if (failed) retry.current?.focus(); }, [failed]);
+  const manifest = plan?.manifest ?? null;
+  const summary = manifest ? exportSummary(manifest) : null;
+  const linked = manifest ? linkedWorkspaces(manifest.workspaces) : [];
+  const pointers = manifest ? manifestPointers(manifest) : [];
+  const field = (plan !== null || pickAgain) && !running;
+  return (
+    <Modal title={t('env.export.title', { name })} running={running} cancelling={run.phase === 'plan' || run.phase === 'planning'} onClose={onClose}>
+      {run.phase === 'planning' && <p role="status" className="m-0 text-sm text-muted-foreground">{t('env.export.planning')}</p>}
+      {plan && <p className="m-0 text-sm text-muted-foreground">{t('env.export.body', { name })}</p>}
+      {manifest && summary && (
+        <div className="grid gap-2 text-sm">
+          <div className="grid gap-1">
+            <h3 className={heading}>{t('env.export.travels')}</h3>
+            <p className={`m-0 ${mono}`}>{t('env.life.totals', { files: summary.files, bytes: formatBytes(summary.bytes) })}</p>
+            <ClassificationRows rows={manifestClassifications(manifest)} t={t} />
+            <p className="m-0 text-xs text-muted-foreground">
+              {t('env.export.memory', { location: manifest.memory.location ?? t('unknown') })}{manifest.memory.target ? ` (${manifest.memory.target})` : ''} · {t('env.export.journal', { entries: summary.journalEntries })}
+            </p>
+          </div>
+          {manifest.excluded.length > 0 && (
+            <div className="grid gap-1">
+              <h3 className={heading}>{t('env.export.leftOut')}</h3>
+              <ul className="m-0 grid list-none gap-0.5 p-0 pl-3 text-xs">
+                {manifest.excluded.map((row) => (
+                  <li key={row.relative} className="grid gap-x-2 min-[480px]:grid-cols-[1fr_auto]">
+                    <span className={mono}>{row.relative}</span>
+                    <span className="text-muted-foreground">{row.classification ?? ''}</span>
+                    {row.reason && <span className="text-muted-foreground min-[480px]:col-span-2">{row.reason}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {linked.length > 0 && (
+            <div className="grid gap-1">
+              <h3 className={heading}>{t('env.export.workspaces')}</h3>
+              <p className="m-0 text-xs text-muted-foreground">{t('env.export.linkedHint')}</p>
+              <WorkspaceRows rows={linked} t={t} />
+            </div>
+          )}
+          {pointers.length > 0 && (
+            <div className="grid gap-1">
+              <h3 className={heading}>{t('env.export.pointers')}</h3>
+              <PointerRows rows={pointers} />
+            </div>
+          )}
+        </div>
+      )}
+      {field && (
+        <div className="grid gap-1 text-sm">
+          <label htmlFor={`${ids}-to`} className="text-xs font-medium">{t('env.export.to')}</label>
+          <input id={`${ids}-to`} type="text" value={to} onChange={(e) => onTo(e.target.value)} spellCheck={false} autoComplete="off" className={input} aria-describedby={`${ids}-to-hint`} />
+          <p id={`${ids}-to-hint`} className="m-0 text-xs text-muted-foreground">{t('env.export.toHint')}</p>
+        </div>
+      )}
+      <p role="status" aria-live="polite" className="m-0 min-h-5 text-sm">
+        {running && t('env.export.running')}
+        {result?.decision === 'exported' && t('env.export.done', { file: result.file ?? '—', files: result.manifest.totals.files ?? 0, bytes: formatBytes(result.manifest.totals.bytes ?? 0) })}
+      </p>
+      {result?.decision === 'exported' && (
+        <p className="m-0 text-xs text-muted-foreground">
+          {t('env.export.doneDetail', { excluded: result.manifest.excluded.length, linked: linkedWorkspaces(result.manifest.workspaces).length })}
+        </p>
+      )}
+      {running && <p className="m-0 text-xs text-muted-foreground">{t('env.noCancel')}</p>}
+      {run.error && <Refusal text={t('env.export.refused', { message: run.error.message })} action={run.error.action} />}
+      {pickAgain && <p className="m-0 text-xs text-muted-foreground">{t('env.export.pickAnother')}</p>}
+      <div className="flex flex-wrap justify-end gap-2">
+        {plan && <button type="button" onClick={onClose} className={button}>{t('cancel')}</button>}
+        {plan && <button ref={confirm} type="button" onClick={onConfirm} disabled={to.trim() === ''} className={primary}>{t('env.export.confirm')}</button>}
+        {failed && <button ref={retry} type="button" onClick={onRetry} disabled={pickAgain && to.trim() === ''} className={primary}>{t('env.retry')}</button>}
+        {!plan && <button type="button" onClick={onClose} className={button}>{t('close')}</button>}
+      </div>
+    </Modal>
+  );
+}
+
+/** What the import dialog carries to the engine: the archive, how the exported ID is settled, a fork's display name. */
+export interface ImportForm {
+  archive: string;
+  identity: ImportIdentity;
+  name: string;
+}
+
+const JOURNAL_TEXT: Record<string, 'env.import.journal.restored' | 'env.import.journal.adopted' | 'env.import.journal.keptLocal'> = {
+  restored: 'env.import.journal.restored', adopted: 'env.import.journal.adopted', 'kept-local': 'env.import.journal.keptLocal',
+};
+
+/**
+ * The import dialog: the archive's path, then the engine's plan (the
+ * identity decision and the destination, what would be restored by
+ * classification, pointers listed and never recreated, the linked
+ * workspaces to link again), the replace-or-fork choice when the ID is
+ * already here (fork only when it is retired), an optional display name
+ * for a fork, confirm, the owner-gated apply, then the engine's report:
+ * the root restored, its Agent ID, the previous root a replace moved aside
+ * (never deleted), the journal's fate and the workspaces to link again, or
+ * the engine's refusal with its action as text.
+ */
+function ImportDialog({ run, form, onForm, onPlan, onConfirm, onRetry, onClose }: {
+  run: EngineRun<SoulEnvironmentImport> | null; form: ImportForm; onForm: (form: ImportForm) => void; onPlan: (form: ImportForm) => void; onConfirm: () => void; onRetry: () => void; onClose: () => void;
+}) {
+  const { t } = useI18n();
+  const ids = useId();
+  const archiveField = useRef<HTMLInputElement>(null);
+  const confirm = useRef<HTMLButtonElement>(null);
+  const retry = useRef<HTMLButtonElement>(null);
+  const phase = run?.phase ?? 'pick';
+  const running = phase === 'running';
+  const plan = run?.phase === 'plan' ? run.plan : null;
+  const result = run?.phase === 'finished' ? run.result : null;
+  const error = run?.error ?? null;
+  const choices = importChoices(plan, error);
+  // An identity refusal is the engine asking which way: the choice is the answer, not a failure to retry.
+  const deciding = choices.length > 0 && plan === null;
+  const failed = error !== null && !deciding;
+  const picking = phase === 'pick' || (failed && run?.plan === null);
+  useEffect(() => { if (phase === 'pick') archiveField.current?.focus(); }, [phase]);
+  useEffect(() => { if (phase === 'plan') confirm.current?.focus(); }, [phase]);
+  useEffect(() => { if (failed) retry.current?.focus(); }, [failed]);
+  const choose = (identity: ImportIdentity) => { const next = { ...form, identity }; onForm(next); onPlan(next); };
+  const identityLine = plan ? (plan.identity.decision === 'replace' ? t('env.import.replace', { soulDir: plan.identity.existing?.soulDir ?? '—' })
+    : plan.identity.decision === 'fork' ? t('env.import.fork', { agentId: plan.identity.importedFrom ?? '—' })
+      : t('env.import.keep', { agentId: plan.identity.agentId ?? '—' })) : null;
+  const restored = result ?? plan;
+  const workspaces = restored?.workspaces ?? [];
+  const pointers = restored?.pointers ?? [];
+  return (
+    <Modal title={t('env.import.title')} running={running} cancelling={phase === 'pick' || phase === 'plan' || phase === 'planning' || deciding} onClose={onClose}>
+      {picking && (
+        <div className="grid gap-1 text-sm">
+          <label htmlFor={`${ids}-archive`} className="text-xs font-medium">{t('env.import.archive')}</label>
+          <input ref={archiveField} id={`${ids}-archive`} type="text" value={form.archive} onChange={(e) => onForm({ ...form, archive: e.target.value })}
+            onKeyDown={(e) => { if (e.key === 'Enter' && form.archive.trim() !== '') { e.preventDefault(); onPlan(form); } }}
+            spellCheck={false} autoComplete="off" className={input} aria-describedby={`${ids}-archive-hint`} />
+          <p id={`${ids}-archive-hint`} className="m-0 text-xs text-muted-foreground">{t('env.import.archiveHint')}</p>
+        </div>
+      )}
+      {phase === 'planning' && <p role="status" className="m-0 text-sm text-muted-foreground">{t('env.import.planning')}</p>}
+      {/* The engine asking which way (`import-id-active`, `import-id-retired`): its message as it came, then the choice. */}
+      {deciding && error && <p className="m-0 text-sm">{error.message}</p>}
+      {plan && <p className="m-0 text-sm text-muted-foreground">{t('env.import.body')}</p>}
+      {plan && identityLine && <p className="m-0 text-sm">{identityLine}</p>}
+      {choices.length > 0 && !running && !result && (
+        <fieldset className="m-0 grid gap-1 border-0 p-0 text-sm">
+          <legend className="mb-1 text-xs font-medium">{t('env.import.choice')}</legend>
+          {choices.map((choice) => (
+            <label key={choice} className="flex items-center gap-2">
+              <input type="radio" name={`${ids}-identity`} value={choice} checked={form.identity === choice} onChange={() => choose(choice)} />
+              <span>{t(choice === 'replace' ? 'env.import.choiceReplace' : 'env.import.choiceFork')}</span>
+            </label>
+          ))}
+        </fieldset>
+      )}
+      {plan && form.identity === 'fork' && (
+        <div className="grid gap-1 text-sm">
+          <label htmlFor={`${ids}-name`} className="text-xs font-medium">{t('env.import.name')}</label>
+          <input id={`${ids}-name`} type="text" value={form.name} onChange={(e) => onForm({ ...form, name: e.target.value })} maxLength={128} autoComplete="off" className={input} aria-describedby={`${ids}-name-hint`} />
+          <p id={`${ids}-name-hint`} className="m-0 text-xs text-muted-foreground">{t('env.import.nameHint', { name: plan.displayName ?? plan.name ?? '—' })}</p>
+        </div>
+      )}
+      {plan && (
+        <div className="grid gap-2 text-sm">
+          <p className={`m-0 ${mono}`}><span className="font-sans text-muted-foreground">{t('env.import.destination')}: </span>{plan.soulDir ?? '—'}</p>
+          <div className="grid gap-1">
+            <h3 className={heading}>{t('env.import.wouldRestore')}</h3>
+            <p className={`m-0 ${mono}`}>{t('env.life.totals', { files: plan.restored.files ?? 0, bytes: formatBytes(plan.restored.bytes ?? 0) })}</p>
+            <ClassificationRows rows={classificationRows(plan.restored.byClassification)} t={t} />
+          </div>
+        </div>
+      )}
+      {(plan || result) && pointers.length > 0 && (
+        <div className="grid gap-1 text-sm">
+          <h3 className={heading}>{t('env.import.pointers')}</h3>
+          <PointerRows rows={pointers} />
+        </div>
+      )}
+      {(plan || result) && workspaces.length > 0 && (
+        <div className="grid gap-1 text-sm">
+          <h3 className={heading}>{t('env.import.workspaces')}</h3>
+          <WorkspaceRows rows={workspaces} t={t} />
+        </div>
+      )}
+      <p role="status" aria-live="polite" className="m-0 min-h-5 text-sm">
+        {running && t('env.import.running')}
+        {result?.applied && t('env.import.done', { name: result.displayName ?? result.name ?? '—', soulDir: result.soulDir ?? '—', files: result.restored.files ?? 0, bytes: formatBytes(result.restored.bytes ?? 0) })}
+      </p>
+      {result?.applied && (
+        <div className={`grid gap-0.5 text-xs text-muted-foreground ${mono}`}>
+          <span>{t('env.import.agentId', { agentId: result.identity.agentId ?? '—' })}</span>
+          {result.replaced && <span className="font-sans">{t('env.import.replaced', { path: result.replaced })}</span>}
+          {result.journal && JOURNAL_TEXT[result.journal] && <span className="font-sans">{t(JOURNAL_TEXT[result.journal])}</span>}
+        </div>
+      )}
+      {running && <p className="m-0 text-xs text-muted-foreground">{t('env.noCancel')}</p>}
+      {failed && error && <Refusal text={t('env.import.refused', { message: error.message })} action={error.action} />}
+      <div className="flex flex-wrap justify-end gap-2">
+        {(picking || plan || deciding) && <button type="button" onClick={onClose} className={button}>{t('cancel')}</button>}
+        {picking && !failed && <button type="button" onClick={() => onPlan(form)} disabled={form.archive.trim() === ''} className={primary}>{t('env.import.read')}</button>}
+        {plan && <button ref={confirm} type="button" onClick={onConfirm} className={primary}>{t('env.import.confirm')}</button>}
+        {failed && <button ref={retry} type="button" onClick={onRetry} disabled={form.archive.trim() === ''} className={primary}>{t('env.retry')}</button>}
+        {!picking && !plan && !deciding && <button type="button" onClick={onClose} className={button}>{t('close')}</button>}
+      </div>
+    </Modal>
+  );
+}
+
 interface MigrationState { kind: MigrationKind; busy: boolean; result: EnvironmentMigration | null; error: string | null }
 
 /**
@@ -446,9 +732,29 @@ export function EnvironmentSection({ soul, refresh = 0 }: { soul: CensusRow; ref
     useCallback(() => source.migrate(agentId, 'complete', null, true), [source, agentId]),
     useCallback(() => source.migrate(agentId, 'complete', null, false), [source, agentId]),
     reload);
+  // The export's destination and the import's form live here with their
+  // runs: a refusal about the path keeps what was typed for another try.
+  const [exportTo, setExportTo] = useState(() => defaultExportPath(soul.name, soul.agentId));
+  const exportLife = useEngineRun<SoulEnvironmentExport, { to: string | null }>(agentId, shown,
+    useCallback(() => source.exportLife(agentId, { plan: true, to: null }), [source, agentId]),
+    useCallback(({ to }: { to: string | null }) => source.exportLife(agentId, { plan: false, to }), [source, agentId]),
+    reload);
+  const [importForm, setImportForm] = useState<ImportForm>({ archive: '', identity: 'keep', name: '' });
+  const importLife = useEngineRun<SoulEnvironmentImport, ImportForm>(agentId, shown,
+    useCallback((form: ImportForm) => source.importLife(form.archive.trim(), { plan: true, identity: form.identity, name: form.name.trim() || null }), [source]),
+    useCallback((form: ImportForm) => source.importLife(form.archive.trim(), { plan: false, identity: form.identity, name: form.name.trim() || null }), [source]),
+    reload);
   const resetClean = clean.reset;
   const resetComplete = complete.reset;
-  useEffect(() => { shown.current = soul.agentId; setRun(null); setPlanOpen(false); setMigration(null); resetClean(); resetComplete(); }, [soul.agentId, resetClean, resetComplete]);
+  const resetExport = exportLife.reset;
+  const resetImport = importLife.reset;
+  useEffect(() => {
+    shown.current = soul.agentId; setRun(null); setPlanOpen(false); setMigration(null); resetClean(); resetComplete(); resetExport(); resetImport();
+    setExportTo(defaultExportPath(soul.name, soul.agentId)); setImportForm({ archive: '', identity: 'keep', name: '' });
+  }, [soul.agentId, soul.name, resetClean, resetComplete, resetExport, resetImport]);
+  const gated = [!actions?.export, !actions?.import, !actions?.clean];
+  const gatedNote = !actions ? 'env.gated' : gated.every(Boolean) ? 'env.gated' : gated[0] && gated[1] ? 'env.gatedExport' : gated.some(Boolean) ? 'env.gatedList' : null;
+  const gatedFeatures = [gated[0] ? t('env.export') : null, gated[1] ? t('env.import') : null, gated[2] ? t('env.cleanCache') : null].filter((f): f is string => f !== null).join(', ');
 
   const execute = useCallback(async (start: InstallRun) => {
     const agentId = soul.agentId;
@@ -553,7 +859,7 @@ export function EnvironmentSection({ soul, refresh = 0 }: { soul: CensusRow; ref
           {/* Capability-gated: the engine finishes every pending step at once (`migrate-complete`). */}
           {actions?.complete && (
             <div>
-              <button ref={complete.trigger} type="button" aria-haspopup="dialog" className={button} onClick={complete.start}>{t('env.complete')}</button>
+              <button ref={complete.trigger} type="button" aria-haspopup="dialog" className={button} onClick={() => complete.start()}>{t('env.complete')}</button>
             </div>
           )}
           {/* Capability-gated recovery: the engine lists the action for the problem, and can run it. */}
@@ -673,16 +979,20 @@ export function EnvironmentSection({ soul, refresh = 0 }: { soul: CensusRow; ref
         </div>
       )}
 
-      {/* Export and import wait for their engine slice; the clean is live once the engine lists `env-clean`. */}
+      {/* Each is live once the engine lists its capability (`env-export`, `env-import`, `env-clean`); the rest stay visible, disabled, with the gated copy. */}
       <div className="grid gap-1.5">
         <div className="flex flex-wrap gap-2">
-          <button type="button" disabled aria-describedby={`${ids}-gated`} className={button}>{t('env.export')}</button>
-          <button type="button" disabled aria-describedby={`${ids}-gated`} className={button}>{t('env.import')}</button>
+          {actions?.export
+            ? <button ref={exportLife.trigger} type="button" aria-haspopup="dialog" className={button} onClick={() => exportLife.start({ to: null })}>{t('env.exportLife')}</button>
+            : <button type="button" disabled aria-describedby={`${ids}-gated`} className={button}>{t('env.export')}</button>}
+          {actions?.import
+            ? <button ref={importLife.trigger} type="button" aria-haspopup="dialog" className={button} onClick={importLife.show}>{t('env.importLife')}</button>
+            : <button type="button" disabled aria-describedby={`${ids}-gated`} className={button}>{t('env.import')}</button>}
           {actions?.clean
-            ? <button ref={clean.trigger} type="button" aria-haspopup="dialog" className={button} onClick={clean.start}>{t('env.cleanCache')}</button>
+            ? <button ref={clean.trigger} type="button" aria-haspopup="dialog" className={button} onClick={() => clean.start()}>{t('env.cleanCache')}</button>
             : <button type="button" disabled aria-describedby={`${ids}-gated`} className={button}>{t('env.cleanCache')}</button>}
         </div>
-        <p id={`${ids}-gated`} className="m-0 text-xs text-muted-foreground">{t(actions?.clean ? 'env.gatedExport' : 'env.gated')}</p>
+        {gatedNote && <p id={`${ids}-gated`} className="m-0 text-xs text-muted-foreground">{t(gatedNote, { features: gatedFeatures })}</p>}
       </div>
 
       {env && (
@@ -713,7 +1023,15 @@ export function EnvironmentSection({ soul, refresh = 0 }: { soul: CensusRow; ref
         <CleanDialog name={name} run={clean.run} onClose={clean.close} onConfirm={() => { void clean.confirm(); }} onRetry={clean.retry} />
       )}
       {complete.open && complete.run && (
-        <CompleteDialog name={name} run={complete.run} onClose={complete.close} onConfirm={() => { void complete.confirm(); }} onRetry={complete.retry} />
+        <CompleteDialog name={name} run={complete.run} onClose={complete.close} onConfirm={() => { void complete.confirm(); }} onRetry={() => complete.retry()} />
+      )}
+      {exportLife.open && exportLife.run && (
+        <ExportDialog name={name} run={exportLife.run} to={exportTo} onTo={setExportTo} onClose={exportLife.close}
+          onConfirm={() => { void exportLife.confirm({ to: exportTo.trim() }); }} onRetry={() => exportLife.retry({ to: exportTo.trim() })} />
+      )}
+      {importLife.open && (
+        <ImportDialog run={importLife.run} form={importForm} onForm={setImportForm} onClose={importLife.close}
+          onPlan={(form) => { void importLife.plan(form); }} onConfirm={() => { void importLife.confirm(importForm); }} onRetry={() => importLife.retry(importForm)} />
       )}
     </section>
   );

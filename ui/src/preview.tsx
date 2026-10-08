@@ -54,7 +54,7 @@ import { SoulSourceContext, type SoulSource } from './components/SoulNotices';
 import { EnvironmentSourceContext, type EnvironmentSource } from './components/EnvironmentSection';
 import type { CensusRow } from './model/census';
 import { emptyChat, emptyComposer, mergeIncoming, type ChatState } from './model/chat';
-import { inboxMessage, sampleApprovals, sampleAudit, sampleBadges, sampleCensus, sampleColdWake, sampleConnection, sampleEnvironments, sampleFloating, sampleHosts, sampleModels, sampleModes, sampleOpenedPackages, samplePaused, samplePopulation, samplePreparedRevision, sampleProfile, sampleProfileFiles, sampleRemovalPlan, sampleSandbox, sampleSandboxSteps, sampleSessionEntries, sampleTemplates } from './model/fixtures';
+import { inboxMessage, sampleApprovals, sampleAudit, sampleBadges, sampleCensus, sampleColdWake, sampleConnection, sampleEnvironments, sampleFloating, sampleLifeExport, sampleLifeImport, sampleHosts, sampleModels, sampleModes, sampleOpenedPackages, samplePaused, samplePopulation, samplePreparedRevision, sampleProfile, sampleProfileFiles, sampleRemovalPlan, sampleSandbox, sampleSandboxSteps, sampleSessionEntries, sampleTemplates } from './model/fixtures';
 import type { SandboxSource, SandboxStatus } from './components/Sandbox';
 import { HOST_TOOLS, checkingHost, type HostCapabilities, type HostToolId, type HostToolState } from './model/host';
 import type { Starter } from './components/FirstLaunch';
@@ -140,6 +140,7 @@ const computerUseSwitch: ComputerUseSwitch = {
 // approves; scout's older engine offers none; the rest read as offline,
 // and the archived soul as an engine without `soul env`.
 const environments: Record<string, SoulEnvironment> = { ...sampleEnvironments };
+const lunaSoulDir = sampleEnvironments.agent_p.root.soulDir ?? '/Users/user/Souls/Luna.soul';
 const environmentSource: EnvironmentSource = {
   environment: async (agentId) => {
     const env = environments[agentId];
@@ -212,6 +213,46 @@ const environmentSource: EnvironmentSource = {
     const bytes = removable.reduce((sum, r) => sum + r.bytes, 0);
     const base = { agentId, soulDir: root, components: ['cache', 'temp', 'runtimes'], removable, removed: [], failed: [], kept, files, bytes };
     return plan ? { ...base, applied: false, decision: 'planned' } : { ...base, applied: true, decision: 'cleaned', removed: removable };
+  },
+  // A life export as agent-bot 0.10.55 plans luna's (sampleLifeExport);
+  // the apply "writes" the file named, refusing a path that exists in the
+  // scenario (&export=exists) or while the soul runs (&export=running).
+  exportLife: async (agentId, { plan, to }) => {
+    const env = environments[agentId];
+    if (!env) throw new BridgeError('soul-not-found', 'Soul not found.');
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    const manifest = { ...sampleLifeExport.manifest, agentId, root: env.root.soulDir };
+    if (plan) return { ...sampleLifeExport, agentId, soulDir: env.root.soulDir, manifest };
+    const scenario = new URLSearchParams(location.search).get('export');
+    if (scenario === 'running') throw new BridgeError('soul-running', `${agentId} is running (a turn in flight or a warm harness); stop it before exporting its life`, `agent-bot soul stop ${agentId}`);
+    if (scenario === 'exists' || to === null) throw new BridgeError('export-target-exists', `${to ?? '-'} already exists; choose another path`, 'pick a file that does not exist yet');
+    return { ...sampleLifeExport, agentId, soulDir: env.root.soulDir, applied: true, decision: 'exported', file: to, manifest };
+  },
+  // An import of that export: an archive named after luna is her ID, active
+  // here, so the engine asks for --replace or --fork; any other archive is
+  // an unknown ID kept as a moved life (&import=retired makes it a tombstone).
+  importLife: async (archive, { plan, identity, name }) => {
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    if (!/\.(tar\.gz|tgz)$/.test(archive)) throw new BridgeError('import-archive-missing', `${archive} is not a file`);
+    const scenario = new URLSearchParams(location.search).get('import');
+    const known = /luna/i.test(archive);
+    const retired = new BridgeError('import-id-retired', 'agent_p is retired here; a retired soul never comes back under its ID', 'add --fork to import it as a new soul');
+    if (known && identity === 'keep') {
+      if (scenario === 'retired') throw retired;
+      throw new BridgeError('import-id-active', `agent_p is an active soul here (${lunaSoulDir})`, 'add --replace to overwrite its life, or --fork to import as a new soul');
+    }
+    if (known && identity === 'replace' && scenario === 'retired') throw retired;
+    const existing = known ? { status: scenario === 'retired' ? 'retired' : 'active', soulDir: lunaSoulDir } : null;
+    const base = { ...sampleLifeImport, archive, displayName: name ?? sampleLifeImport.displayName };
+    const planned = identity === 'fork'
+      ? { ...base, identity: { decision: 'fork', agentId: null, importedFrom: 'agent_p', existing }, soulDir: '/Users/user/Souls/luna-<agent id tail>.soul', name: null }
+      : identity === 'replace'
+        ? { ...base, identity: { decision: 'replace', agentId: 'agent_p', importedFrom: 'agent_p', existing }, soulDir: lunaSoulDir, replaced: lunaSoulDir }
+        : { ...base, identity: { decision: 'keep', agentId: 'agent_p', importedFrom: 'agent_p', existing: null } };
+    if (plan) return planned;
+    if (identity === 'fork') return { ...planned, applied: true, decision: 'forked', identity: { ...planned.identity, agentId: 'agent_f' }, soulDir: '/Users/user/Souls/luna-6e3a9c1d.soul', name: 'luna-6e3a9c1d', journal: 'adopted' };
+    if (identity === 'replace') return { ...planned, applied: true, decision: 'replaced', replaced: `${lunaSoulDir}.replaced-2026-10-08T10-00-00-000Z`, journal: 'kept-local' };
+    return { ...planned, applied: true, decision: 'imported', journal: 'restored' };
   },
 };
 

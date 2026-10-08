@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { RuntimeInstall, SoulCleanRow, SoulEnvironment } from '../bridge';
-import { sampleEnvironments } from './fixtures';
+import { sampleEnvironments, sampleLifeExport, sampleLifeImport } from './fixtures';
 import {
-  cleanGroups, componentRows, environmentActions, environmentState, failedStep, formatBytes, harnessRows, historySummary, installOutcome, installProgress, installReducer, installSummary,
+  classificationRows, cleanGroups, componentRows, defaultExportPath, environmentActions, environmentState, exportSummary, failedStep, formatBytes, harnessRows, historySummary, importChoices,
+  installOutcome, installProgress, installReducer, installSummary, linkedWorkspaces, manifestClassifications, manifestPointers,
   memoryContinuity, migrationRequired, migrationStepStatus, missingRuntimes, nextStep, pendingMigrationSteps, planInstall, providerRows, refusalOf, runtimeRows, secretRows, toolSignIns, type InstallRun,
 } from './environment';
 
@@ -88,10 +89,10 @@ describe('rows from the descriptor', () => {
 });
 
 describe('capability-gated actions', () => {
-  const none = { install: null, adopt: null, migrateSpace: false, clean: false, complete: false };
+  const none = { install: null, adopt: null, migrateSpace: false, clean: false, complete: false, export: false, import: false };
 
   it('offers install, adopt and migrate only with the capability and the engine-listed action', () => {
-    expect(environmentActions(luna)).toEqual({ install: [{ name: 'node', version: '24.11.1', reason: 'not provisioned' }], adopt: 'codex', migrateSpace: true, clean: true, complete: true });
+    expect(environmentActions(luna)).toEqual({ install: [{ name: 'node', version: '24.11.1', reason: 'not provisioned' }], adopt: 'codex', migrateSpace: true, clean: true, complete: true, export: true, import: true });
     // The older engine lists the same missing runtime but no capability: nothing is offered.
     expect(environmentActions(scout)).toEqual(none);
     expect(environmentActions(withCaps(luna, ['env', 'runtimes']))).toEqual({ ...none, install: [{ name: 'node', version: '24.11.1', reason: 'not provisioned' }] });
@@ -110,6 +111,12 @@ describe('capability-gated actions', () => {
     expect(pendingMigrationSteps(finished)).toEqual([]);
     // An interrupted phase is still pending.
     expect(pendingMigrationSteps({ ...luna, migration: { ...luna.migration, steps: [{ id: 'space-into-soul', status: 'copying', from: null, to: null }] } }).length).toBe(1);
+  });
+
+  it('offers the export and the import each on its own capability (slice 7)', () => {
+    expect(environmentActions(withCaps(luna, ['env-export']))).toEqual({ ...none, export: true });
+    expect(environmentActions(withCaps(luna, ['env-import']))).toEqual({ ...none, import: true });
+    expect(environmentActions(withCaps(luna, ['env-export', 'env-import', 'env-clean']))).toEqual({ ...none, export: true, import: true, clean: true });
   });
 
   it('never gates on the engine version', () => {
@@ -202,5 +209,47 @@ describe('the install run', () => {
       .toEqual({ outcome: 'failed', message: 'the download is corrupt' });
     expect(installOutcome(report({ harnesses: [{ name: 'opencode', status: 'installed', version: '1.2.3', lastError: null }] }), 'opencode')).toEqual({ outcome: 'completed', message: null });
     expect(installOutcome(report(), 'node')).toEqual({ outcome: 'unknown', message: null });
+  });
+});
+
+describe("the life export and import helpers (slice 7)", () => {
+  const manifest = sampleLifeExport.manifest;
+
+  it('sums the manifest per classification from entries that carry bytes, in the manifest\'s order, and the engine\'s totals as they are', () => {
+    expect(manifestClassifications(manifest)).toEqual([
+      { classification: 'definition', files: 4, bytes: 6_260 },
+      { classification: 'private-home', files: 4, bytes: 48_735 },
+      { classification: 'memory', files: 2, bytes: 7_520 },
+      { classification: 'history', files: 2, bytes: 133_120 },
+      { classification: 'workspace', files: 5, bytes: 5_056 },
+    ]);
+    // A directory row and a pointer without an entry carry no bytes.
+    expect(manifestClassifications({ ...manifest, components: [{ ...manifest.components[0], kind: 'dir' }, { ...manifest.components[0], entry: null }, { ...manifest.components[0], classification: null }] }))
+      .toEqual([{ classification: 'unclassified', files: 1, bytes: 1_204 }]);
+    expect(exportSummary(manifest)).toEqual({ files: 17, bytes: 200_209, excluded: 5, linked: 1, pointers: 1, journalEntries: 3 });
+    expect(exportSummary({ ...manifest, totals: { files: null, bytes: null }, journal: { entries: null }, excluded: [], workspaces: [] })).toEqual({ files: 0, bytes: 0, excluded: 0, linked: 0, pointers: 1, journalEntries: 0 });
+    expect(manifestPointers(manifest).map((p) => [p.relative, p.target])).toEqual([['.soul-state/space', '/Users/user/space/luna']]);
+    expect(linkedWorkspaces(manifest.workspaces).map((w) => w.name)).toEqual(['site']);
+    expect(classificationRows(sampleLifeImport.restored.byClassification)[0]).toEqual({ classification: 'definition', files: 4, bytes: 6_260 });
+  });
+
+  it('offers the identity choices the engine leaves open: none for a moved life, replace or fork for an active ID, fork only for a retired one', () => {
+    expect(importChoices(sampleLifeImport, null)).toEqual([]);
+    expect(importChoices(null, { code: 'import-id-active', message: 'active', action: 'add --replace or --fork' })).toEqual(['replace', 'fork']);
+    expect(importChoices(null, { code: 'import-id-retired', message: 'retired', action: 'add --fork' })).toEqual(['fork']);
+    expect(importChoices(null, { code: 'import-unsafe-archive', message: 'a symlink', action: null })).toEqual([]);
+    expect(importChoices(null, null)).toEqual([]);
+    const active = { status: 'active', soulDir: '/s' };
+    expect(importChoices({ ...sampleLifeImport, identity: { decision: 'replace', agentId: 'agent_p', importedFrom: 'agent_p', existing: active } }, null)).toEqual(['replace', 'fork']);
+    expect(importChoices({ ...sampleLifeImport, identity: { decision: 'fork', agentId: null, importedFrom: 'agent_p', existing: active } }, null)).toEqual(['replace', 'fork']);
+    expect(importChoices({ ...sampleLifeImport, identity: { decision: 'fork', agentId: null, importedFrom: 'agent_p', existing: { status: 'retired', soulDir: null } } }, null)).toEqual(['fork']);
+    expect(importChoices({ ...sampleLifeImport, identity: { decision: 'fork', agentId: null, importedFrom: 'agent_p', existing: null } }, null)).toEqual([]);
+  });
+
+  it('names the default destination after the soul, on the Desktop, file-safe', () => {
+    expect(defaultExportPath('luna', 'agent_p')).toBe('~/Desktop/luna.soul-life.tar.gz');
+    expect(defaultExportPath('Luna Two / Beta', 'agent_p')).toBe('~/Desktop/Luna-Two-Beta.soul-life.tar.gz');
+    expect(defaultExportPath(null, 'agent_p')).toBe('~/Desktop/agent_p.soul-life.tar.gz');
+    expect(defaultExportPath('///', 'agent_p')).toBe('~/Desktop/agent_p.soul-life.tar.gz');
   });
 });

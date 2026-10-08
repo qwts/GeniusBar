@@ -5333,6 +5333,213 @@ fn parse_soul_env_clean(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeErr
     )
 }
 
+/// Exports the soul's life as one file (#268; agent-bot 0.10.55,
+/// agent-bot-identity #583 slice 7): `soul env export <agentId> [--to FILE]
+/// [--plan] --json`. With `plan` the engine prints the manifest, read-only
+/// (what travels by classification, what is left out and why, linked
+/// workspaces as pointers, no gate, nothing written); without it the engine
+/// owner-gates the write itself (its consent dialog, Touch ID), refuses
+/// `soul-running` while the soul runs (the action `agent-bot soul stop
+/// <id>` rides on the error), `export-target-exists` and
+/// `export-target-inside-root` for the destination, and answers `applied:
+/// true` with `decision: exported` and the file it wrote. Printed as
+/// `{schemaVersion, agentId, soulDir, applied, decision, file, manifest}`
+/// and passed through as printed: paths, counts, hashes and reasons, never
+/// a file's contents. A leading `~/` in the destination is the owner's home
+/// (the engine resolves against its cwd and expands nothing). The section
+/// offers it only when the descriptor lists the `env-export` capability;
+/// an older bundle without `soul env export` answers its `soul env` usage
+/// line, which maps to `soul-env-export-unsupported`.
+#[tauri::command]
+pub async fn soul_env_export<R: Runtime>(
+    app: AppHandle<R>,
+    agent: String,
+    to: Option<String>,
+    plan: bool,
+) -> Result<Value, BridgeError> {
+    let home = app.path().home_dir().ok();
+    let to = to.map(|to| expand_home(&to, home.as_deref()));
+    let args = soul_env_export_args(&agent, to.as_deref(), plan)?;
+    let output = run_agent_bot(&app, args, "soul-env-export-unavailable").await?;
+    parse_soul_env_export(&output.stdout, &output.stderr)
+}
+
+/// `~` or `~/...` as the owner's home; any other path as given (the engine
+/// resolves a relative one against its own cwd).
+fn expand_home(path: &str, home: Option<&std::path::Path>) -> String {
+    match (path.strip_prefix("~/"), home) {
+        (Some(rest), Some(home)) => home.join(rest).to_string_lossy().into_owned(),
+        (None, Some(home)) if path == "~" => home.to_string_lossy().into_owned(),
+        _ => path.to_owned(),
+    }
+}
+
+fn soul_env_export_args(
+    agent: &str,
+    to: Option<&str>,
+    plan: bool,
+) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    let invalid = |message: &str| BridgeError::new("soul-env-export-invalid", message);
+    if !plain_argument(agent) {
+        return Err(invalid("agent must be an agent id"));
+    }
+    let mut args: Vec<std::ffi::OsString> =
+        vec!["soul".into(), "env".into(), "export".into(), agent.into()];
+    match to {
+        // The path as given: the engine refuses one inside the root or
+        // already there, and writes nowhere else.
+        Some(to) if plain_argument(to) => {
+            args.push("--to".into());
+            args.push(to.into());
+        }
+        Some(_) => return Err(invalid("to must be a file path")),
+        None if !plan => return Err(invalid("the export needs a destination")),
+        None => {}
+    }
+    if plan {
+        args.push("--plan".into());
+    }
+    args.push("--json".into());
+    Ok(args)
+}
+
+/// True when the answer is an older agent-bot's usage line that does not
+/// list the `soul env` subcommand `verb` (`export`, `import`): the `soul`
+/// line on stderr, or, since the bundle has `soul env` and that command
+/// took the verb for a soul name, its own usage line as a JSON refusal on
+/// stdout.
+fn soul_env_verb_missing(stdout: &[u8], stderr: &[u8], verb: &str) -> bool {
+    let listed = format!("soul env {verb}");
+    if soul_subcommand_missing(stdout, stderr, &listed) {
+        return true;
+    }
+    serde_json::from_str::<Value>(&last_line(stdout))
+        .ok()
+        .and_then(|value| {
+            value
+                .get("error")
+                .and_then(|error| error.get("message"))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .is_some_and(|message| {
+            message.contains("usage: agent-bot soul env ") && !message.contains(&listed)
+        })
+}
+
+fn parse_soul_env_export(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    if soul_env_verb_missing(stdout, stderr, "export") {
+        return Err(BridgeError::new(
+            "soul-env-export-unsupported",
+            "this agent-bot cannot export a soul's life",
+        ));
+    }
+    parse_agent_bot_json(
+        stdout,
+        stderr,
+        "soul-env-export-failed",
+        "agent-bot soul env export: ",
+        "agent-bot did not report the export",
+        |value| {
+            value.get("applied").is_some_and(Value::is_boolean)
+                && value.get("decision").is_some_and(Value::is_string)
+                && value.get("manifest").is_some_and(Value::is_object)
+        },
+    )
+}
+
+/// Imports a soul's life from an export (#268; agent-bot 0.10.55, slice 7):
+/// `soul env import FILE [--fork] [--replace] [--name NAME] [--plan]
+/// --json`. With `plan` the engine reads the manifest only and decides the
+/// identity and the destination (no gate, nothing extracted); an ID active
+/// here is refused `import-id-active` until `replace` or `fork` says which,
+/// a retired one `import-id-retired` until `fork`. Without `plan` the
+/// engine verifies the archive in a private staging, owner-gates the apply
+/// itself, refuses `soul-running` while the soul being replaced runs, and
+/// answers `applied: true` with `decision` `imported | replaced | forked`;
+/// a replace moves the previous root aside (`replaced`) and never deletes
+/// it. Printed as `{schemaVersion, archive, applied, decision, identity,
+/// soulDir, replaced, name, displayName, journal, restored, pointers,
+/// workspaces, migration}` and passed through as printed. The section
+/// offers it only when the descriptor lists `env-import`; an older bundle
+/// maps to `soul-env-import-unsupported`.
+#[tauri::command]
+pub async fn soul_env_import<R: Runtime>(
+    app: AppHandle<R>,
+    archive: String,
+    fork: bool,
+    replace: bool,
+    name: Option<String>,
+    plan: bool,
+) -> Result<Value, BridgeError> {
+    let home = app.path().home_dir().ok();
+    let archive = expand_home(&archive, home.as_deref());
+    let args = soul_env_import_args(&archive, fork, replace, name.as_deref(), plan)?;
+    let output = run_agent_bot(&app, args, "soul-env-import-unavailable").await?;
+    parse_soul_env_import(&output.stdout, &output.stderr)
+}
+
+fn soul_env_import_args(
+    archive: &str,
+    fork: bool,
+    replace: bool,
+    name: Option<&str>,
+    plan: bool,
+) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    let invalid = |message: &str| BridgeError::new("soul-env-import-invalid", message);
+    if !plain_argument(archive) {
+        return Err(invalid("archive must be a file path"));
+    }
+    if fork && replace {
+        return Err(invalid("fork and replace exclude each other"));
+    }
+    let mut args: Vec<std::ffi::OsString> =
+        vec!["soul".into(), "env".into(), "import".into(), archive.into()];
+    if fork {
+        args.push("--fork".into());
+    }
+    if replace {
+        args.push("--replace".into());
+    }
+    if let Some(name) = name {
+        // The engine's own bound: printable text of at most 128 characters.
+        if !plain_argument(name) || name.chars().count() > 128 {
+            return Err(invalid(
+                "name must be printable text of at most 128 characters",
+            ));
+        }
+        args.push("--name".into());
+        args.push(name.into());
+    }
+    if plan {
+        args.push("--plan".into());
+    }
+    args.push("--json".into());
+    Ok(args)
+}
+
+fn parse_soul_env_import(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    if soul_env_verb_missing(stdout, stderr, "import") {
+        return Err(BridgeError::new(
+            "soul-env-import-unsupported",
+            "this agent-bot cannot import a soul's life",
+        ));
+    }
+    parse_agent_bot_json(
+        stdout,
+        stderr,
+        "soul-env-import-failed",
+        "agent-bot soul env import: ",
+        "agent-bot did not report the import",
+        |value| {
+            value.get("applied").is_some_and(Value::is_boolean)
+                && value.get("decision").is_some_and(Value::is_string)
+                && value.get("identity").is_some_and(Value::is_object)
+                && value.get("restored").is_some_and(Value::is_object)
+        },
+    )
+}
+
 #[cfg(test)]
 mod soul_env_operations_tests {
     use super::*;
@@ -5751,6 +5958,281 @@ mod soul_env_operations_tests {
             .unwrap_err()
             .code,
             "soul-env-clean-failed"
+        );
+    }
+    /// agent-bot 0.10.55's `soul env export agent_p --plan --json`, shortened:
+    /// the definition and the home travel, a credential file is left out,
+    /// one linked workspace rides as a pointer.
+    const EXPORT_PLAN: &[u8] = br#"{"schemaVersion":1,"agentId":"agent_p","soulDir":"/s","applied":false,"decision":"planned","file":null,"manifest":{"schemaVersion":1,"agentId":"agent_p","name":"luna","displayName":"Luna","exportedAt":"2026-10-08T10:00:00.000Z","engineVersion":"0.10.55","root":"/s","identity":{"harness":"codex","parentId":null,"genesis":null,"createdAt":null},"memory":{"location":"inside","target":null},"workspaces":[{"name":"site","location":"linked","target":"/Users/me/code/site","head":"abc123","branch":"main","remote":"git@github.com:me/site.git","patch":true,"untracked":2,"note":null}],"journal":{"entries":3},"components":[{"area":"root","entry":"life/soul.json","relative":"soul.json","classification":"definition","retention":"durable","kind":"file","bytes":512,"sha256":"00","mode":420},{"area":"workspace","entry":"workspaces/site/pointer.json","relative":"worktrees/site","classification":"workspace","retention":"durable","kind":"pointer","bytes":180,"sha256":"01","mode":384,"workspace":"site","target":"/Users/me/code/site"}],"excluded":[{"relative":".soul-state/credentials","classification":"private-home","reason":"credentials never travel"}],"totals":{"files":2,"bytes":692}}}
+"#;
+
+    #[test]
+    fn builds_the_export_arguments_with_the_destination_as_given() {
+        assert_eq!(
+            soul_env_export_args("agent_p", None, true).unwrap(),
+            vec!["soul", "env", "export", "agent_p", "--plan", "--json"]
+        );
+        assert_eq!(
+            soul_env_export_args(
+                "agent_p",
+                Some("/Users/me/Desktop/luna.soul-life.tar.gz"),
+                false
+            )
+            .unwrap(),
+            vec![
+                "soul",
+                "env",
+                "export",
+                "agent_p",
+                "--to",
+                "/Users/me/Desktop/luna.soul-life.tar.gz",
+                "--json"
+            ]
+        );
+        // A plan may name its destination too (the engine checks it first).
+        assert_eq!(
+            soul_env_export_args("agent_p", Some("/tmp/x.tgz"), true).unwrap(),
+            vec![
+                "soul",
+                "env",
+                "export",
+                "agent_p",
+                "--to",
+                "/tmp/x.tgz",
+                "--plan",
+                "--json"
+            ]
+        );
+        for (agent, to, plan) in [
+            ("", Some("/tmp/x.tgz"), false),
+            ("--json", Some("/tmp/x.tgz"), false),
+            ("agent_p", None, false),
+            ("agent_p", Some(""), false),
+            ("agent_p", Some("--plan"), false),
+            ("agent_p", Some("/tmp/x\n.tgz"), false),
+        ] {
+            assert_eq!(
+                soul_env_export_args(agent, to, plan).unwrap_err().code,
+                "soul-env-export-invalid",
+                "{agent:?} {to:?} {plan}"
+            );
+        }
+    }
+
+    #[test]
+    fn expands_only_a_leading_tilde() {
+        let home = std::path::Path::new("/Users/me");
+        assert_eq!(
+            expand_home("~/Desktop/x.tgz", Some(home)),
+            "/Users/me/Desktop/x.tgz"
+        );
+        assert_eq!(expand_home("~", Some(home)), "/Users/me");
+        assert_eq!(expand_home("/tmp/~/x.tgz", Some(home)), "/tmp/~/x.tgz");
+        assert_eq!(expand_home("~user/x.tgz", Some(home)), "~user/x.tgz");
+        assert_eq!(expand_home("~/x.tgz", None), "~/x.tgz");
+    }
+
+    #[test]
+    fn passes_the_export_plan_and_report_or_the_engines_refusal() {
+        let planned = parse_soul_env_export(EXPORT_PLAN, b"").unwrap();
+        assert_eq!(planned["decision"], "planned");
+        assert_eq!(planned["manifest"]["totals"]["files"], 2);
+        assert_eq!(
+            planned["manifest"]["excluded"][0]["reason"],
+            "credentials never travel"
+        );
+        assert_eq!(
+            planned,
+            serde_json::from_slice::<Value>(EXPORT_PLAN).unwrap()
+        );
+        let exported = parse_soul_env_export(
+            br#"{"schemaVersion":1,"agentId":"agent_p","soulDir":"/s","applied":true,"decision":"exported","file":"/Users/me/Desktop/luna.soul-life.tar.gz","manifest":{"components":[],"excluded":[],"workspaces":[],"totals":{"files":0,"bytes":0}}}
+"#,
+            b"",
+        )
+        .unwrap();
+        assert_eq!(exported["decision"], "exported");
+        assert_eq!(exported["file"], "/Users/me/Desktop/luna.soul-life.tar.gz");
+        // Refused: the destination exists, with the engine's action; the soul runs, with its stop command.
+        assert_eq!(
+            parse_soul_env_export(
+                b"{\"error\":{\"code\":\"export-target-exists\",\"message\":\"/x.tgz already exists; choose another path\",\"action\":\"pick a file that does not exist yet\"}}\n",
+                b""
+            )
+            .unwrap_err(),
+            BridgeError::new("export-target-exists", "/x.tgz already exists; choose another path")
+                .with_action("pick a file that does not exist yet")
+        );
+        assert_eq!(
+            parse_soul_env_export(
+                b"{\"error\":{\"code\":\"soul-running\",\"message\":\"agent_p is running (a turn in flight or a warm harness); stop it before exporting its life\",\"action\":\"agent-bot soul stop agent_p\"}}\n",
+                b""
+            )
+            .unwrap_err()
+            .action
+            .as_deref(),
+            Some("agent-bot soul stop agent_p")
+        );
+        assert_eq!(
+            parse_soul_env_export(
+                b"",
+                b"agent-bot soul env export: the owner did not approve\n"
+            )
+            .unwrap_err(),
+            BridgeError::new("soul-env-export-failed", "the owner did not approve")
+        );
+        // An older bundle: the `soul` usage line, or `soul env`'s own, which
+        // took `export` for a soul name and lists neither verb.
+        assert_eq!(
+            parse_soul_env_export(b"", OLD_USAGE).unwrap_err().code,
+            "soul-env-export-unsupported"
+        );
+        assert_eq!(
+            parse_soul_env_export(
+                b"{\"error\":{\"code\":\"soul-env-failed\",\"message\":\"usage: agent-bot soul env <agentId|name> [--json] | soul env migrate <agentId|name> --adopt-host-signin [--harness NAME] | --space-into-soul | --complete [--plan] [--json] [--principal-stdin] | soul env clean <agentId|name> [--plan] [--component ID] [--json] [--principal-stdin]\"}}\n",
+                b""
+            )
+            .unwrap_err()
+            .code,
+            "soul-env-export-unsupported"
+        );
+        // The current bundle refusing its arguments names the verb: a plain failure.
+        assert_eq!(
+            parse_soul_env_export(
+                b"{\"error\":{\"code\":\"soul-env-export-failed\",\"message\":\"usage: agent-bot soul env export <agentId|name> --to FILE [--plan] [--json] [--principal-stdin] | soul env import FILE [--fork] [--replace] [--name NAME] [--plan] [--json] [--principal-stdin]\"}}\n",
+                b""
+            )
+            .unwrap_err()
+            .code,
+            "soul-env-export-failed"
+        );
+    }
+
+    #[test]
+    fn builds_the_import_arguments_with_one_identity_decision() {
+        assert_eq!(
+            soul_env_import_args(
+                "/Users/me/Desktop/luna.soul-life.tar.gz",
+                false,
+                false,
+                None,
+                true
+            )
+            .unwrap(),
+            vec![
+                "soul",
+                "env",
+                "import",
+                "/Users/me/Desktop/luna.soul-life.tar.gz",
+                "--plan",
+                "--json"
+            ]
+        );
+        assert_eq!(
+            soul_env_import_args("/a.tgz", false, true, None, false).unwrap(),
+            vec!["soul", "env", "import", "/a.tgz", "--replace", "--json"]
+        );
+        assert_eq!(
+            soul_env_import_args("/a.tgz", true, false, Some("Luna II"), false).unwrap(),
+            vec!["soul", "env", "import", "/a.tgz", "--fork", "--name", "Luna II", "--json"]
+        );
+        let long = "n".repeat(129);
+        for (archive, fork, replace, name) in [
+            ("", false, false, None),
+            ("--plan", false, false, None),
+            ("/a.tgz", true, true, None),
+            ("/a.tgz", true, false, Some("")),
+            ("/a.tgz", true, false, Some("--fork")),
+            ("/a.tgz", true, false, Some("a\tb")),
+            ("/a.tgz", true, false, Some(long.as_str())),
+        ] {
+            assert_eq!(
+                soul_env_import_args(archive, fork, replace, name, false)
+                    .unwrap_err()
+                    .code,
+                "soul-env-import-invalid",
+                "{archive:?} {fork} {replace} {name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn passes_the_import_plan_and_report_or_the_engines_refusal() {
+        let planned = parse_soul_env_import(
+            br#"{"schemaVersion":1,"archive":"/a.tgz","applied":false,"decision":"planned","identity":{"decision":"keep","agentId":"agent_p","importedFrom":"agent_p","existing":null},"soulDir":"/Users/me/Souls/luna.soul","replaced":null,"name":"luna","displayName":"Luna","journal":null,"restored":{"files":2,"bytes":692,"byClassification":{"definition":{"files":1,"bytes":512},"workspace":{"files":1,"bytes":180}}},"pointers":[],"workspaces":[{"name":"site","location":"linked","target":"/Users/me/code/site","head":"abc123","branch":"main","remote":null,"patch":true,"untracked":2,"note":null,"imported":".soul-state/imports/site"}],"migration":"life-import"}
+"#,
+            b"",
+        )
+        .unwrap();
+        assert_eq!(planned["identity"]["decision"], "keep");
+        assert_eq!(
+            planned["workspaces"][0]["imported"],
+            ".soul-state/imports/site"
+        );
+        let replaced = parse_soul_env_import(
+            br#"{"schemaVersion":1,"archive":"/a.tgz","applied":true,"decision":"replaced","identity":{"decision":"replace","agentId":"agent_p","importedFrom":"agent_p","existing":{"status":"active","soulDir":"/s"}},"soulDir":"/s","replaced":"/s.replaced-2026-10-08T10-00-00-000Z","name":"luna","displayName":"Luna","journal":"kept-local","restored":{"files":2,"bytes":692,"byClassification":{}},"pointers":[],"workspaces":[],"migration":"life-import"}
+"#,
+            b"",
+        )
+        .unwrap();
+        assert_eq!(replaced["decision"], "replaced");
+        assert_eq!(replaced["replaced"], "/s.replaced-2026-10-08T10-00-00-000Z");
+        // The identity refusals carry the engine's action, as text.
+        assert_eq!(
+            parse_soul_env_import(
+                b"{\"error\":{\"code\":\"import-id-active\",\"message\":\"agent_p is an active soul here (/s)\",\"action\":\"add --replace to overwrite its life, or --fork to import as a new soul\"}}\n",
+                b""
+            )
+            .unwrap_err(),
+            BridgeError::new("import-id-active", "agent_p is an active soul here (/s)")
+                .with_action("add --replace to overwrite its life, or --fork to import as a new soul")
+        );
+        assert_eq!(
+            parse_soul_env_import(
+                b"{\"error\":{\"code\":\"import-id-retired\",\"message\":\"agent_p is retired here; a retired soul never comes back under its ID\",\"action\":\"add --fork to import it as a new soul\"}}\n",
+                b""
+            )
+            .unwrap_err()
+            .code,
+            "import-id-retired"
+        );
+        assert_eq!(
+            parse_soul_env_import(
+                b"{\"error\":{\"code\":\"import-checksum-mismatch\",\"message\":\"life/soul.json does not match the manifest\",\"action\":null}}\n",
+                b""
+            )
+            .unwrap_err(),
+            BridgeError::new("import-checksum-mismatch", "life/soul.json does not match the manifest")
+        );
+        assert_eq!(
+            parse_soul_env_import(
+                b"",
+                b"agent-bot soul env import: the owner did not approve\n"
+            )
+            .unwrap_err(),
+            BridgeError::new("soul-env-import-failed", "the owner did not approve")
+        );
+        assert_eq!(
+            parse_soul_env_import(b"", OLD_USAGE).unwrap_err().code,
+            "soul-env-import-unsupported"
+        );
+        assert_eq!(
+            parse_soul_env_import(
+                b"{\"error\":{\"code\":\"soul-env-failed\",\"message\":\"usage: agent-bot soul env <agentId|name> [--json] | soul env clean <agentId|name> [--plan] [--json]\"}}\n",
+                b""
+            )
+            .unwrap_err()
+            .code,
+            "soul-env-import-unsupported"
+        );
+        assert_eq!(
+            parse_soul_env_import(
+                b"{\"error\":{\"code\":\"soul-env-import-failed\",\"message\":\"usage: agent-bot soul env export <agentId|name> --to FILE [--plan] [--json] [--principal-stdin] | soul env import FILE [--fork] [--replace] [--name NAME] [--plan] [--json] [--principal-stdin]\"}}\n",
+                b""
+            )
+            .unwrap_err()
+            .code,
+            "soul-env-import-failed"
         );
     }
 }

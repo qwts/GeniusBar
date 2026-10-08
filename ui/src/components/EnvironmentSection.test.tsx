@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BridgeError, type EnvironmentMigration, type RuntimeInstall, type SoulCleanRow, type SoulEnvironment, type SoulEnvironmentClean } from '../bridge';
-import { sampleCensus, sampleEnvironments } from '../model/fixtures';
+import { BridgeError, type EnvironmentMigration, type ImportIdentity, type RuntimeInstall, type SoulCleanRow, type SoulEnvironment, type SoulEnvironmentClean, type SoulEnvironmentImport } from '../bridge';
+import { sampleCensus, sampleEnvironments, sampleLifeExport, sampleLifeImport } from '../model/fixtures';
 import { EnvironmentSection, EnvironmentSourceContext, type EnvironmentSource } from './EnvironmentSection';
 
 afterEach(cleanup);
@@ -38,6 +38,8 @@ function source(overrides: Partial<EnvironmentSource> = {}): EnvironmentSource {
     migrate: vi.fn(async (agentId: string, kind: string, _harness: string | null, plan = false): Promise<EnvironmentMigration> =>
       (kind === 'complete' ? (plan ? completePlan : completed) : { agentId, operation: kind, decision: kind === 'space-into-soul' ? 'migrated' : 'adopted', steps: [] })),
     clean: vi.fn(async (_agentId: string, { plan }: { plan: boolean }) => (plan ? cleanPlan : cleaned)),
+    exportLife: vi.fn(async (_agentId: string, { plan, to }: { plan: boolean; to: string | null }) => (plan ? sampleLifeExport : { ...sampleLifeExport, applied: true, decision: 'exported', file: to })),
+    importLife: vi.fn(async (archive: string, { plan }: { plan: boolean; identity: ImportIdentity; name: string | null }) => (plan ? { ...sampleLifeImport, archive } : { ...sampleLifeImport, archive, applied: true, decision: 'imported', journal: 'restored' })),
     ...overrides,
   };
 }
@@ -118,7 +120,7 @@ describe('the Environment section (#268)', () => {
     expect(screen.getByText('Continuity:', { exact: false }).closest('p')?.textContent).toBe('Continuity: Not supported');
   });
 
-  it('keeps export and import visible but disabled, and the clean too until the engine lists env-clean', async () => {
+  it('keeps export, import and the clean visible but disabled until the engine lists each capability', async () => {
     // The older engine: all three gated, the original copy.
     show(source({ environment: vi.fn(async () => older) }), scout);
     await screen.findByText('Components');
@@ -128,20 +130,36 @@ describe('the Environment section (#268)', () => {
     }
     expect(screen.getByText("Export, import and cache clean-up aren't available yet.")).toBeTruthy();
     cleanup();
-    // The same descriptor without the capability, whatever the version says: still gated.
+    // The same descriptor without env-clean, whatever the version says: the clean alone stays gated.
     const noClean: SoulEnvironment = { ...env, engine: { ...env.engine, version: '99.0.0', capabilities: env.engine.capabilities.filter((c) => c !== 'env-clean') } };
     show(source({ environment: vi.fn(async () => noClean) }));
     await screen.findByText('Components');
     expect((screen.getByRole('button', { name: 'Clean up cache' }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText("Export, import and cache clean-up aren't available yet.")).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Export life…' })).toBeTruthy();
+    expect(screen.getByText('Not available yet: Clean up cache.')).toBeTruthy();
     cleanup();
-    // With env-clean the clean is live and the note names only the two that are not.
-    show(source());
+    // Without env-export and env-import (agent-bot 0.10.54): the clean is live and the note names the two that are not.
+    const noLife: SoulEnvironment = { ...env, engine: { ...env.engine, capabilities: env.engine.capabilities.filter((c) => c !== 'env-export' && c !== 'env-import') } };
+    show(source({ environment: vi.fn(async () => noLife) }));
     await screen.findByText('Components');
     expect((screen.getByRole('button', { name: 'Clean up cache' }) as HTMLButtonElement).disabled).toBe(false);
     for (const name of ['Export', 'Import']) expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText("Export and import aren't available yet.")).toBeTruthy();
     expect(screen.queryByText("Export, import and cache clean-up aren't available yet.")).toBeNull();
+    cleanup();
+    // One of the two alone: that one gated, the other live.
+    const noImport: SoulEnvironment = { ...env, engine: { ...env.engine, capabilities: env.engine.capabilities.filter((c) => c !== 'env-import') } };
+    show(source({ environment: vi.fn(async () => noImport) }));
+    await screen.findByText('Components');
+    expect(screen.getByRole('button', { name: 'Export life…' })).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Import' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('Not available yet: Import.')).toBeTruthy();
+    cleanup();
+    // All three listed: every button live and no gated copy at all.
+    show(source());
+    await screen.findByText('Components');
+    for (const name of ['Export life…', 'Import life…', 'Clean up cache']) expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByText(/available yet/)).toBeNull();
   });
 
   it('re-checks on request and on refresh, and shows the sign-in per harness', async () => {
@@ -474,5 +492,256 @@ describe('completing the migration (#268, agent-bot-identity #583 slice 6)', () 
     expect((await screen.findByText(/Not completed: agent_p is running/)).textContent).toBe('Not completed: agent_p is running; stop it before completing its migration');
     expect(screen.getByText('agent-bot soul stop agent_p', { selector: 'code' })).toBeTruthy();
     expect(migrate.mock.calls.map(([, kind, , plan]) => [kind, plan])).toEqual([['complete', true], ['complete', false], ['complete', false]]);
+  });
+});
+
+describe("exporting a soul's life (#268, agent-bot-identity #583 slice 7)", () => {
+  const openExport = async () => {
+    const trigger = await screen.findByRole('button', { name: 'Export life…' });
+    fireEvent.click(trigger);
+    return trigger;
+  };
+
+  it('reads the manifest, lists what travels, what is left out and the pointers, writes nothing until confirmed, then names the file', async () => {
+    const s = source();
+    show(s);
+    const trigger = await openExport();
+    const dialog = screen.getByRole('dialog', { name: "Export luna's life?" });
+    expect(s.exportLife).toHaveBeenCalledWith('agent_p', { plan: true, to: null });
+    expect(await within(dialog).findByText("agent-bot will write luna's life as one file: what is durable and the soul's own. Nothing is written until you confirm.")).toBeTruthy();
+    // The engine's totals and its rows per classification, nothing recounted from the filesystem.
+    expect(within(dialog).getByText('17 files (196 KB)')).toBeTruthy();
+    expect(within(dialog).getByText('definition · 4 files (6.1 KB)')).toBeTruthy();
+    expect(within(dialog).getByText('private-home · 4 files (48 KB)')).toBeTruthy();
+    expect(within(dialog).getByText('Memory: linked (/Users/user/space/luna) · revision journal: 3 entries')).toBeTruthy();
+    expect(within(dialog).getByText('Left out')).toBeTruthy();
+    expect(within(dialog).getByText('.soul-state/credentials')).toBeTruthy();
+    expect(within(dialog).getByText('credentials never travel: GitHub App keys and file-store secrets stay on this Mac')).toBeTruthy();
+    expect(within(dialog).getByText('Linked workspaces')).toBeTruthy();
+    expect(within(dialog).getByText('site → /Users/user/code/site')).toBeTruthy();
+    expect(within(dialog).getByText('feature/landing 4f2c9a1b7e3d · uncommitted changes as a patch · 2 untracked files')).toBeTruthy();
+    expect(within(dialog).getByText('Links recorded, not followed')).toBeTruthy();
+    expect(within(dialog).getByText('.soul-state/space → /Users/user/space/luna')).toBeTruthy();
+    // The destination defaults to the Desktop, named after the soul; a plain field, no file dialog.
+    const to = within(dialog).getByLabelText('Save to') as HTMLInputElement;
+    expect(to.value).toBe('~/Desktop/luna.soul-life.tar.gz');
+    expect(s.exportLife).toHaveBeenCalledTimes(1);
+    const confirm = within(dialog).getByRole('button', { name: 'Confirm and export' });
+    await waitFor(() => expect(document.activeElement).toBe(confirm));
+    // No loss claimed, no secret value anywhere: the manifest holds names and hashes only.
+    expect(dialog.textContent).not.toMatch(/\blost\b|roll(ed)? back/i);
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(s.exportLife).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(trigger);
+
+    fireEvent.click(trigger);
+    const field = await screen.findByLabelText('Save to');
+    fireEvent.change(field, { target: { value: '/Volumes/T7/luna.soul-life.tar.gz' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm and export' }));
+    expect(s.exportLife).toHaveBeenLastCalledWith('agent_p', { plan: false, to: '/Volumes/T7/luna.soul-life.tar.gz' });
+    const status = await screen.findByText('Done. agent-bot wrote /Volumes/T7/luna.soul-life.tar.gz (17 files, 196 KB).');
+    expect(status.getAttribute('aria-live')).toBe('polite');
+    expect(screen.getByText('5 paths left out · 1 linked workspaces as pointers. The manifest inside the file holds the detail.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Confirm and export' })).toBeNull();
+    await waitFor(() => expect(s.environment).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Close' }).at(-1)!);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('keeps the destination field after a target refusal so another path can be tried, and shows soul-running with its command as text', async () => {
+    const exportLife = vi.fn<(agentId: string, options: { plan: boolean; to: string | null }) => Promise<typeof sampleLifeExport>>()
+      .mockResolvedValueOnce(sampleLifeExport)
+      .mockRejectedValueOnce(new BridgeError('export-target-exists', '/Users/user/Desktop/luna.soul-life.tar.gz already exists; choose another path', 'pick a file that does not exist yet'))
+      .mockRejectedValueOnce(new BridgeError('soul-running', 'agent_p is running (a turn in flight or a warm harness); stop it before exporting its life', 'agent-bot soul stop agent_p'));
+    const s = source({ exportLife });
+    show(s);
+    await openExport();
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm and export' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Not exported: /Users/user/Desktop/luna.soul-life.tar.gz already exists; choose another path');
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Pick another path and retry.')).toBeTruthy();
+    const field = within(dialog).getByLabelText('Save to');
+    fireEvent.change(field, { target: { value: '~/Desktop/luna-2.soul-life.tar.gz' } });
+    const retry = within(dialog).getByRole('button', { name: 'Retry' });
+    await waitFor(() => expect(document.activeElement).toBe(retry));
+    fireEvent.click(retry);
+    expect(exportLife).toHaveBeenLastCalledWith('agent_p', { plan: false, to: '~/Desktop/luna-2.soul-life.tar.gz' });
+    expect((await screen.findByText(/Not exported: agent_p is running/)).textContent).toBe('Not exported: agent_p is running (a turn in flight or a warm harness); stop it before exporting its life');
+    expect(screen.getByText('agent-bot soul stop agent_p', { selector: 'code' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /stop/i })).toBeNull();
+    expect(exportLife.mock.calls.map(([, o]) => o.plan)).toEqual([true, false, false]);
+  });
+
+  it('while agent-bot asks for approval shows the gate line, no Cancel, and ignores Escape', async () => {
+    let finish: (value: typeof sampleLifeExport) => void = () => {};
+    const exportLife = vi.fn<(agentId: string, options: { plan: boolean; to: string | null }) => Promise<typeof sampleLifeExport>>()
+      .mockResolvedValueOnce(sampleLifeExport)
+      .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    show(source({ exportLife }));
+    await openExport();
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm and export' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Exporting… agent-bot asks for your approval (Touch ID or your login password).').getAttribute('aria-live')).toBe('polite');
+    expect(within(dialog).queryByRole('button', { name: 'Cancel' })).toBeNull();
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    await act(async () => { finish({ ...sampleLifeExport, applied: true, decision: 'exported', file: '/x.tgz' }); });
+    await screen.findByText('Done. agent-bot wrote /x.tgz (17 files, 196 KB).');
+  });
+});
+
+describe("importing a soul's life (#268, agent-bot-identity #583 slice 7)", () => {
+  const archive = '/Users/user/Desktop/luna.soul-life.tar.gz';
+  const openImport = async () => {
+    const trigger = await screen.findByRole('button', { name: 'Import life…' });
+    fireEvent.click(trigger);
+    return trigger;
+  };
+  const readArchive = async (path = archive) => {
+    const field = await screen.findByLabelText('Archive');
+    fireEvent.change(field, { target: { value: path } });
+    fireEvent.click(screen.getByRole('button', { name: 'Read archive' }));
+  };
+
+  it('asks for the archive first, reads its plan, keeps an unknown ID as a moved life, restores nothing until confirmed, then reports the root', async () => {
+    const s = source();
+    show(s);
+    const trigger = await openImport();
+    const dialog = screen.getByRole('dialog', { name: 'Import a life?' });
+    expect(s.importLife).not.toHaveBeenCalled();
+    expect((within(dialog).getByRole('button', { name: 'Read archive' }) as HTMLButtonElement).disabled).toBe(true);
+    await readArchive();
+    expect(s.importLife).toHaveBeenCalledWith(archive, { plan: true, identity: 'keep', name: null });
+    expect(await within(dialog).findByText('agent-bot will restore this life. Nothing starts until you confirm.')).toBeTruthy();
+    expect(within(dialog).getByText('Keeps its Agent ID agent_p: a moved life.')).toBeTruthy();
+    expect(within(dialog).getByText('Destination:', { exact: false }).closest('p')?.textContent).toBe('Destination: /Users/user/Souls/luna.soul');
+    expect(within(dialog).getByText('Would restore')).toBeTruthy();
+    expect(within(dialog).getByText('17 files (196 KB)')).toBeTruthy();
+    expect(within(dialog).getByText('history · 2 files (130 KB)')).toBeTruthy();
+    expect(within(dialog).getByText('Links recorded, not recreated')).toBeTruthy();
+    expect(within(dialog).getByText('.soul-state/space → /Users/user/space/luna')).toBeTruthy();
+    expect(within(dialog).getByText('Workspaces to link again')).toBeTruthy();
+    expect(within(dialog).getByText('site → /Users/user/code/site')).toBeTruthy();
+    expect(within(dialog).getByText('Check the repository out, link it, apply the patch and copy the untracked files from .soul-state/imports/site.')).toBeTruthy();
+    // An unknown ID offers no choice and no name.
+    expect(within(dialog).queryByRole('radio')).toBeNull();
+    expect(within(dialog).queryByLabelText('Display name')).toBeNull();
+    expect(s.importLife).toHaveBeenCalledTimes(1);
+    const confirm = within(dialog).getByRole('button', { name: 'Confirm and import' });
+    await waitFor(() => expect(document.activeElement).toBe(confirm));
+    fireEvent.click(confirm);
+    expect(s.importLife).toHaveBeenLastCalledWith(archive, { plan: false, identity: 'keep', name: null });
+    const status = await screen.findByText('Done. agent-bot restored Luna at /Users/user/Souls/luna.soul (17 files, 196 KB).');
+    expect(status.getAttribute('aria-live')).toBe('polite');
+    expect(within(dialog).getByText('Agent ID: agent_p')).toBeTruthy();
+    expect(within(dialog).getByText('Revision journal: restored from the archive.')).toBeTruthy();
+    expect(within(dialog).queryByText(/moved aside/)).toBeNull();
+    expect(dialog.textContent).not.toMatch(/\blost\b|roll(ed)? back/i);
+    // The descriptor is read again afterwards.
+    await waitFor(() => expect(s.environment).toHaveBeenCalledTimes(2));
+    fireEvent.click(within(dialog).getAllByRole('button', { name: 'Close' }).at(-1)!);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("turns the engine's import-id-active into the replace-or-fork choice, re-plans on each, says the previous root is moved aside, and names a fork", async () => {
+    const existing = { status: 'active', soulDir: '/Users/user/Souls/Luna.soul' };
+    const importLife = vi.fn(async (path: string, { plan, identity, name }: { plan: boolean; identity: ImportIdentity; name: string | null }): Promise<SoulEnvironmentImport> => {
+      if (identity === 'keep') throw new BridgeError('import-id-active', 'agent_p is an active soul here (/Users/user/Souls/Luna.soul)', 'add --replace to overwrite its life, or --fork to import as a new soul');
+      const base = { ...sampleLifeImport, archive: path, displayName: name ?? 'Luna' };
+      if (identity === 'fork') {
+        const planned = { ...base, identity: { decision: 'fork', agentId: null, importedFrom: 'agent_p', existing }, soulDir: '/Users/user/Souls/luna-<agent id tail>.soul', name: null };
+        return plan ? planned : { ...planned, applied: true, decision: 'forked', identity: { ...planned.identity, agentId: 'agent_f' }, soulDir: '/Users/user/Souls/luna-6e3a9c1d.soul', journal: 'adopted' };
+      }
+      const planned = { ...base, identity: { decision: 'replace', agentId: 'agent_p', importedFrom: 'agent_p', existing }, soulDir: existing.soulDir, replaced: existing.soulDir };
+      return plan ? planned : { ...planned, applied: true, decision: 'replaced', replaced: `${existing.soulDir}.replaced-2026-10-08T10-00-00-000Z`, journal: 'kept-local' };
+    });
+    const s = source({ importLife });
+    show(s);
+    await openImport();
+    await readArchive();
+    const dialog = screen.getByRole('dialog');
+    // The engine's message as it came, then the choice; no Retry: the choice is the answer.
+    expect(await within(dialog).findByText('agent_p is an active soul here (/Users/user/Souls/Luna.soul)')).toBeTruthy();
+    expect(within(dialog).getByText('This Agent ID is already here')).toBeTruthy();
+    expect(within(dialog).queryByRole('alert')).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: 'Confirm and import' })).toBeNull();
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'Replace the soul here' }));
+    expect(importLife).toHaveBeenLastCalledWith(archive, { plan: true, identity: 'replace', name: null });
+    expect(await within(dialog).findByText('Replaces the soul here (/Users/user/Souls/Luna.soul). Its current folder is moved aside, not deleted.')).toBeTruthy();
+    expect((within(dialog).getByRole('radio', { name: 'Replace the soul here' }) as HTMLInputElement).checked).toBe(true);
+    expect(within(dialog).queryByLabelText('Display name')).toBeNull();
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'Import as a new soul (fork)' }));
+    expect(importLife).toHaveBeenLastCalledWith(archive, { plan: true, identity: 'fork', name: null });
+    expect(await within(dialog).findByText('Imports as a new soul: agent-bot mints a new Agent ID when it applies (from agent_p).')).toBeTruthy();
+    expect(within(dialog).getByText('Destination:', { exact: false }).closest('p')?.textContent).toBe('Destination: /Users/user/Souls/luna-<agent id tail>.soul');
+    fireEvent.change(within(dialog).getByLabelText('Display name'), { target: { value: 'Luna II' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm and import' }));
+    expect(importLife).toHaveBeenLastCalledWith(archive, { plan: false, identity: 'fork', name: 'Luna II' });
+    await screen.findByText('Done. agent-bot restored Luna II at /Users/user/Souls/luna-6e3a9c1d.soul (17 files, 196 KB).');
+    expect(within(dialog).getByText('Agent ID: agent_f')).toBeTruthy();
+    expect(within(dialog).getByText('Revision journal: a new chain starts from the restored package.')).toBeTruthy();
+    expect(dialog.textContent).not.toMatch(/\blost\b|roll(ed)? back/i);
+    cleanup();
+
+    // A replace, applied: the previous root is moved aside, never deleted, and the local journal kept.
+    show(source({ importLife }));
+    await openImport();
+    await readArchive();
+    fireEvent.click(await screen.findByRole('radio', { name: 'Replace the soul here' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm and import' }));
+    expect(importLife).toHaveBeenLastCalledWith(archive, { plan: false, identity: 'replace', name: null });
+    await screen.findByText('Done. agent-bot restored Luna at /Users/user/Souls/Luna.soul (17 files, 196 KB).');
+    expect(screen.getByText('The previous folder was moved aside, not deleted: /Users/user/Souls/Luna.soul.replaced-2026-10-08T10-00-00-000Z')).toBeTruthy();
+    expect(screen.getByText('Revision journal: the local chain is kept.')).toBeTruthy();
+  });
+
+  it('offers fork only for a retired ID', async () => {
+    const importLife = vi.fn(async (path: string, { plan, identity }: { plan: boolean; identity: ImportIdentity; name: string | null }): Promise<SoulEnvironmentImport> => {
+      if (identity !== 'fork') throw new BridgeError('import-id-retired', 'agent_p is retired here; a retired soul never comes back under its ID', 'add --fork to import it as a new soul');
+      const planned = { ...sampleLifeImport, archive: path, identity: { decision: 'fork', agentId: null, importedFrom: 'agent_p', existing: { status: 'retired', soulDir: null } }, soulDir: '/Users/user/Souls/luna.soul', name: null };
+      return plan ? planned : { ...planned, applied: true, decision: 'forked', identity: { ...planned.identity, agentId: 'agent_f' }, journal: 'adopted' };
+    });
+    show(source({ importLife }));
+    await openImport();
+    await readArchive();
+    const dialog = screen.getByRole('dialog');
+    expect(await within(dialog).findByText('agent_p is retired here; a retired soul never comes back under its ID')).toBeTruthy();
+    expect(within(dialog).getByRole('radio', { name: 'Import as a new soul (fork)' })).toBeTruthy();
+    expect(within(dialog).queryByRole('radio', { name: 'Replace the soul here' })).toBeNull();
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'Import as a new soul (fork)' }));
+    expect(importLife).toHaveBeenLastCalledWith(archive, { plan: true, identity: 'fork', name: null });
+    await within(dialog).findByText('Imports as a new soul: agent-bot mints a new Agent ID when it applies (from agent_p).');
+    // Still fork only: the engine says the ID is a tombstone.
+    expect(within(dialog).queryByRole('radio', { name: 'Replace the soul here' })).toBeNull();
+    expect(within(dialog).getByRole('button', { name: 'Confirm and import' })).toBeTruthy();
+  });
+
+  it("shows the archive's own refusal with Retry and the field, and a soul-running refusal on apply with its command as text", async () => {
+    const importLife = vi.fn<(archive: string, options: { plan: boolean; identity: ImportIdentity; name: string | null }) => Promise<SoulEnvironmentImport>>()
+      .mockRejectedValueOnce(new BridgeError('import-checksum-mismatch', 'life/soul.json does not match the manifest'))
+      .mockResolvedValueOnce(sampleLifeImport)
+      .mockRejectedValueOnce(new BridgeError('soul-running', 'agent_p is running (a turn in flight or a warm harness); stop it before replacing its life', 'agent-bot soul stop agent_p'));
+    show(source({ importLife }));
+    await openImport();
+    await readArchive('/Users/user/Desktop/broken.tar.gz');
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe('Not imported: life/soul.json does not match the manifest');
+    const dialog = screen.getByRole('dialog');
+    const retry = within(dialog).getByRole('button', { name: 'Retry' });
+    await waitFor(() => expect(document.activeElement).toBe(retry));
+    // The field stays: another archive can be named and read.
+    fireEvent.change(within(dialog).getByLabelText('Archive'), { target: { value: archive } });
+    fireEvent.click(retry);
+    expect(importLife).toHaveBeenLastCalledWith(archive, { plan: true, identity: 'keep', name: null });
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Confirm and import' }));
+    expect((await screen.findByText(/Not imported: agent_p is running/)).textContent).toBe('Not imported: agent_p is running (a turn in flight or a warm harness); stop it before replacing its life');
+    expect(screen.getByText('agent-bot soul stop agent_p', { selector: 'code' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /stop/i })).toBeNull();
+    expect(importLife.mock.calls.map(([, o]) => o.plan)).toEqual([true, true, false]);
   });
 });

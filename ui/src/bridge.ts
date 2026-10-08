@@ -1976,3 +1976,217 @@ export async function soulEnvClean(agentId: string, { plan = false, components =
   if (!result) throw new BridgeError('soul-env-clean-failed', 'agent-bot did not report the clean');
   return result;
 }
+
+/** One entry of a life export's manifest (`soul env export`): where it comes from, what the contract says of it, how it travels. */
+export interface SoulLifeComponent {
+  /** `root`, `workspace` or `journal`. */
+  area: string;
+  /** The archive entry; null for a row that carries no bytes. */
+  entry: string | null;
+  /** Root-relative, as the engine names it. */
+  relative: string;
+  classification: string | null;
+  retention: SoulRetention | null;
+  /** `file`, `dir`, `pointer` or `patch`. */
+  kind: string | null;
+  bytes: number | null;
+  sha256: string | null;
+  /** The linked workspace the row belongs to; null on the root's. */
+  workspace: string | null;
+  /** Where a pointer points; followed by nobody. */
+  target: string | null;
+}
+
+/** A path the export leaves out, with the engine's reason. */
+export interface SoulLifeExcluded {
+  relative: string;
+  classification: string | null;
+  reason: string | null;
+}
+
+/** A workspace as the manifest lists it: inside (carried whole) or linked (a pointer, a patch and the untracked files). */
+export interface SoulLifeWorkspace {
+  name: string;
+  location: string | null;
+  target: string | null;
+  head: string | null;
+  branch: string | null;
+  remote: string | null;
+  patch: boolean;
+  untracked: number | null;
+  note: string | null;
+}
+
+/** The manifest of a life export, as the engine prints it: paths, counts, hashes and reasons, never a file's contents. */
+export interface SoulLifeManifest {
+  agentId: string | null;
+  name: string | null;
+  displayName: string | null;
+  exportedAt: string | null;
+  engineVersion: string | null;
+  root: string | null;
+  memory: { location: string | null; target: string | null };
+  workspaces: SoulLifeWorkspace[];
+  journal: { entries: number | null };
+  components: SoulLifeComponent[];
+  excluded: SoulLifeExcluded[];
+  totals: { files: number | null; bytes: number | null };
+}
+
+/**
+ * The engine's report of a life export (#268; agent-bot-identity #583
+ * slice 7): with `--plan`, `applied` false and the manifest (what travels,
+ * what is left out and why); after the owner-gated write, `applied` true,
+ * `decision` `exported` and the file written.
+ */
+export interface SoulEnvironmentExport {
+  agentId: string;
+  soulDir: string | null;
+  applied: boolean;
+  decision: string;
+  file: string | null;
+  manifest: SoulLifeManifest;
+}
+
+const lifeWorkspace = (row: Record<string, unknown>): SoulLifeWorkspace | null => {
+  const name = text(row.name);
+  return name ? { name, location: text(row.location), target: text(row.target), head: text(row.head), branch: text(row.branch), remote: text(row.remote), patch: row.patch === true, untracked: count(row.untracked), note: text(row.note) } : null;
+};
+
+function normalizeLifeManifest(raw: unknown): SoulLifeManifest {
+  const m = record(raw);
+  const memory = record(m.memory);
+  const totals = record(m.totals);
+  return {
+    agentId: text(m.agentId), name: text(m.name), displayName: text(m.displayName), exportedAt: text(m.exportedAt), engineVersion: text(m.engineVersion), root: text(m.root),
+    memory: { location: text(memory.location), target: text(memory.target) },
+    workspaces: records(m.workspaces).flatMap((w) => { const row = lifeWorkspace(w); return row ? [row] : []; }),
+    journal: { entries: count(record(m.journal).entries) },
+    components: records(m.components).flatMap((c): SoulLifeComponent[] => {
+      const area = text(c.area);
+      const relative = text(c.relative);
+      if (!area || !relative) return [];
+      const retention = c.retention;
+      return [{ area, entry: text(c.entry), relative, classification: text(c.classification), retention: RETENTIONS.includes(retention as SoulRetention) ? retention as SoulRetention : null,
+        kind: text(c.kind), bytes: count(c.bytes), sha256: text(c.sha256), workspace: text(c.workspace), target: text(c.target) }];
+    }),
+    excluded: records(m.excluded).flatMap((e) => { const relative = text(e.relative); return relative ? [{ relative, classification: text(e.classification), reason: text(e.reason) }] : []; }),
+    totals: { files: count(totals.files), bytes: count(totals.bytes) },
+  };
+}
+
+/** The export report with its shape checked; null when the answer is not one. */
+export function normalizeSoulEnvironmentExport(raw: unknown): SoulEnvironmentExport | null {
+  if (!isRecord(raw) || typeof raw.agentId !== 'string' || typeof raw.applied !== 'boolean' || typeof raw.decision !== 'string' || !isRecord(raw.manifest)) return null;
+  return { agentId: raw.agentId, soulDir: text(raw.soulDir), applied: raw.applied, decision: raw.decision, file: text(raw.file), manifest: normalizeLifeManifest(raw.manifest) };
+}
+
+/**
+ * Plans or writes an export of the soul's life (`soul env export`). `plan`
+ * is read-only (the manifest, no gate, nothing written); the write needs
+ * `to` and is owner-gated by the engine itself, refused `soul-running`
+ * while the soul runs, `export-target-exists` for a path already there and
+ * `export-target-inside-root` for one under the soul (each with the
+ * engine's action on the error). Rejects with a BridgeError;
+ * `soul-env-export-unsupported` is a bundle without the command.
+ */
+export async function soulEnvExport(agentId: string, { plan = false, to = null }: { plan?: boolean; to?: string | null } = {}, invokeImpl: typeof invoke = invoke): Promise<SoulEnvironmentExport> {
+  if (!inApp() && invokeImpl === invoke) throw new BridgeError('soul-env-export-unavailable', 'not in the app');
+  let raw: unknown;
+  try {
+    raw = await invokeImpl<unknown>('soul_env_export', { agent: agentId, to, plan });
+  } catch (error) {
+    throw failureAs(error, 'soul-env-export-failed');
+  }
+  const result = normalizeSoulEnvironmentExport(raw);
+  if (!result) throw new BridgeError('soul-env-export-failed', 'agent-bot did not report the export');
+  return result;
+}
+
+/** A linked workspace an import brings back as files to link again, and where it put them. */
+export interface SoulLifeImportedWorkspace extends SoulLifeWorkspace {
+  /** Root-relative (`.soul-state/imports/<name>`): the pointer, the patch and the untracked files. */
+  imported: string | null;
+}
+
+/**
+ * The engine's report of a life import (#268; agent-bot-identity #583
+ * slice 7): with `--plan`, `applied` false and the identity decision
+ * (`keep` a moved life, `replace` the soul active here, `fork` a new ID
+ * minted on apply) with the destination; after the owner-gated apply,
+ * `applied` true with `decision` `imported | replaced | forked`, the root
+ * restored, the previous root a replace moved aside (never deleted), the
+ * revision journal's fate, and the workspaces to link again. Pointers are
+ * listed and never recreated.
+ */
+export interface SoulEnvironmentImport {
+  archive: string;
+  applied: boolean;
+  decision: string;
+  identity: {
+    decision: string;
+    /** The ID the life keeps, or null for a fork until the apply mints one. */
+    agentId: string | null;
+    importedFrom: string | null;
+    /** The soul of that ID here, when there is one. */
+    existing: { status: string | null; soulDir: string | null } | null;
+  };
+  soulDir: string | null;
+  /** Where a replace moved the previous root; null otherwise. */
+  replaced: string | null;
+  name: string | null;
+  displayName: string | null;
+  /** `restored`, `adopted` or `kept-local` after the apply; null in a plan. */
+  journal: string | null;
+  restored: { files: number | null; bytes: number | null; byClassification: Record<string, { files: number; bytes: number }> };
+  pointers: { relative: string; target: string | null }[];
+  workspaces: SoulLifeImportedWorkspace[];
+  migration: string | null;
+}
+
+/** The import report with its shape checked; null when the answer is not one. */
+export function normalizeSoulEnvironmentImport(raw: unknown): SoulEnvironmentImport | null {
+  if (!isRecord(raw) || typeof raw.archive !== 'string' || typeof raw.applied !== 'boolean' || typeof raw.decision !== 'string' || !isRecord(raw.identity) || !isRecord(raw.restored)) return null;
+  const identity = raw.identity;
+  const existing = isRecord(identity.existing) ? { status: text(identity.existing.status), soulDir: text(identity.existing.soulDir) } : null;
+  const byClassification = Object.fromEntries(Object.entries(record(raw.restored.byClassification)).flatMap(([classification, row]) => {
+    const counts = record(row);
+    return [[classification, { files: count(counts.files) ?? 0, bytes: count(counts.bytes) ?? 0 }]];
+  }));
+  return {
+    archive: raw.archive, applied: raw.applied, decision: raw.decision,
+    identity: { decision: text(identity.decision) ?? 'keep', agentId: text(identity.agentId), importedFrom: text(identity.importedFrom), existing },
+    soulDir: text(raw.soulDir), replaced: text(raw.replaced), name: text(raw.name), displayName: text(raw.displayName), journal: text(raw.journal),
+    restored: { files: count(raw.restored.files), bytes: count(raw.restored.bytes), byClassification },
+    pointers: records(raw.pointers).flatMap((p) => { const relative = text(p.relative); return relative ? [{ relative, target: text(p.target) }] : []; }),
+    workspaces: records(raw.workspaces).flatMap((w) => { const row = lifeWorkspace(w); return row ? [{ ...row, imported: text(w.imported) }] : []; }),
+    migration: text(raw.migration),
+  };
+}
+
+/** How an import settles the exported ID: keep it (a moved life), replace the soul active here, or fork a new one. */
+export type ImportIdentity = 'keep' | 'replace' | 'fork';
+
+/**
+ * Plans or applies an import of a soul's life (`soul env import`). `plan`
+ * reads the manifest only (no gate, nothing extracted); the apply is
+ * owner-gated by the engine itself. `identity` adds `--replace` or
+ * `--fork`; `name` the fork's display name. Rejects with a BridgeError:
+ * `import-id-active` until the identity is decided, `import-id-retired`
+ * until `fork`, `soul-running` while the soul replaced runs, the archive's
+ * own refusals (`import-archive-missing`, `import-unsafe-archive`,
+ * `import-checksum-mismatch`, ...), each with the engine's action;
+ * `soul-env-import-unsupported` is a bundle without the command.
+ */
+export async function soulEnvImport(archive: string, { plan = false, identity = 'keep', name = null }: { plan?: boolean; identity?: ImportIdentity; name?: string | null } = {}, invokeImpl: typeof invoke = invoke): Promise<SoulEnvironmentImport> {
+  if (!inApp() && invokeImpl === invoke) throw new BridgeError('soul-env-import-unavailable', 'not in the app');
+  let raw: unknown;
+  try {
+    raw = await invokeImpl<unknown>('soul_env_import', { archive, fork: identity === 'fork', replace: identity === 'replace', name, plan });
+  } catch (error) {
+    throw failureAs(error, 'soul-env-import-failed');
+  }
+  const result = normalizeSoulEnvironmentImport(raw);
+  if (!result) throw new BridgeError('soul-env-import-failed', 'agent-bot did not report the import');
+  return result;
+}
