@@ -239,7 +239,7 @@ export const es: Catalog = {
   'launch.err.brief': 'El encargo supera los {max} caracteres.',
   'launch.err.parent': 'El padre elegido no está en la flota activa.',
   'launch.err.parentSelf': 'Un compañero no puede ser su propio padre. Elige otro, o Independiente.',
-  'launch.err.parentUncarried': 'El lanzamiento desde GeniusBar aún no transmite el padre, así que empezaría independiente. Elige Independiente, o pide a ese compañero que lo inicie como integrante de su equipo.',
+  'launch.err.parentUncarried': 'Este motor no transmite el padre al lanzar (agent-bot sin launch-parent), así que empezaría independiente. Elige Independiente, o pide a ese compañero que lo inicie como integrante de su equipo.',
   'harness.defaultTitle': 'Arnés predeterminado',
   'harness.none': 'Ninguno — preguntar siempre',
   'harness.defaultHint': 'Los nuevos agentes usan este salvo que elijas otro.',

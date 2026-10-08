@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Check, ChevronDown, Circle, Loader2, Shield, ShieldOff } from 'lucide-react';
 import { displayName, roleAndHarness, type CensusRow } from '../model/census';
-import { declaredProvider, savedBrief, soulEnvironment, type SoulEnvironment } from '../bridge';
+import { declaredProvider, engineCan, savedBrief, soulEnvironment, type SoulEnvironment } from '../bridge';
 import { canLaunch, harnessLabel, harnessOptions, launchDraftErrors, MAX_BRIEF, MAX_HARNESS, MAX_ROLE, normalPackagePath, parentChoices, preferredHarness, prefillHarness, soulHarnessLabel, suggestedName, type LaunchSandbox, type LaunchStage, type LaunchState } from '../model/launch';
 import { useI18n, type Translate } from '../lib/i18n';
 import { radioGroupKeys } from '../lib/radioGroup';
@@ -74,9 +74,13 @@ interface LaunchFormProps {
   loadEnvironment?: (agentId: string) => Promise<SoulEnvironment>;
   /**
    * Whether the app's launch path carries a parent to the daemon (#261).
-   * agent-comms' launch op (0.3.14) does not, so the default refuses a
-   * companion parent before sending rather than letting it be dropped and
-   * the soul started independent in silence. Independent always sends.
+   * Decided from the engine: the form reads the chosen parent's `soul env`
+   * (or the relaunched soul's) and carries a companion parent only when
+   * its `engine.capabilities` lists `launch-parent` (agent-bot 0.10.53 with
+   * agent-comms 0.3.15; the pin ships both). An engine without it refuses
+   * the parent before sending rather than letting it be dropped and the
+   * soul started independent in silence. Independent always sends. `true`
+   * here forces it, for a host that knows better; the default asks the engine.
    */
   parentCarried?: boolean;
 }
@@ -227,6 +231,15 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
   // the soul's own parent while that companion is still one it may name.
   const parents = parentChoices(roster, soul);
   const [parent, setParent] = useState<string | null>(() => (soul?.parent && parents.some((p) => p.agentId === soul.parent) ? soul.parent : null));
+  // The chosen parent's engine (#261): its descriptor says whether the launch
+  // carries a parent at all. Null until read, or when the engine cannot say.
+  const [parentEnvironment, setParentEnvironment] = useState<{ agentId: string; env: SoulEnvironment } | null>(null);
+  useEffect(() => {
+    if (parent === null) return;
+    let live = true;
+    Promise.resolve().then(() => (loadEnvironment ?? soulEnvironment)(parent)).then((env) => { if (live) setParentEnvironment({ agentId: parent, env }); }, () => {});
+    return () => { live = false; };
+  }, [parent]);
   // The design's Advanced disclosure: provider, model and parent, closed until opened.
   const [advanced, setAdvanced] = useState(false);
   // The provider (#261) an existing soul's soul.json declares for the harness; null until read or when the engine cannot say.
@@ -304,8 +317,11 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
   const pathError = custom ? packageError : null;
   // The design's pre-validation (#261): every problem at once, shown on
   // submit until fixed; the engine checks again and its refusal is shown as it is.
+  const carried = parentCarried
+    || engineCan(parentEnvironment?.agentId === parent ? parentEnvironment.env : null, 'launch-parent')
+    || engineCan(environment, 'launch-parent');
   const errors = launchDraftErrors({
-    soul: soul ?? null, copy: Boolean(copyOf), customPackage: !soul && custom, packagePath, name, account, harness, model, brief, parent, parents, parentCarried,
+    soul: soul ?? null, copy: Boolean(copyOf), customPackage: !soul && custom, packagePath, name, account, harness, model, brief, parent, parents, parentCarried: carried,
   });
   const [tried, setTried] = useState(false);
   const errorList = useRef<HTMLDivElement>(null);
