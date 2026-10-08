@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Copy, ExternalLink } from 'lucide-react';
+import { BookOpen, Copy, ExternalLink } from 'lucide-react';
 import { aboutInfo, aboutRunning, openInBrowser, type AboutInfo, type AboutRunning } from '../bridge';
 import { useI18n } from '../lib/i18n';
 import { aboutSummary, aboutVersions, RELEASE_NOTES_URL, REPORT_PROBLEM_URL } from '../model/about';
@@ -43,15 +43,18 @@ type CopyState = 'idle' | 'copied' | 'failed';
  * collapsed disclosure; a read-only, selectable summary of only those
  * lines, with Copy, which says it copied only after the clipboard took
  * the text and otherwise selects the text for a manual copy; release
- * notes and a problem report in the owner's browser. The design's App
- * guide waits for the guide itself (#287). Escape, Close or a backdrop
- * click closes it. Opening it reads nothing else and changes nothing.
+ * notes and a problem report in the owner's browser, and the App guide
+ * (#287) when given, which closes About and opens the guide in its place.
+ * Escape, Close or a backdrop click closes it. Opening it reads nothing
+ * else and changes nothing.
  */
-export function AboutDialog({ source, brokerReachable, onClose }: {
+export function AboutDialog({ source, brokerReachable, onClose, onGuide }: {
   source: AboutSource;
   /** Whether the broker answers now, which is when agent-comms's running version is shown. */
   brokerReachable: boolean;
   onClose: () => void;
+  /** Opens the App guide (#287) in About's place; absent, the link is not offered. */
+  onGuide?: () => void;
 }) {
   const { t } = useI18n();
   const ids = useId();
@@ -154,6 +157,11 @@ export function AboutDialog({ source, brokerReachable, onClose }: {
           <button type="button" className={textLink} onClick={() => openLink(REPORT_PROBLEM_URL)}>
             <ExternalLink className="size-3" aria-hidden />{t('about.report')}
           </button>
+          {onGuide && (
+            <button type="button" className={textLink} aria-haspopup="dialog" onClick={onGuide}>
+              <BookOpen className="size-3" aria-hidden />{t('guide.title')}
+            </button>
+          )}
         </nav>
         {openError && <p className={errorLine} role="alert">{openError}</p>}
         <div className="flex justify-end">

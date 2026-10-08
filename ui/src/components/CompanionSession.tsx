@@ -30,6 +30,8 @@ import { ActsAs, GitHubAppRow, useIdentityApps } from './IdentityApps';
 import { useSandbox } from './Sandbox';
 import { runsAsText, SandboxChip } from './SandboxChip';
 import { SoulNotices, SoulSourceContext, useSoulMode, useSoulModel, useSoulPopulation } from './SoulNotices';
+import { GeniusNotice, GuideDialog } from './GuideDialog';
+import { isGuideSoul } from '../model/guide';
 import { SurfaceOpenerContext } from '../surfaces/opener';
 import { preferenceActions, usePreferences, windowChoiceOf, type WindowChoice } from '../state/preferences';
 import { Select } from './Select';
@@ -209,7 +211,12 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
  * The chat tab: the soul's notices, then the conversation. As the design,
  * the composer is disabled while the companion is unavailable (left and
  * not woken by messages) or its harness sign-in has lapsed (the record
- * the sign-in notice reads).
+ * the sign-in notice reads). Genius's chat (#287) leads with the guide
+ * banner, whose App guide opens here, so a pop-out window has it too;
+ * focus returns to the banner's button when it closes. A companion is
+ * taken for Genius by its display name, the template's: the package it
+ * came from is not in the census, and reading its profile here would be
+ * one agent-bot run per chat opened.
  */
 function ChatTab({ soul, chat, paused, refresh }: { soul: CensusRow; chat: SoulChat; paused: boolean; refresh: number }) {
   const population = useSoulPopulation(soul.agentId, refresh);
@@ -217,8 +224,15 @@ function ChatTab({ soul, chat, paused, refresh }: { soul: CensusRow; chat: SoulC
   // A left companion the daemon still watches is asleep: a message wakes it.
   const gone = soul.presence === 'left' && !soul.daemonWatching;
   const blocked = gone || signIn === 'expired' || signIn === 'signed-out';
+  const [guideOpen, setGuideOpen] = useState(false);
+  const guideReturn = useRef<HTMLElement | null>(null);
+  const name = displayName(soul);
   return (
     <>
+      {isGuideSoul(name) && (
+        <GeniusNotice name={name} onOpen={() => { guideReturn.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; setGuideOpen(true); }} />
+      )}
+      {guideOpen && <GuideDialog onClose={() => { setGuideOpen(false); guideReturn.current?.focus(); guideReturn.current = null; }} />}
       <SoulNotices soul={soul} refresh={refresh} population={population} />
       <Conversation name={displayName(soul)} entries={chat.entries} composer={chat.composer} onDraft={chat.onDraft} onSend={chat.onSend}
         dudle={dudleFor(soul)} paused={paused} onResolve={chat.onResolve} disabled={blocked} />

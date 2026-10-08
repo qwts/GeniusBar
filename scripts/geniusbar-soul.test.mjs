@@ -22,10 +22,21 @@ test('the GeniusBar soul is a template named GeniusBar on claude, then codex', (
   assert.equal(soul.parentRevision, null);
 });
 
-test('the GeniusBar soul has the same manifest shape as Starter', () => {
-  const starter = JSON.parse(readFileSync(path.join(GENIUSBAR, '..', 'starter.soul', 'soul.json'), 'utf8'));
-  const extra = Object.keys(manifest()).filter((key) => !(key in starter));
+test('the GeniusBar soul has the same manifest shape as Genius, plus template', () => {
+  const genius = JSON.parse(readFileSync(path.join(GENIUSBAR, '..', 'starter.soul', 'soul.json'), 'utf8'));
+  const extra = Object.keys(manifest()).filter((key) => !(key in genius));
   assert.deepEqual(extra, ['template']);
+  // Genius alone remembers its old name; both maintain the guide (#287).
+  assert.deepEqual(Object.keys(genius).filter((key) => !(key in manifest())), ['previousNames']);
+  assert.deepEqual(manifest().maintained, ['docs/guide/', 'skills/']);
+});
+
+test('the GeniusBar soul carries the same guide as Genius and its brief points at it (#287)', () => {
+  const guide = path.join(GENIUSBAR, 'docs', 'guide');
+  const source = path.join(GENIUSBAR, '..', 'starter.soul', 'docs', 'guide');
+  assert.deepEqual(readdirSync(guide).sort(), readdirSync(source).sort());
+  for (const name of readdirSync(guide)) assert.equal(readFileSync(path.join(guide, name), 'utf8'), readFileSync(path.join(source, name), 'utf8'), name);
+  assert.match(readFileSync(path.join(GENIUSBAR, 'AGENTS.md'), 'utf8'), /docs\/guide\/index\.json/);
 });
 
 test('the GeniusBar soul carries every skill its brief names', () => {

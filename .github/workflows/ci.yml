@@ -66,6 +66,8 @@ jobs:
           key: git-${{ runner.arch }}-${{ hashFiles('components.json') }}
       - name: Build bundled git
         run: node scripts/build-git.mjs
+      - name: Bundled guide is current (#287)
+        run: node scripts/build-guide.mjs --check
       - name: Bridge tests
         run: node --test 'bridge/*.test.mjs' 'scripts/*.test.mjs'
       - name: UI typecheck and tests

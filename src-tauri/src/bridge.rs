@@ -530,8 +530,10 @@ pub async fn cli_tools<R: Runtime>(
 }
 
 /// At launch, re-registers GeniusBar's services if they still run an older
-/// or moved copy of the app (#9). Release builds only: a development build
-/// lives in `target/` and must not take over the installed app's services.
+/// or moved copy of the app (#9), then refreshes the bundled templates'
+/// instances once per app version (#287). Release builds only: a
+/// development build lives in `target/` and must not take over the
+/// installed app's services.
 pub fn refresh_services<R: Runtime>(app: AppHandle<R>) {
     if cfg!(debug_assertions) {
         return;
@@ -556,7 +558,610 @@ pub fn refresh_services<R: Runtime>(app: AppHandle<R>) {
                 error.code, error.message
             );
         }
+        // Souls made from the bundled templates follow the app's guide (#287).
+        refresh_templates(&app).await;
     });
+}
+
+// ---- Bundled templates after an update (#287) ----
+
+/// What the engine lets GeniusBar do for a template instance, from its
+/// `soul env` descriptor: rename a template-owned name (`template-name`),
+/// refresh the template's maintained files (`template-refresh`), and the
+/// template the instance records. Decided from the capability list, never
+/// from the version; either spelling of a capability is accepted.
+#[derive(Debug, PartialEq)]
+struct TemplateSupport {
+    rename: bool,
+    refresh: bool,
+    template_name: Option<String>,
+}
+
+fn parse_template_support(descriptor: &Value) -> TemplateSupport {
+    let has =
+        |kebab: &str, camel: &str| engine_has(descriptor, kebab) || engine_has(descriptor, camel);
+    TemplateSupport {
+        rename: has("template-name", "templateName"),
+        refresh: has("template-refresh", "templateRefresh"),
+        template_name: descriptor
+            .get("identity")
+            .and_then(|identity| identity.get("templateName"))
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+    }
+}
+
+/// One of the souls the app bundles (`resources/souls/<folder>.soul`): the
+/// name its manifest gives it and the names it went by (`previousNames`),
+/// so an instance of Starter is still Genius's.
+#[derive(Debug, PartialEq)]
+struct BundledTemplate {
+    package: std::path::PathBuf,
+    names: Vec<String>,
+}
+
+fn bundled_templates(souls: &std::path::Path) -> Vec<BundledTemplate> {
+    let Ok(entries) = std::fs::read_dir(souls) else {
+        return Vec::new();
+    };
+    let mut templates: Vec<BundledTemplate> = entries
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.extension().is_some_and(|ext| ext == "soul"))
+        .filter_map(|package| {
+            let text = std::fs::read_to_string(package.join("soul.json")).ok()?;
+            let manifest: Value = serde_json::from_str(&text).ok()?;
+            let mut names = vec![manifest.get("name")?.as_str()?.to_owned()];
+            if let Some(previous) = manifest.get("previousNames").and_then(Value::as_array) {
+                names.extend(previous.iter().filter_map(Value::as_str).map(str::to_owned));
+            }
+            Some(BundledTemplate { package, names })
+        })
+        .collect();
+    templates.sort_by(|a, b| a.package.cmp(&b.package));
+    templates
+}
+
+fn bundled_template_named<'a>(
+    templates: &'a [BundledTemplate],
+    name: &str,
+) -> Option<&'a BundledTemplate> {
+    templates
+        .iter()
+        .find(|template| template.names.iter().any(|known| known == name))
+}
+
+fn template_rename_args(agent: &str, plan: bool) -> Vec<std::ffi::OsString> {
+    let mut args: Vec<std::ffi::OsString> = vec![
+        "soul".into(),
+        "env".into(),
+        "migrate".into(),
+        agent.into(),
+        "--template-name".into(),
+    ];
+    if plan {
+        args.push("--plan".into());
+    }
+    args.push("--json".into());
+    args
+}
+
+/// `--from` names the bundled package: the engine cannot see the app bundle.
+fn template_refresh_args(
+    agent: &str,
+    package: &std::path::Path,
+    plan: bool,
+) -> Vec<std::ffi::OsString> {
+    let mut args: Vec<std::ffi::OsString> = vec![
+        "soul".into(),
+        "template".into(),
+        "refresh".into(),
+        agent.into(),
+        "--from".into(),
+        package.as_os_str().to_owned(),
+    ];
+    if plan {
+        args.push("--plan".into());
+    }
+    args.push("--json".into());
+    args
+}
+
+/// What `soul env migrate <id> --template-name --json` answered: the
+/// decision (`planned`, `renamed`, `skipped`) and the one step's status,
+/// names and note.
+#[derive(Debug, PartialEq)]
+struct TemplateRename {
+    decision: String,
+    status: String,
+    from: Option<String>,
+    to: Option<String>,
+    note: Option<String>,
+}
+
+fn parse_template_rename(stdout: &[u8], stderr: &[u8]) -> Result<TemplateRename, BridgeError> {
+    let value = parse_agent_bot_json(
+        stdout,
+        stderr,
+        "template-rename-failed",
+        "agent-bot soul env migrate: ",
+        "agent-bot gave no rename result",
+        |value| {
+            value.get("operation").and_then(Value::as_str) == Some("template-name")
+                && value.get("decision").is_some_and(Value::is_string)
+                && value
+                    .get("steps")
+                    .and_then(Value::as_array)
+                    .is_some_and(|steps| steps.first().is_some_and(Value::is_object))
+        },
+    )?;
+    let step = &value["steps"][0];
+    let text = |field: &Value| field.as_str().map(str::to_owned);
+    Ok(TemplateRename {
+        decision: value["decision"].as_str().unwrap_or_default().to_owned(),
+        status: step["status"].as_str().unwrap_or_default().to_owned(),
+        from: text(&step["from"]),
+        to: text(&step["to"]),
+        note: text(&step["note"]),
+    })
+}
+
+/// What `soul template refresh <id> --json` answered: whether a revision
+/// was (or, with `--plan`, would be) written, and what it changes.
+#[derive(Debug, PartialEq)]
+struct TemplateRefresh {
+    template: String,
+    applied: bool,
+    added: usize,
+    changed: usize,
+    removed: usize,
+}
+
+fn parse_template_refresh(stdout: &[u8], stderr: &[u8]) -> Result<TemplateRefresh, BridgeError> {
+    let value = parse_agent_bot_json(
+        stdout,
+        stderr,
+        "template-refresh-failed",
+        "agent-bot soul template refresh: ",
+        "agent-bot gave no refresh result",
+        |value| {
+            value.get("applied").is_some_and(Value::is_boolean)
+                && value
+                    .get("template")
+                    .and_then(|template| template.get("name"))
+                    .is_some_and(Value::is_string)
+        },
+    )?;
+    let count = |name: &str| {
+        value
+            .get(name)
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len)
+    };
+    Ok(TemplateRefresh {
+        template: value["template"]["name"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned(),
+        applied: value["applied"].as_bool().unwrap_or(false),
+        added: count("added"),
+        changed: count("changed"),
+        removed: count("removed"),
+    })
+}
+
+/// Whether the templates were already looked at for this app version; the
+/// stamp is `{ "version": "…" }` in the app's data folder.
+fn template_refresh_due(stamp: &std::path::Path, version: &str) -> bool {
+    std::fs::read_to_string(stamp)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|value| {
+            value
+                .get("version")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .is_none_or(|stamped| stamped != version)
+}
+
+fn record_template_refresh(stamp: &std::path::Path, version: &str) {
+    if let Some(dir) = stamp.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(stamp, format!("{}\n", json!({ "version": version })));
+}
+
+/// Once per app version, after the services refresh (#287): every soul made
+/// from a bundled template gets its template-owned name migrated
+/// (Starter → Genius) and its maintained files (the App guide, the lead's
+/// skills) refreshed from the bundled template, each only when the bundled
+/// engine reports the capability and only after a read-only `--plan` says
+/// there is something to do, so a soul with nothing to change is never
+/// written and never asks the owner. The write operations are agent-bot's
+/// owner-gated ones, which ask the owner as a revision edit does. Every
+/// outcome, including "capability absent, nothing done", goes to
+/// `shell.log`; the souls' memories, history and the owner's own files are
+/// never read here, let alone written.
+pub(crate) async fn refresh_templates<R: Runtime>(app: &AppHandle<R>) {
+    let log = |message: String| crate::windows::log_line(app, &format!("templates: {message}"));
+    let version = app.package_info().version.to_string();
+    let Ok(data) = app.path().app_data_dir() else {
+        return;
+    };
+    let stamp = data.join("templates.json");
+    if !template_refresh_due(&stamp, &version) {
+        return;
+    }
+    let Ok(resources) = app.path().resource_dir() else {
+        return;
+    };
+    let templates = bundled_templates(&resources.join("souls"));
+    if templates.is_empty() {
+        log("no bundled templates found; nothing done".into());
+        return;
+    }
+    let souls = match run_agent_bot(
+        app,
+        population_list_args().into_iter().map(Into::into).collect(),
+        "population-unavailable",
+    )
+    .await
+    .and_then(|output| parse_population_list(&output.stdout, &output.stderr))
+    {
+        Ok(Value::Array(souls)) => souls,
+        Ok(_) => Vec::new(),
+        Err(error) => {
+            log(format!(
+                "census unavailable ({}: {}); nothing done",
+                error.code, error.message
+            ));
+            return;
+        }
+    };
+    let (mut renamed, mut refreshed, mut skipped, mut failed) = (0, 0, 0, 0);
+    for soul in &souls {
+        let Some(agent) = soul.get("agentId").and_then(Value::as_str) else {
+            continue;
+        };
+        if soul.get("status").and_then(Value::as_str) == Some("retired") {
+            continue;
+        }
+        let support = match run_agent_bot(app, soul_env_args(agent), "soul-env-unavailable")
+            .await
+            .and_then(|output| parse_soul_env(&output.stdout, &output.stderr))
+        {
+            Ok(descriptor) => parse_template_support(&descriptor),
+            Err(error) if error.code == "soul-env-unsupported" => {
+                log("the bundled agent-bot has no soul environment; nothing done".into());
+                break;
+            }
+            Err(error) => {
+                log(format!(
+                    "{agent}: soul env failed ({}: {}); skipped",
+                    error.code, error.message
+                ));
+                failed += 1;
+                continue;
+            }
+        };
+        if !support.rename && !support.refresh {
+            log("the bundled agent-bot reports neither template-name nor template-refresh; nothing done".into());
+            break;
+        }
+        let Some(template) = support
+            .template_name
+            .as_deref()
+            .and_then(|name| bundled_template_named(&templates, name))
+        else {
+            skipped += 1;
+            continue;
+        };
+        if support.rename {
+            match run_rename(app, agent).await {
+                Ok(Some(rename)) => {
+                    log(format!(
+                        "{agent}: renamed {} -> {}",
+                        rename.from.as_deref().unwrap_or("?"),
+                        rename.to.as_deref().unwrap_or("?")
+                    ));
+                    renamed += 1;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    log(format!(
+                        "{agent}: rename failed ({}: {})",
+                        error.code, error.message
+                    ));
+                    failed += 1;
+                }
+            }
+        }
+        if support.refresh {
+            match run_refresh(app, agent, &template.package).await {
+                Ok(Some(refresh)) => {
+                    log(format!(
+                        "{agent}: refreshed from {} ({} added, {} changed, {} removed)",
+                        refresh.template, refresh.added, refresh.changed, refresh.removed
+                    ));
+                    refreshed += 1;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    log(format!(
+                        "{agent}: refresh failed ({}: {})",
+                        error.code, error.message
+                    ));
+                    failed += 1;
+                }
+            }
+        }
+    }
+    record_template_refresh(&stamp, &version);
+    log(format!(
+        "{version}: {} souls, {renamed} renamed, {refreshed} refreshed, {skipped} not from a bundled template, {failed} failed",
+        souls.len()
+    ));
+}
+
+/// Plans the rename, then applies it only when the plan is pending.
+async fn run_rename<R: Runtime>(
+    app: &AppHandle<R>,
+    agent: &str,
+) -> Result<Option<TemplateRename>, BridgeError> {
+    let plan = run_agent_bot(
+        app,
+        template_rename_args(agent, true),
+        "template-rename-unavailable",
+    )
+    .await?;
+    let planned = parse_template_rename(&plan.stdout, &plan.stderr)?;
+    if planned.status != "pending" {
+        return Ok(None);
+    }
+    let output = run_agent_bot(
+        app,
+        template_rename_args(agent, false),
+        "template-rename-unavailable",
+    )
+    .await?;
+    let done = parse_template_rename(&output.stdout, &output.stderr)?;
+    Ok((done.decision == "renamed").then_some(done))
+}
+
+/// Plans the refresh, then applies it only when a maintained file differs.
+async fn run_refresh<R: Runtime>(
+    app: &AppHandle<R>,
+    agent: &str,
+    package: &std::path::Path,
+) -> Result<Option<TemplateRefresh>, BridgeError> {
+    let plan = run_agent_bot(
+        app,
+        template_refresh_args(agent, package, true),
+        "template-refresh-unavailable",
+    )
+    .await?;
+    if !parse_template_refresh(&plan.stdout, &plan.stderr)?.applied {
+        return Ok(None);
+    }
+    let output = run_agent_bot(
+        app,
+        template_refresh_args(agent, package, false),
+        "template-refresh-unavailable",
+    )
+    .await?;
+    let done = parse_template_refresh(&output.stdout, &output.stderr)?;
+    Ok(done.applied.then_some(done))
+}
+
+#[cfg(test)]
+mod template_refresh_tests {
+    use super::*;
+
+    fn descriptor(capabilities: &[&str], template_name: Option<&str>) -> Value {
+        json!({
+            "schemaVersion": 1,
+            "engine": { "version": "0.10.52", "contractVersion": 1, "capabilities": capabilities },
+            "identity": { "agentId": "agent_1", "name": "Genius - Genius", "displayName": "Genius", "templateName": template_name, "nameSource": "template" },
+            "components": []
+        })
+    }
+
+    #[test]
+    fn reads_the_capabilities_in_either_spelling_and_the_template_name() {
+        assert_eq!(
+            parse_template_support(&descriptor(
+                &["env", "template-name", "template-refresh"],
+                Some("Starter")
+            )),
+            TemplateSupport {
+                rename: true,
+                refresh: true,
+                template_name: Some("Starter".into())
+            }
+        );
+        assert_eq!(
+            parse_template_support(&descriptor(&["templateName"], None)),
+            TemplateSupport {
+                rename: true,
+                refresh: false,
+                template_name: None
+            }
+        );
+        assert_eq!(
+            parse_template_support(&descriptor(&["env", "revision-prepare"], Some("Genius"))),
+            TemplateSupport {
+                rename: false,
+                refresh: false,
+                template_name: Some("Genius".into())
+            }
+        );
+    }
+
+    #[test]
+    fn lists_the_bundled_templates_with_their_previous_names() {
+        let souls = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../souls");
+        let templates = bundled_templates(&souls);
+        assert_eq!(templates.len(), 2);
+        let genius =
+            bundled_template_named(&templates, "Starter").expect("Starter is Genius's old name");
+        assert_eq!(
+            genius.names,
+            vec!["Genius".to_owned(), "Starter".to_owned()]
+        );
+        assert!(genius.package.ends_with("starter.soul"));
+        assert_eq!(
+            bundled_template_named(&templates, "Genius").map(|t| &t.package),
+            Some(&genius.package)
+        );
+        assert!(bundled_template_named(&templates, "GeniusBar")
+            .is_some_and(|t| t.package.ends_with("geniusbar.soul")));
+        assert!(bundled_template_named(&templates, "Luna").is_none());
+        assert!(bundled_templates(&souls.join("nowhere")).is_empty());
+    }
+
+    #[test]
+    fn builds_the_plan_and_apply_arguments() {
+        assert_eq!(
+            template_rename_args("agent_1", true),
+            vec![
+                "soul",
+                "env",
+                "migrate",
+                "agent_1",
+                "--template-name",
+                "--plan",
+                "--json"
+            ]
+            .into_iter()
+            .map(std::ffi::OsString::from)
+            .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            template_rename_args("agent_1", false),
+            vec![
+                "soul",
+                "env",
+                "migrate",
+                "agent_1",
+                "--template-name",
+                "--json"
+            ]
+            .into_iter()
+            .map(std::ffi::OsString::from)
+            .collect::<Vec<_>>()
+        );
+        let package = std::path::Path::new("/App/souls/starter.soul");
+        assert_eq!(
+            template_refresh_args("agent_1", package, true),
+            vec![
+                "soul",
+                "template",
+                "refresh",
+                "agent_1",
+                "--from",
+                "/App/souls/starter.soul",
+                "--plan",
+                "--json"
+            ]
+            .into_iter()
+            .map(std::ffi::OsString::from)
+            .collect::<Vec<_>>()
+        );
+        assert_eq!(template_refresh_args("agent_1", package, false).len(), 7);
+    }
+
+    #[test]
+    fn parses_a_pending_and_a_skipped_rename_and_the_engines_refusal() {
+        let pending = br#"{"schemaVersion":1,"agentId":"agent_1","soulDir":"/s/starter.soul","operation":"template-name","decision":"planned","steps":[{"id":"template-name","status":"pending","from":"Starter - Starter","to":"Genius - Genius","at":"2026-10-07T00:00:00Z","note":null,"templateName":{"from":"Starter","to":"Genius"},"template":{"name":"Genius","package":"/App/souls/starter.soul","revision":"sha256:0"},"displayName":{"from":"Starter","to":"Starter"}}],"root":"/s/starter.soul"}
+"#;
+        assert_eq!(
+            parse_template_rename(pending, b"").unwrap(),
+            TemplateRename {
+                decision: "planned".into(),
+                status: "pending".into(),
+                from: Some("Starter - Starter".into()),
+                to: Some("Genius - Genius".into()),
+                note: None
+            }
+        );
+        let skipped = br#"{"schemaVersion":1,"agentId":"agent_1","soulDir":"/s/x.soul","operation":"template-name","decision":"skipped","steps":[{"id":"template-name","status":"skipped","from":"Pip","to":null,"note":"the name was chosen by the owner","templateName":{"from":"Starter","to":"Starter"},"template":null,"displayName":{"from":"Pip","to":"Pip"}}],"root":"/s/x.soul"}
+"#;
+        let parsed = parse_template_rename(skipped, b"").unwrap();
+        assert_eq!(parsed.status, "skipped");
+        assert_eq!(
+            parsed.note.as_deref(),
+            Some("the name was chosen by the owner")
+        );
+        assert_eq!(parsed.to, None);
+        let refused = parse_template_rename(
+            br#"{"error":{"code":"soul-not-found","message":"Soul not found.","action":null}}
+"#,
+            b"",
+        )
+        .unwrap_err();
+        assert_eq!(refused.code, "soul-not-found");
+        let usage = parse_template_rename(b"", b"agent-bot soul env migrate: usage: agent-bot soul env migrate <agentId|name> --adopt-host-signin\n").unwrap_err();
+        assert_eq!(usage.code, "template-rename-failed");
+        assert!(usage.message.starts_with("usage:"));
+        assert_eq!(
+            parse_template_rename(
+                br#"{"operation":"space-into-soul","decision":"done","steps":[{}]}"#,
+                b""
+            )
+            .unwrap_err()
+            .code,
+            "template-rename-failed"
+        );
+    }
+
+    #[test]
+    fn parses_a_refresh_plan_a_refresh_and_a_refusal() {
+        let plan = br#"{"schemaVersion":1,"soul":{"agentId":"agent_1","soulDir":"/s/starter.soul","revision":"sha256:a"},"template":{"name":"Genius","package":"/App/souls/starter.soul","revision":"sha256:b"},"templateRevision":"sha256:0","maintained":["docs/guide/"],"added":["docs/guide/17-genius-and-the-lead.md"],"changed":["docs/guide/index.json","docs/guide/01-overview.md"],"removed":[],"applied":true}
+"#;
+        assert_eq!(
+            parse_template_refresh(plan, b"").unwrap(),
+            TemplateRefresh {
+                template: "Genius".into(),
+                applied: true,
+                added: 1,
+                changed: 2,
+                removed: 0
+            }
+        );
+        let same = br#"{"schemaVersion":1,"soul":{"agentId":"agent_1","soulDir":"/s/starter.soul","revision":"sha256:a"},"template":{"name":"Genius","package":"/App/souls/starter.soul","revision":"sha256:b"},"templateRevision":"sha256:b","maintained":["docs/guide/"],"added":[],"changed":[],"removed":[],"applied":false}
+"#;
+        assert!(!parse_template_refresh(same, b"").unwrap().applied);
+        let refused = parse_template_refresh(
+            br#"{"error":{"code":"template-not-maintained","message":"template declares no maintained paths","action":null}}
+"#,
+            b"",
+        )
+        .unwrap_err();
+        assert_eq!(refused.code, "template-not-maintained");
+        let older = parse_template_refresh(
+            b"",
+            b"agent-bot soul template refresh: unknown soul command\n",
+        )
+        .unwrap_err();
+        assert_eq!(
+            (older.code.as_str(), older.message.as_str()),
+            ("template-refresh-failed", "unknown soul command")
+        );
+    }
+
+    #[test]
+    fn stamps_once_per_app_version() {
+        let dir = std::env::temp_dir().join(format!("geniusbar-templates-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let stamp = dir.join("templates.json");
+        assert!(template_refresh_due(&stamp, "0.1.61"));
+        record_template_refresh(&stamp, "0.1.61");
+        assert!(!template_refresh_due(&stamp, "0.1.61"));
+        assert!(template_refresh_due(&stamp, "0.1.62"));
+        std::fs::write(&stamp, "not json").unwrap();
+        assert!(template_refresh_due(&stamp, "0.1.61"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
 
 #[cfg(test)]

@@ -253,5 +253,5 @@ the readiness report (`useSnapshot`).
 - `bridge/` — Node scripts run in the bundled Node: the broker bridge,
   first-run setup, login services, and command-line tools.
 - `scripts/` — component fetching, signing checks, and release helpers.
-- `souls/` — the bundled Starter soul.
+- `souls/` — the bundled souls: Genius (`starter.soul`, formerly Starter, with the App guide in `docs/guide`) and the GeniusBar lead.
 - `docs/decisions/` — ADRs.

@@ -20,7 +20,7 @@ differs, follow its `--help` and `agent-comms skill`.
 - `start_soul` `{name, harness?, template?, brief?}`: starts a full new soul
   with you as parent and returns `{agentId, name, harness, parent}`. The
   harness defaults to yours, the template to the owner's `teams.template`,
-  else the bundled Starter. Limits: at most `teams.maxChildren` active
+  else the bundled Genius (formerly Starter). Limits: at most `teams.maxChildren` active
   children (default 5) and `teams.maxDepth` levels (default 2). Pass a `template` path from
   `agent-bot soul templates --json`. It takes no role or model; set those
   afterwards (fleet-configuration skill).

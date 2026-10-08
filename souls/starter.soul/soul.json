@@ -1,12 +1,18 @@
 {
   "formatVersion": 1,
-  "name": "Starter",
-  "description": "A friendly first soul: chats, answers questions and helps with everyday work.",
+  "name": "Genius",
+  "previousNames": [
+    "Starter"
+  ],
+  "description": "A friendly first soul and GeniusBar's built-in guide: chats, answers questions, helps with everyday work, and explains GeniusBar, agent-bot and agent-comms from the guide it carries.",
   "displaySeed": "starter",
   "preferredHarnesses": [
     "claude",
     "codex"
   ],
-  "revision": "sha256:bfc7f672b43e122f3542a78c5fb35d33a2504b008447b1511aeb435f73aaffed",
+  "maintained": [
+    "docs/guide/"
+  ],
+  "revision": "sha256:b2ce275b53612b8841df95f3ccfe88688e1a83c457ace7c984b7e044826048f8",
   "parentRevision": null
 }

@@ -1,4 +1,4 @@
-import { ArrowRightLeft, Check, Circle, Loader2 } from 'lucide-react';
+import { ArrowRightLeft, BookOpen, Check, Circle, Loader2 } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { describeExisting, SETUP_STEPS, type ExistingServices, type SetupState } from '../model/setup';
 import { textLink } from './ui';
@@ -9,14 +9,16 @@ const setupButton = 'inline-flex items-center justify-center gap-1.5 rounded-md 
 
 /**
  * Setup can keep another install's services or move them to GeniusBar.
- * About GeniusBar (#290) is reachable from here too, as the design's
- * SetupPanel has it, so a version can be reported before setup is done.
+ * About GeniusBar (#290) and the App guide (#287) are reachable from here
+ * too, as the design's SetupPanel has them, so a version can be reported
+ * and the guide read before setup is done.
  */
-export function SetupPanel({ setup, onSetup, existing, onAbout }: {
+export function SetupPanel({ setup, onSetup, existing, onAbout, onGuide }: {
   setup: SetupState;
   onSetup: (migrate?: boolean) => void;
   existing?: ExistingServices | null;
   onAbout?: () => void;
+  onGuide?: () => void;
 }) {
   const { t } = useI18n();
   const found = describeExisting(existing, t);
@@ -56,7 +58,12 @@ export function SetupPanel({ setup, onSetup, existing, onAbout }: {
           {setup.running ? t('setup.settingUp') : setup.error ? t('setup.retry') : t('setup.go')}
         </button>
       )}
-      {onAbout && <p className="m-0"><button type="button" className={textLink} onClick={onAbout}>{t('about.link')}</button></p>}
+      {(onAbout || onGuide) && (
+        <p className="m-0 flex flex-wrap gap-3">
+          {onAbout && <button type="button" className={textLink} onClick={onAbout}>{t('about.link')}</button>}
+          {onGuide && <button type="button" className={textLink} aria-haspopup="dialog" onClick={onGuide}><BookOpen className="size-3" aria-hidden />{t('guide.open')}</button>}
+        </p>
+      )}
     </section>
   );
 }

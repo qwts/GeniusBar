@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { BookOpen } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { canLaunch } from '../model/launch';
 import type { LaunchApi } from '../useLaunch';
@@ -143,12 +144,16 @@ function DevToolsNeeded({ devTools, installing }: { devTools?: DevTools; install
 
 /**
  * The empty roster's one-click start (R4): launches the bundled starter
- * soul with its default harness, which the owner may change first.
+ * soul, Genius (#287), with its default harness, which the owner may
+ * change first. "Meet Genius, your guide" leads, with the App guide a
+ * click away, as the design's first start has it.
  */
-export function FirstLaunch({ starter, launcher, auth, devTools, onStart, onAbout }:
+export function FirstLaunch({ starter, launcher, auth, devTools, onStart, onAbout, onGuide }:
   { starter: Starter; launcher: LaunchApi; auth?: HarnessAuth; devTools?: DevTools; onStart?: () => void;
     /** Opens About GeniusBar (#290), reachable before the first companion exists. */
-    onAbout?: () => void }) {
+    onAbout?: () => void;
+    /** Opens the App guide (#287), likewise. */
+    onGuide?: () => void }) {
   const { t } = useI18n();
   const [harness, setHarness] = useState(starter.harnesses[0] ?? '');
   // Agent comms is on by default and can be turned off only before start (#71).
@@ -160,7 +165,7 @@ export function FirstLaunch({ starter, launcher, auth, devTools, onStart, onAbou
   return (
     <form
       className="grid gap-2 text-sm"
-      aria-label={t('starter.start')}
+      aria-label={t('starter.start', { name: starter.name })}
       onSubmit={(e) => {
         e.preventDefault();
         if (!ready) return;
@@ -170,6 +175,9 @@ export function FirstLaunch({ starter, launcher, auth, devTools, onStart, onAbou
       }}
     >
       {!started && <p className="m-0">{t('starter.intro', { name: starter.name })}</p>}
+      {!started && onGuide && (
+        <p className="m-0"><button type="button" className={textLink} aria-haspopup="dialog" onClick={onGuide}><BookOpen className="size-3" aria-hidden />{t('guide.open')}</button></p>
+      )}
       <datalist id={`${ids}-harnesses`}>{starter.harnesses.map((h) => <option key={h} value={h} />)}</datalist>
       <label className={row}>
         <span className="text-xs text-muted-foreground">{t('field.harness')}</span>
@@ -189,7 +197,7 @@ export function FirstLaunch({ starter, launcher, auth, devTools, onStart, onAbou
       {!started && (
         <div className={actions}>
           {onAbout && <button type="button" className={`${textLink} mr-auto`} onClick={onAbout}>{t('about.link')}</button>}
-          <button type="submit" className={primaryButton} disabled={!ready}>{t('starter.start')}</button>
+          <button type="submit" className={primaryButton} disabled={!ready}>{t('starter.start', { name: starter.name })}</button>
         </div>
       )}
     </form>
