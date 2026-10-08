@@ -15,8 +15,8 @@ export function CustomizeSurface({ soul: key, census, loaded, chat, badges, win 
   useWindowTitle(soul ? t('surface.title', { name: `${t('edit.title')} ${displayName(soul)}` }) : null, win);
   const state = soul ? liveState(soul, awaiting, busy) : undefined;
   return (
-    <main className="gb flex min-h-full flex-col bg-background">
-      {/* The title bar's strip, above the page, drags the window. */}
+    <main className="gb flex h-full flex-col overflow-y-auto overscroll-contain bg-background">
+      {/* The title bar's strip, above the page, drags the window; the page scrolls under it, never the document (#260). */}
       <div data-tauri-drag-region="" className="fixed inset-x-0 top-0 z-10 h-8" />
       {soul ? (
         <CustomizeDialog page soul={soul} state={state === 'awaiting' || state === 'working' ? state : undefined} onClose={() => closeWindow(win)} />

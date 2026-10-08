@@ -193,7 +193,7 @@ export function CompanionSession({ soul, forest, roster, paused = false, chat, l
       </div>
       </div>
       <div id={`${ids}-panel`} role="tabpanel" aria-labelledby={`${ids}-tab-${active}`}
-        className={`flex min-h-0 flex-1 flex-col ${active === 'chat' ? '' : 'overflow-y-auto'}`}>
+        className={`flex min-h-0 flex-1 flex-col ${active === 'chat' ? '' : 'overflow-y-auto overscroll-contain'}`}>
         {active === 'chat' && chat && (
           <ChatTab key={soulKey(soul)} soul={soul} chat={chat} paused={paused} refresh={metricsRefresh} />
         )}

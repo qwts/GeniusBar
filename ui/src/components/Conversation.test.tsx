@@ -20,6 +20,17 @@ describe('Conversation', () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it('scrolls only the log, which shrinks to the room left and chains no scroll to the window (#260)', () => {
+    const { rerender } = render(<Conversation name="luna" entries={entries} composer={emptyComposer} onDraft={() => {}} onSend={() => {}} />);
+    const log = screen.getByRole('log', { name: 'Conversation with luna' });
+    expect(log.className.split(' ')).toEqual(expect.arrayContaining(['min-h-0', 'flex-1', 'overflow-y-auto', 'overscroll-contain']));
+    expect(log.parentElement!.className.split(' ')).toEqual(expect.arrayContaining(['flex', 'min-h-0', 'flex-1', 'flex-col']));
+    expect(screen.getByRole('textbox').closest('form')!.className.split(' ')).toContain('shrink-0');
+    rerender(<Conversation name="luna" entries={[]} composer={emptyComposer} onDraft={() => {}} onSend={() => {}} />);
+    const empty = screen.getByText(/Say hello to luna/).parentElement!.parentElement!;
+    expect(empty.className.split(' ')).toEqual(expect.arrayContaining(['min-h-0', 'flex-1', 'overflow-y-auto', 'overscroll-contain']));
+  });
+
   it('lists messages oldest first and renders bodies as safe Markdown, never HTML (#117)', () => {
     render(<Conversation name="luna" entries={entries} composer={emptyComposer} onDraft={() => {}} onSend={() => {}} />);
     // role="log" as the design's message list (X14).

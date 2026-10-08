@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Shield, ShieldOff } from 'lucide-react';
+import { useFloating, withinAny } from '../lib/floating';
 import { useI18n, type Translate } from '../lib/i18n';
 import { menuKeys } from '../lib/keys';
 import { displayName, type CensusRow } from '../model/census';
@@ -18,6 +20,7 @@ export function runsAsText(row: SandboxSoul, t: Translate): string {
  * again. Absent while agent-bot has no `sandbox` or no row for the soul.
  * As Radix DropdownMenu: the open menu focuses its first item, Up / Down /
  * Home / End move between the items, Escape hands focus back to the pill.
+ * The menu floats over the body, kept inside the window (#262).
  */
 export function SandboxChip({ soul }: { soul: CensusRow }) {
   const { t } = useI18n();
@@ -26,14 +29,14 @@ export function SandboxChip({ soul }: { soul: CensusRow }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
-  const menu = useRef<HTMLDivElement>(null);
+  const { ref: menu, style, side } = useFloating<HTMLDivElement>(button, { align: 'end' });
   useEffect(() => { reload(); }, [reload, soul.agentId]);
   useEffect(() => {
     if (!open) return;
-    const away = (e: PointerEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
+    const away = (e: PointerEvent) => { if (!withinAny(e.target, box, menu)) setOpen(false); };
     document.addEventListener('pointerdown', away);
     return () => document.removeEventListener('pointerdown', away);
-  }, [open]);
+  }, [open, menu]);
   useEffect(() => { if (open) menu.current?.querySelector<HTMLElement>('[role^="menuitem"]')?.focus(); }, [open]);
   const failure = sb.failure?.scope === soul.agentId ? sb.failure.message : null;
   // A refusal reopens the menu to say why the override stayed.
@@ -68,9 +71,11 @@ export function SandboxChip({ soul }: { soul: CensusRow }) {
         {on ? <Shield className="size-3" aria-hidden /> : <ShieldOff className="size-3" aria-hidden />}
         {on ? t('sandbox.on') : t('sandbox.off')}
       </button>
-      {open && (
-        <div ref={menu} role="menu" aria-label={t('sandbox.title')} onKeyDown={menuKeys}
-          className="absolute top-full right-0 z-50 mt-1 w-64 rounded-md border border-border bg-popover p-1 shadow-md">
+      {open && createPortal(
+        <div ref={menu} role="menu" aria-label={t('sandbox.title')} onKeyDown={menuKeys} data-side={side} style={style}
+          // The chip sits in a title bar that drags the window: a press in the menu stays here.
+          onPointerDown={(e) => e.stopPropagation()}
+          className="z-50 w-64 rounded-md border border-border bg-popover p-1 shadow-md">
           <p className="m-0 px-2 py-1.5 text-xs text-muted-foreground">{runsAsText(row, t)}</p>
           {decided && <p className="m-0 px-2 pb-1.5 text-[11px] text-muted-foreground">{t('sandbox.bySop', { rule: row.rule ?? '' })}</p>}
           {row.reason && <p className="m-0 px-2 pb-1.5 text-[11px] text-muted-foreground">{row.reason}</p>}
@@ -88,7 +93,8 @@ export function SandboxChip({ soul }: { soul: CensusRow }) {
               {label}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
       {saving && <span className="sr-only" role="status">{t('sandbox.saving')}</span>}
     </div>

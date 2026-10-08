@@ -14,13 +14,15 @@ export const MOVE_SAVE_MS = 250;
 /**
  * What the team window must show: the card, plus any menu or hover card
  * hanging from it, so they are not clipped by a window the card's size.
- * Rounded up to whole points.
+ * Menus and hover cards float over the body (#262), shifted to stay inside
+ * the window; one too big for it still hangs past the card, and the window
+ * grows to show it. Rounded up to whole points.
  */
 export function windowSizeFor(card: HTMLElement): { width: number; height: number; card: { width: number; height: number } } {
   const box = card.getBoundingClientRect();
   let right = box.right;
   let bottom = box.bottom;
-  card.querySelectorAll('[role="menu"], [role="tooltip"]').forEach((el) => {
+  card.ownerDocument.querySelectorAll('[role="menu"], [role="tooltip"]').forEach((el) => {
     const r = el.getBoundingClientRect();
     right = Math.max(right, r.right);
     bottom = Math.max(bottom, r.bottom);
@@ -49,9 +51,10 @@ function useFitWindow(card: RefObject<HTMLElement | null>, win: SurfaceWindow | 
     };
     const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
     resized?.observe(el);
-    // A menu or hover card opening changes no size of the card's own.
+    // A menu or hover card opening changes no size of the card's own, and
+    // floats over the body, placed by its style: the whole page is watched.
     const changed = new MutationObserver(measure);
-    changed.observe(el, { childList: true, subtree: true });
+    changed.observe(el.ownerDocument.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] });
     measure();
     return () => { resized?.disconnect(); changed.disconnect(); cancelAnimationFrame(frame); };
   }, [card, win, key, shown]);

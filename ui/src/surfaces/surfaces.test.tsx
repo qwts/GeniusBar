@@ -2,9 +2,11 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SurfaceRequest, SurfaceWindow } from '../bridge';
 import type { Archiver } from '../components/ArchiveDialog';
+import { emptyChat } from '../model/chat';
 import { sampleCensus, sampleProfile } from '../model/fixtures';
 import { LAYOUT_KEY, layoutActions } from '../state/layout';
 import type { PackageCheck } from '../soulPackage';
+import type { ChatApi } from '../useChat';
 import type { LaunchApi } from '../useLaunch';
 import { ProfileSourceContext, type ProfileSource } from '../useSoulProfile';
 import { AuditSurface } from './AuditSurface';
@@ -117,14 +119,55 @@ describe('TeamSurface (#223)', () => {
     expect(move).toHaveBeenCalledTimes(1);
   });
 
-  it('measures menus and hover cards with the card', () => {
+  it('measures menus and hover cards with the card, wherever on the page they float', () => {
     const card = document.createElement('section');
     const menu = document.createElement('div');
     menu.setAttribute('role', 'tooltip');
-    card.append(menu);
+    // Over the body (#262), not inside the card.
+    document.body.append(card, menu);
     card.getBoundingClientRect = () => new DOMRect(0, 0, 200, 64);
     menu.getBoundingClientRect = () => new DOMRect(-20, 50, 224, 120.2);
     expect(windowSizeFor(card)).toEqual({ width: 204, height: 171, card: { width: 200, height: 64 } });
+    card.remove();
+    menu.remove();
+  });
+});
+
+// styles.css locks the viewport (html overflow hidden, body and #root clip);
+// jsdom loads no stylesheet, so these check the chain under it.
+describe('native windows never scroll as a document (#260)', () => {
+  it('session: the page clips under a fixed title bar, and only the log scrolls', () => {
+    const chat: ChatApi = { chat: emptyChat, composers: {}, setDraft: vi.fn(), send: vi.fn(async () => {}), open: vi.fn() };
+    render(<SessionSurface {...data} chat={chat} soul="user/agent_p" tab="chat" action={null} win={null} open={null} />);
+    const main = screen.getByRole('main');
+    expect(main.className.split(' ')).toContain('h-full');
+    const page = main.querySelector('section')!;
+    expect(page.className.split(' ')).toEqual(expect.arrayContaining(['flex', 'h-full', 'flex-col', 'overflow-clip']));
+    expect(page.className).not.toContain('overflow-hidden');
+    // The drag title bar is the page's first row; the body shrinks to the room left.
+    expect(page.firstElementChild!.hasAttribute('data-tauri-drag-region')).toBe(true);
+    expect(page.lastElementChild!.className.split(' ')).toEqual(expect.arrayContaining(['min-h-0', 'flex-1']));
+    const panel = screen.getByRole('tabpanel');
+    expect(panel.className.split(' ')).toEqual(expect.arrayContaining(['min-h-0', 'flex-1']));
+    const log = panel.querySelector('.overflow-y-auto')!;
+    expect(log.className.split(' ')).toEqual(expect.arrayContaining(['min-h-0', 'flex-1', 'overflow-y-auto', 'overscroll-contain']));
+    fireEvent.click(screen.getByRole('tab', { name: 'Audit log' }));
+    expect(screen.getByRole('tabpanel').className.split(' ')).toEqual(expect.arrayContaining(['overflow-y-auto', 'overscroll-contain']));
+  });
+
+  it('audit, customize and launch: their own pane scrolls, contained', () => {
+    render(<AuditSurface {...data} soul={null} win={null} />);
+    const pane = screen.getByRole('heading', { level: 1 }).parentElement!;
+    expect(pane.className.split(' ')).toEqual(expect.arrayContaining(['min-h-0', 'flex-1', 'overflow-y-auto', 'overscroll-contain']));
+    cleanup();
+    render(<ProfileSourceContext.Provider value={profiles}><CustomizeSurface {...data} soul="user/agent_p" win={null} /></ProfileSourceContext.Provider>);
+    expect(screen.getByRole('main').className.split(' ')).toEqual(expect.arrayContaining(['h-full', 'overflow-y-auto', 'overscroll-contain']));
+    cleanup();
+    const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+    render(<LaunchSurface {...data} win={null} launcher={launcher} open={null} />);
+    const main = screen.getByRole('main');
+    expect(main.className.split(' ')).toEqual(expect.arrayContaining(['h-full', 'overflow-y-auto', 'overscroll-contain']));
+    expect(main.className).not.toContain('min-h-full');
   });
 });
 

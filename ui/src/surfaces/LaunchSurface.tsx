@@ -52,7 +52,8 @@ export function LaunchSurface({ census, chat, badges, win, launcher, listTemplat
     closeWindow(win);
   }, [installedKey, open, win]);
   return (
-    <main className="gb flex min-h-full flex-col bg-background">
+    <main className="gb flex h-full flex-col overflow-y-auto overscroll-contain bg-background">
+      {/* The title bar's strip drags the window; the form scrolls under it, never the document (#260). */}
       <div data-tauri-drag-region="" className="fixed inset-x-0 top-0 z-10 h-8" />
       <LaunchModal page onClose={close} busy={!canLaunch(launcher.state)}>
         <LaunchForm key={opened?.id ?? 'manual'} launcher={launcher} accounts={accounts} harnesses={harnesses} defaultHarness={defaultHarness} roster={roster}

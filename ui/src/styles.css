@@ -75,7 +75,17 @@
 
 @layer base {
   * { border-color: var(--color-border); }
+  /*
+   * No page of the app scrolls as a document (#260): the popup, the window
+   * desktop and every native surface window are the viewport's height and
+   * scroll only their own panes. The viewport is locked (no wheel, no
+   * scroll chaining from a pane that reached its end), and the body and
+   * root clip rather than hide, so a focus or scrollIntoView inside can
+   * never shift the page under a window's title bar either.
+   */
   html, body, #root { height: 100%; margin: 0; }
+  html { overflow: hidden; overscroll-behavior: none; }
+  body, #root { overflow: clip; }
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
