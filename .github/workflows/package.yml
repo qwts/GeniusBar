@@ -379,13 +379,12 @@ jobs:
 
   package-windows:
     name: Windows x64 installer
-    # ADR-0046 decision 8. Dispatched for Windows alone, a failure fails the
-    # run, so a branch's Windows build can be validated. Inside a full
-    # package or release run the job is advisory until the Rust shell's
-    # Windows port (decision 7) has landed: a failure is annotated, and the
-    # release goes out without a Windows installer.
+    # ADR-0046 decision 8. A failure fails the run, whether dispatched for
+    # Windows alone (how a branch's Windows build is validated) or inside a
+    # full package or release run: since the Rust shell's Windows port
+    # (decision 7) landed and the 0.1.56 release built its installer, a
+    # release without Windows is a regression, not the expected state.
     if: inputs.platform != 'macos'
-    continue-on-error: ${{ inputs.platform != 'windows' }}
     runs-on: windows-latest
     timeout-minutes: 90
     defaults:
