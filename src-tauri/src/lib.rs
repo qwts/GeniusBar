@@ -4,6 +4,7 @@
 
 mod about;
 mod bridge;
+mod host;
 mod snapshot;
 mod soul_package;
 mod starter;
@@ -456,6 +457,7 @@ pub fn run() {
             windows::shell_log,
             about::about_info,
             about::about_running,
+            host::host_capabilities,
             bridge::bridge,
             bridge::setup,
             bridge::remove_services,

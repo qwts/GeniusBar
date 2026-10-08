@@ -17,6 +17,7 @@ import { useLaunch } from './useLaunch';
 import { useSetup } from './useSetup';
 import { useSnapshot, type SnapshotOptions } from './useSnapshot';
 import { useUpdates } from './useUpdates';
+import { useHostCapabilities } from './useHostCapabilities';
 import { usePreferences } from './state/preferences';
 import '@fontsource/ibm-plex-sans/latin-400.css';
 import '@fontsource/ibm-plex-sans/latin-500.css';
@@ -75,6 +76,10 @@ function Live({ snapshot }: { snapshot: SnapshotOptions | null }) {
   const loadStarter = () => { invoke<Starter>('starter_soul').then(setStarter, () => {}); };
   const devTools: DevTools = { install: () => invoke('install_dev_tools'), recheck: loadStarter };
   useEffect(loadStarter, []);
+  // What this computer can do (#46): the first launch's copy follows the
+  // host's platform; Retry probes again and reads the starter again too.
+  const { host, recheck: recheckHost } = useHostCapabilities(inApp());
+  const onRecheckHost = () => { recheckHost(); loadStarter(); };
   const cliTools: CliToolsApi = {
     status: () => invoke('cli_tools', { action: 'status' }),
     install: (replace) => invoke('cli_tools', { action: 'install', replace }),
@@ -102,7 +107,7 @@ function Live({ snapshot }: { snapshot: SnapshotOptions | null }) {
     <>
     <App mode={mode} census={census} connection={connection} rosterSettled={settled} onRefresh={refresh} setup={setup} isStatic={Boolean(snapshot)} select={select}
       onSetup={(migrate) => { void runSetup(migrate); }} existingServices={existing} cliTools={cliTools} chat={snapshot ? undefined : chat} launcher={launcher} starter={starter} harnessAuth={harnessAuth}
-      devTools={devTools} openedPackage={openedPackage} updates={updates}
+      devTools={devTools} host={host} onRecheckHost={onRecheckHost} openedPackage={openedPackage} updates={updates}
       onOpenDesktop={inApp() && !snapshot ? () => { void openDesktop().catch(() => {}); } : undefined}
       onRemoveServices={async () => { await invoke('remove_services'); void refresh?.(); }} />
     {dropping && <div className="gb"><DropCue fill /></div>}

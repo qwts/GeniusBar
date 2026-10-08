@@ -10,6 +10,8 @@ import { CompanionSession, ComputerUseContext, InfoButton, type SessionTab } fro
 import { AuditWindow, CompanionWindow, Desktop } from './components/Desktop';
 import { FloatingDudle, type Stopper } from './components/FloatingDudle';
 import { FirstLaunch, type DevTools, type HarnessAuth, type Starter } from './components/FirstLaunch';
+import { devBuild, type HostCapabilities } from './model/host';
+import { REPORT_PROBLEM_URL } from './model/about';
 import { FleetList, liveState, type Hiding } from './components/FleetList';
 import { HealthHeader, SetupHeader } from './components/HealthHeader';
 import { LaunchForm } from './components/LaunchForm';
@@ -129,6 +131,14 @@ interface AppProps {
   harnessAuth?: HarnessAuth;
   /** Apple's command line tools, which the starter needs first (R4). */
   devTools?: DevTools;
+  /**
+   * The host's capability results (#46): the first launch's copy follows
+   * their platform. Absent keeps today's flow; null holds the starter until
+   * the shell has answered, so a Windows PC never sees the macOS step.
+   */
+  host?: HostCapabilities | null;
+  /** Asks the shell to probe the host again (the Windows first launch's Retry). */
+  onRecheckHost?: () => void;
   /** Update status and action (#34); without it the popup stays quiet. */
   updates?: UpdateApi;
   /** Desktop avatar badges (#122); the app reads agent-bot when absent. */
@@ -234,7 +244,7 @@ function LanguageSelect() {
 
 // The GeniusBar menu (the tray popup's content, and the toolbar popover in
 // window mode) and, from it, one companion's session.
-function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onOpenDesktop, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, floatingButton = false, archiver, stopper, pauser, computerUseSwitch, templateLister, popupShowing, surfaces, rosterSettled = true, about }: AppProps) {
+function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onOpenDesktop, onRemoveServices, starter, harnessAuth, devTools, host, onRecheckHost, updates, existingServices, cliTools, badges, floatingButton = false, archiver, stopper, pauser, computerUseSwitch, templateLister, popupShowing, surfaces, rosterSettled = true, about }: AppProps) {
   const { t, lang } = useI18n();
   // Only the live tray popup opens native windows (#223); --window and snapshots keep theirs.
   const native = mode !== 'tray' ? null : surfaces === undefined ? (inApp() && !isStatic ? liveSurfaces : null) : surfaces;
@@ -334,10 +344,13 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   // The first launch stays open from the click until closed, so its result
   // and sign-in remain after the new soul fills the roster.
   const [starterOpen, setStarterOpen] = useState(false);
-  const canOfferStarter = Boolean(starter && launcher && connection.bridgeConnected && !connection.brokerUnreachable && !showSetup);
+  // The starter waits for the host's answer (#46) when one is on its way.
+  const canOfferStarter = Boolean(starter && launcher && connection.bridgeConnected && !connection.brokerUnreachable && !showSetup && host !== null);
   // The footer offers a check when the update line has nothing to say, so
   // the panel carries the whole update flow when there is no tray (#34).
-  const canCheckUpdates = Boolean(updates && !updateNotice(updates.status) && updates.status.state !== 'disabled');
+  // A build the host calls unsigned, or without the updater, never offers
+  // one as working (#46).
+  const canCheckUpdates = Boolean(updates && !updateNotice(updates.status) && updates.status.state !== 'disabled' && !(host && devBuild(host)));
   // Check for Updates… by hand: an up-to-date answer says so for a moment.
   const [checkedUpdates, setCheckedUpdates] = useState(false);
   const checkUpdates = () => { setCheckedUpdates(true); updates?.act(); };
@@ -593,7 +606,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
       {showStarter && starter && launcher && (
         // The menu's card look (as the sandbox and default-harness cards); no Lovable screen.
         <section className="grid gap-2 border-b border-border p-3 text-xs" aria-label={t('firstCompanion')}>
-          <FirstLaunch starter={starter} launcher={launcher} auth={harnessAuth} devTools={devTools} onStart={() => setStarterOpen(true)} onAbout={openAbout} onGuide={openGuide} />
+          <FirstLaunch starter={starter} launcher={launcher} auth={harnessAuth} devTools={devTools} onStart={() => setStarterOpen(true)} onAbout={openAbout} onGuide={openGuide}
+            host={host} onRecheckHost={onRecheckHost} help={aboutWith ? { url: REPORT_PROBLEM_URL, open: aboutWith.open } : undefined} />
           {starterOpen && launcher.state.phase !== 'requesting' && launcher.state.phase !== 'pending' && (
             <div className={actions}>
               <button type="button" className={secondaryButton} onClick={() => setStarterOpen(false)}>{t('close')}</button>
@@ -607,7 +621,8 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
         awaiting={awaitingIds} busy={(badges ?? liveBadges).busy}
         empty={!showStarter && empty && <p className="m-0 px-3 py-2 text-sm text-muted-foreground">{empty}</p>} />
       {launch && <DefaultHarness harnesses={launch.harnesses} />}
-      <SandboxCard />
+      {/* Sandboxing offers no provider on Windows (#46, ADR-0046 decision 1), so the card stays off there. */}
+      {host?.platform !== 'windows' && <SandboxCard />}
       <IdentityAppsCard roster={roster} />
       {iconFooter(false)}
     </>

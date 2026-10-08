@@ -4,6 +4,7 @@ import type { PreparedRevision, RemovalPlan, RemovalPlanEntry, RemovalScope, Sou
 import type { SandboxStatus } from '../components/Sandbox';
 import type { AuditRecord } from './audit';
 import type { CensusRow } from './census';
+import type { HostCapabilities, HostTool, HostToolId, HostToolState } from './host';
 import type { PauseEntry } from './pause';
 import type { ApprovalRecord, ChatEntry, InboxMessage } from './chat';
 import type { SoulBadges } from './refresh';
@@ -448,3 +449,45 @@ export const sampleSandboxSteps = (account: string): SandboxStatus['steps'] => [
   { id: 'pair', title: `Pair ${account} with the broker`, run: 'account', commands: ['agent-comms account pair --broker user'], done: false },
   { id: 'harness-sign-in', title: `Sign the harnesses in as ${account}`, run: 'account', commands: ['claude'], done: null },
 ];
+
+const hostTool = (id: HostToolId, state: HostToolState, message: string | null = null): HostTool => ({ id, bundled: true, state, message });
+
+/**
+ * Host capability results (#46), as `host_capabilities` reports them: a
+ * Mac with every bundled tool ready, and a Windows PC in each state the
+ * design shows (an unsigned development build, as CI's Windows installer
+ * is until the signing secrets exist).
+ */
+export const sampleHosts: Readonly<Record<'macos' | 'windows' | 'windowsChecking' | 'windowsMissing' | 'windowsFailed' | 'windowsMixed', HostCapabilities>> = {
+  macos: {
+    platform: 'macos',
+    tools: [hostTool('git', 'ready'), hostTool('node', 'ready'), hostTool('cli', 'ready')],
+    build: { signed: null, updater: true },
+  },
+  windows: {
+    platform: 'windows',
+    tools: [hostTool('git', 'ready'), hostTool('node', 'ready'), hostTool('cli', 'ready')],
+    build: { signed: false, updater: false },
+  },
+  windowsChecking: {
+    platform: 'windows',
+    tools: [hostTool('git', 'checking'), hostTool('node', 'checking'), hostTool('cli', 'checking')],
+    build: { signed: false, updater: false },
+  },
+  windowsMissing: {
+    platform: 'windows',
+    tools: [hostTool('git', 'missing'), hostTool('node', 'ready'), hostTool('cli', 'ready')],
+    build: { signed: false, updater: false },
+  },
+  windowsFailed: {
+    platform: 'windows',
+    tools: [hostTool('git', 'ready'), hostTool('node', 'ready'), hostTool('cli', 'failed', 'agent-bot: access denied (example host message)')],
+    build: { signed: false, updater: false },
+  },
+  // The design's screenshot: one row in each reported state.
+  windowsMixed: {
+    platform: 'windows',
+    tools: [hostTool('git', 'ready'), hostTool('node', 'missing'), hostTool('cli', 'failed', 'access denied (example host message)')],
+    build: { signed: false, updater: false },
+  },
+};

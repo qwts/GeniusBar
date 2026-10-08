@@ -7538,7 +7538,7 @@ fn create_record_dir<R: Runtime>(app: &AppHandle<R>) -> Result<std::path::PathBu
 
 /// The bundled Node, beside the app executable, where the shell plugin's
 /// `sidecar("node")` finds it.
-fn node_sidecar() -> Result<std::path::PathBuf, String> {
+pub(crate) fn node_sidecar() -> Result<std::path::PathBuf, String> {
     let exe = tauri::utils::platform::current_exe().map_err(|e| e.to_string())?;
     let dir = exe
         .parent()

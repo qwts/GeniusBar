@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow, LogicalSize, Window } from '@tauri-apps/api/window';
 import { normalizeAudit, type AuditRecord } from './model/audit';
 import type { QueryTab, WindowSurface } from './model/surface';
+import { normalizeHostCapabilities, type HostCapabilities } from './model/host';
 import { normalizeApproval, normalizeApprovals, normalizeAsides, type ApprovalRecord, type AsideRecord } from './model/chat';
 
 export type BridgeMethod = 'census' | 'send' | 'inbox' | 'ack' | 'launch' | 'launchStatus' | 'auditExport';
@@ -714,6 +715,21 @@ export async function daemonStatus(invokeImpl: typeof invoke = invoke): Promise<
   if (!inApp() && invokeImpl === invoke) return null;
   try {
     return normalizeDaemonStatus(await invokeImpl<unknown>('daemon_status'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What this computer can do before the first launch (`host_capabilities`,
+ * #46): the platform, each bundled tool's probe and the build's facts, as
+ * the shell established them. Each call probes again. Null outside the app,
+ * when the call fails, or when the answer is not the shape the view reads.
+ */
+export async function hostCapabilities(invokeImpl: typeof invoke = invoke): Promise<HostCapabilities | null> {
+  if (!inApp() && invokeImpl === invoke) return null;
+  try {
+    return normalizeHostCapabilities(await invokeImpl<unknown>('host_capabilities'));
   } catch {
     return null;
   }
