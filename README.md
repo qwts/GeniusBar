@@ -155,10 +155,10 @@ an unsigned prerelease. When the two builds' signing modes differ, or the
 Windows job did not finish, the release goes out without Windows and the
 publish job says so.
 
-Until the Rust shell's Windows port (decision 7) has landed, the Windows job
-is advisory inside a full package or release run: a failure is annotated and
-never blocks the macOS release. Dispatched for Windows alone it fails like any
-job, which is how a branch is validated before it reaches `main`:
+The Windows job blocks a release like the macOS job does (since the Rust
+shell's Windows port, decision 7, and the first release that built the
+installer, 0.1.56). Dispatched for Windows alone it fails the same way, which
+is how a branch is validated before it reaches `main`:
 
 ```sh
 gh workflow run package.yml --ref <branch> -f platform=windows -f unsigned=true
