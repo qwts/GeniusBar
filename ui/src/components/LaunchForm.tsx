@@ -1,8 +1,8 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { Check, Circle, Loader2, Shield, ShieldOff } from 'lucide-react';
-import { displayName, type CensusRow } from '../model/census';
-import { savedBrief } from '../bridge';
-import { canLaunch, harnessOptions, MAX_BRIEF, MAX_HARNESS, MAX_ROLE, normalPackagePath, preferredHarness, prefillHarness, suggestedName, type LaunchSandbox, type LaunchStage, type LaunchState } from '../model/launch';
+import { Check, ChevronDown, Circle, Loader2, Shield, ShieldOff } from 'lucide-react';
+import { displayName, roleAndHarness, type CensusRow } from '../model/census';
+import { declaredProvider, savedBrief, soulEnvironment, type SoulEnvironment } from '../bridge';
+import { canLaunch, harnessLabel, harnessOptions, launchDraftErrors, MAX_BRIEF, MAX_HARNESS, MAX_ROLE, normalPackagePath, parentChoices, preferredHarness, prefillHarness, soulHarnessLabel, suggestedName, type LaunchSandbox, type LaunchStage, type LaunchState } from '../model/launch';
 import { useI18n, type Translate } from '../lib/i18n';
 import { radioGroupKeys } from '../lib/radioGroup';
 import { chosenTemplate, CUSTOM_SOUL, initialChoice } from '../model/templates';
@@ -65,6 +65,20 @@ interface LaunchFormProps {
    * on relaunch; null when it has none. Defaults to agent-bot's census.
    */
   loadBrief?: (agentId: string) => Promise<string | null>;
+  /**
+   * Reads an existing soul's environment (#261), for the provider its
+   * soul.json declares for the harness; shown read-only, since providers
+   * are the template's choice, not a launch's. Defaults to agent-bot's
+   * `soul env`; a package launch has no soul to read yet.
+   */
+  loadEnvironment?: (agentId: string) => Promise<SoulEnvironment>;
+  /**
+   * Whether the app's launch path carries a parent to the daemon (#261).
+   * agent-comms' launch op (0.3.14) does not, so the default refuses a
+   * companion parent before sending rather than letting it be dropped and
+   * the soul started independent in silence. Independent always sends.
+   */
+  parentCarried?: boolean;
 }
 
 /** "Runs as <account> (sandboxed)" or "(unrestricted)", as the launch result says (#66). */
@@ -163,6 +177,8 @@ export function LaunchProgress({ state }: { state: LaunchState }) {
 }
 
 const OTHER = '__other';
+/** The Parent select's Independent choice (#261): parent null, never self. */
+const INDEPENDENT = '__none';
 
 const radio = 'inline-flex min-h-9 items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring';
 const radioOn = 'border-primary bg-primary/10 text-foreground';
@@ -182,7 +198,7 @@ const LABEL = 'text-sm font-medium leading-none';
  */
 export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness = null, initialPackagePath = '', packageName, preferredHarnesses,
   packageDescription, copyOf: openedCopyOf, checkingPackage: checkingOpened = false, packageError: initialPackageError = null, initialComms, onCancel, onLaunched,
-  roster = [], listTemplates, loadBrief }: LaunchFormProps) {
+  roster = [], listTemplates, loadBrief, loadEnvironment, parentCarried = false }: LaunchFormProps) {
   const { t } = useI18n();
   // The design's soul choices (#65): agent-bot's templates, then "Custom
   // soul", which is the package path field. Asked once; never waited on.
@@ -207,6 +223,14 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
   // The model (#128): null is the harness default; a new harness starts over.
   const [model, setModel] = useState<string | null>(null);
   useEffect(() => setModel(null), [harness]);
+  // The parent (#261): Independent (null) for a new soul; a relaunch keeps
+  // the soul's own parent while that companion is still one it may name.
+  const parents = parentChoices(roster, soul);
+  const [parent, setParent] = useState<string | null>(() => (soul?.parent && parents.some((p) => p.agentId === soul.parent) ? soul.parent : null));
+  // The design's Advanced disclosure: provider, model and parent, closed until opened.
+  const [advanced, setAdvanced] = useState(false);
+  // The provider (#261) an existing soul's soul.json declares for the harness; null until read or when the engine cannot say.
+  const [environment, setEnvironment] = useState<SoulEnvironment | null>(null);
   // An existing soul keeps its name (#79): the form has no Name for it.
   // A copied folder starts blank, since it becomes a new companion (#110).
   const [name, setName] = useState(soul || copyOf ? '' : suggestedName(packageName));
@@ -224,6 +248,12 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
   const [briefLoading, setBriefLoading] = useState(Boolean(soul));
   const briefTyped = useRef(false);
   const relaunched = soul?.agentId;
+  useEffect(() => {
+    if (!relaunched) return;
+    let live = true;
+    Promise.resolve().then(() => (loadEnvironment ?? soulEnvironment)(relaunched)).then((env) => { if (live) setEnvironment(env); }, () => {});
+    return () => { live = false; };
+  }, [relaunched]);
   useEffect(() => {
     if (!relaunched) return;
     let live = true;
@@ -272,6 +302,19 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
   const needsName = Boolean(copyOf && !soul) && name.trim() === '';
   const options = harnessOptions(harnesses, soul?.harness, templateHarness, defaultHarness);
   const pathError = custom ? packageError : null;
+  // The design's pre-validation (#261): every problem at once, shown on
+  // submit until fixed; the engine checks again and its refusal is shown as it is.
+  const errors = launchDraftErrors({
+    soul: soul ?? null, copy: Boolean(copyOf), customPackage: !soul && custom, packagePath, name, account, harness, model, brief, parent, parents, parentCarried,
+  });
+  const [tried, setTried] = useState(false);
+  const errorList = useRef<HTMLDivElement>(null);
+  const errorKey = errors.map((e) => e.code).join(' ');
+  useEffect(() => {
+    if (tried && errorKey) errorList.current?.focus();
+  }, [tried, errorKey]);
+  const provider = environment ? declaredProvider(environment, harness) : null;
+  const harnessName = harness.trim() ? harnessLabel(harness.trim()) : '…';
 
   useEffect(() => setPackageError(initialPackageError), [initialPackageError]);
   // While this form's launch runs, the design shows only its progress.
@@ -283,7 +326,9 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
       aria-label={t('launch.formLabel', { what })}
       onSubmit={(e) => {
         e.preventDefault();
-        if (!ready || checkingPackage || pathError || needsName || briefTooLong) return;
+        if (!ready || checkingPackage || pathError) return;
+        setTried(true);
+        if (errors.length > 0) { errorList.current?.focus(); return; }
         setStarted(true);
         const path = normalPackagePath(packagePath);
         if (!soul && custom) setPackagePath(path);
@@ -296,6 +341,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
           ...(model?.trim() ? { model: model.trim() } : {}),
           ...(brief.trim() && brief !== saved ? { brief } : {}),
           ...(!soul && role.trim() ? { role: role.trim() } : {}),
+          parent,
         });
       }}
     >
@@ -388,7 +434,6 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
             onChange={(e) => { setTouched((was) => ({ ...was, harness: true })); setHarness(e.target.value); }} />
         )}
         <p className="text-xs text-muted-foreground">{t('launch.harnessHint')}</p>
-        <ModelField roster={roster} harness={harness} value={model} onChange={setModel} />
       </fieldset>
       <fieldset>
         <legend className={legend}>{t('launch.step.account')}</legend>
@@ -427,6 +472,46 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
           </label>
           <p className="text-xs text-muted-foreground">{t('launch.commsHint')}</p>
         </fieldset>
+      )}
+      {/* The design's Advanced disclosure (#261): provider, model (#128) and parent. */}
+      <div className="rounded-md border border-border">
+        <button type="button" aria-expanded={advanced} aria-controls={`${ids}-advanced`} onClick={() => setAdvanced((v) => !v)}
+          className="flex w-full items-center gap-1.5 rounded-md px-3 py-2 text-left text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <ChevronDown className={`size-3.5 transition-transform motion-reduce:transition-none ${advanced ? '' : '-rotate-90'}`} aria-hidden />
+          {t('launch.advanced')}
+        </button>
+        {advanced && (
+          <div id={`${ids}-advanced`} className="grid gap-3 border-t border-border p-3">
+            <div className="grid gap-1">
+              <span className="text-sm font-medium" id={`${ids}-provider`}>{t('launch.provider')}</span>
+              {/* Read-only: the soul's template picks the provider; the engine refuses another. */}
+              <p className="m-0 text-xs text-muted-foreground" aria-labelledby={`${ids}-provider`}>
+                {provider ? t('launch.providerDeclared', { provider, harness: harnessName })
+                  : environment && harness.trim() ? t('launch.providerBuiltIn', { harness: harnessName })
+                  : t('launch.providerTemplate', { harness: harness.trim() || '<harness>' })}
+              </p>
+            </div>
+            <ModelField roster={roster} harness={harness} value={model} onChange={setModel} />
+            <div className="grid gap-1">
+              <span className="text-sm font-medium" aria-hidden>{t('launch.parent')}</span>
+              <Select aria-label={t('launch.parent')} value={parent ?? INDEPENDENT} wrapperClassName="w-full" className="h-9 pl-3 text-sm"
+                onChange={(e) => setParent(e.target.value === INDEPENDENT ? null : e.target.value)}>
+                <option value={INDEPENDENT}>{t('launch.independent')}</option>
+                {parents.map((c) => <option key={c.agentId} value={c.agentId}>{displayName(c)} · {roleAndHarness(c, soulHarnessLabel)}</option>)}
+                {/* A parent no longer offered (archived, or now a descendant) stays visible so the list below can say so. */}
+                {parent !== null && !parents.some((c) => c.agentId === parent) && <option value={parent}>{parent}</option>}
+              </Select>
+              {parent !== null && <p className="m-0 text-xs text-muted-foreground">{t('launch.parentHint')}</p>}
+            </div>
+          </div>
+        )}
+      </div>
+      {tried && errors.length > 0 && (
+        <div ref={errorList} tabIndex={-1} role="alert" aria-labelledby={`${ids}-errors`}
+          className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <p id={`${ids}-errors`} className="m-0 font-semibold">{t('launch.errors')}</p>
+          <ul className="mt-1 mb-0 list-disc pl-4">{errors.map((e) => <li key={e.code}>{t(`launch.err.${e.code}`, e.vars)}</li>)}</ul>
+        </div>
       )}
       </>}
       {checkingPackage && <p className="m-0 text-xs text-muted-foreground" role="status">{t('launch.checking')}</p>}

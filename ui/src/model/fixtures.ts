@@ -154,7 +154,7 @@ export const sampleModels: Readonly<Record<string, SoulModel>> = {
     model: null,
     listedAt: '2026-10-05T09:35:00.000Z',
     available: [
-      { modelId: 'default', name: 'Default (recommended)', description: null },
+      { modelId: 'default', name: 'Default (recommended)', description: null, recommended: true },
       { modelId: 'opus', name: 'Opus', description: 'Opus for complex tasks' },
     ],
   },

@@ -223,6 +223,20 @@ export interface ModelChoice {
   modelId: string;
   name: string;
   description: string | null;
+  /**
+   * The harness's own default or recommended entry (#284): flagged by the
+   * list (`recommended`, `default` or `isDefault` true) or, as Claude Code
+   * lists it, named "Default (recommended)". An explicit id of its own,
+   * never the inherited null. Absent in older fixtures: not flagged.
+   */
+  recommended?: boolean;
+}
+
+const RECOMMENDED_NAME = /\b(default|recommended)\b/i;
+
+/** Whether a listed model is the harness's default or recommended one (#284). */
+export function recommendedModel(raw: Record<string, unknown>, name: string): boolean {
+  return raw.recommended === true || raw.default === true || raw.isDefault === true || RECOMMENDED_NAME.test(name);
 }
 
 /**
@@ -241,11 +255,15 @@ export function normalizeSoulModel(raw: unknown): SoulModel | null {
   if (raw.model !== null && (typeof raw.model !== 'string' || raw.model === '')) return null;
   const available = Array.isArray(raw.available)
     ? raw.available.filter((m): m is Record<string, unknown> & { modelId: string } =>
-      isRecord(m) && typeof m.modelId === 'string' && m.modelId !== '').map((m) => ({
-      modelId: m.modelId,
-      name: typeof m.name === 'string' && m.name.trim() !== '' ? m.name : m.modelId,
-      description: typeof m.description === 'string' && m.description !== '' ? m.description : null,
-    }))
+      isRecord(m) && typeof m.modelId === 'string' && m.modelId !== '').map((m) => {
+      const name = typeof m.name === 'string' && m.name.trim() !== '' ? m.name : m.modelId;
+      return {
+        modelId: m.modelId,
+        name,
+        description: typeof m.description === 'string' && m.description !== '' ? m.description : null,
+        ...(recommendedModel(m, name) ? { recommended: true } : {}),
+      };
+    })
     : null;
   return { model: raw.model, available, listedAt: typeof raw.listedAt === 'string' ? raw.listedAt : null };
 }
@@ -1479,6 +1497,19 @@ export function normalizeSoulEnvironment(raw: unknown): SoulEnvironment | null {
     retention: { durable: strings(retention.durable), reconstructible: strings(retention.reconstructible), disposable: strings(retention.disposable) },
     errors: records(raw.errors).flatMap((e) => (typeof e.message === 'string' && e.message !== '' ? [{ area: text(e.area), message: e.message }] : [])),
   };
+}
+
+/**
+ * The provider a soul's harness runs with (#261), from the descriptor's
+ * `providers.declared[]` (`{harness, id, status, ...}`, agent-bot-identity
+ * #583 slice 4): the one its soul.json declares for that harness, or null
+ * when it declares none (the harness's built-in) or the engine cannot list
+ * providers. Providers are chosen by the soul's template, never per launch.
+ */
+export function declaredProvider(env: SoulEnvironment | null, harness: string): string | null {
+  if (!engineCan(env, 'providers')) return null;
+  const row = records(env?.providers.declared).find((p) => p.harness === harness.trim());
+  return typeof row?.id === 'string' && row.id !== '' ? row.id : null;
 }
 
 /** True when the bundled engine lists `capability`; a slice the app adopts is gated on this, not on a version. */

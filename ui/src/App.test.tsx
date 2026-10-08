@@ -191,7 +191,7 @@ describe('App setup', () => {
     expect((screen.getByLabelText('Account') as HTMLInputElement).value).toBe('user');
     expect((screen.getByLabelText('Harness') as HTMLInputElement).value).toBe('codex');
     fireEvent.submit(form);
-    expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { soul: 'agent_p' }, harness: 'codex', name: '' });
+    expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { soul: 'agent_p' }, harness: 'codex', name: '', parent: null });
     // agent-bot could not say what this soul's comms is, so the launch leaves it alone.
     expect(screen.queryByRole('switch', { name: 'Agent comms' })).toBeNull();
   });
@@ -211,7 +211,7 @@ describe('App setup', () => {
     fireEvent.change(harness, { target: { value: '__other' } });
     fireEvent.change(within(screen.getByRole('dialog', { name: 'Launch a new companion' })).getByLabelText('Harness command'), { target: { value: 'my-own-harness' } });
     fireEvent.submit(screen.getByRole('form', { name: 'Launch a companion package' }));
-    expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { package: '/souls/helper' }, harness: 'my-own-harness', name: '', comms: true });
+    expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { package: '/souls/helper' }, harness: 'my-own-harness', name: '', comms: true, parent: null });
   });
 
   it('launches with agent comms on by default, or off when turned off first (#71)', () => {
@@ -224,7 +224,7 @@ describe('App setup', () => {
     fireEvent.change(screen.getByLabelText('Path to soul, ending with .soul'), { target: { value: '/souls/helper' } });
     fireEvent.change(screen.getByLabelText('Harness'), { target: { value: 'claude' } });
     fireEvent.submit(screen.getByRole('form', { name: 'Launch a companion package' }));
-    expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { package: '/souls/helper' }, harness: 'claude', name: '', comms: false });
+    expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { package: '/souls/helper' }, harness: 'claude', name: '', comms: false, parent: null });
   });
 
   it('opens every companion’s audit log from the footer History button (#122)', async () => {
@@ -246,7 +246,7 @@ describe('App setup', () => {
     fireEvent.change(screen.getByLabelText('Path to soul, ending with .soul'), { target: { value: '/souls/helper' } });
     fireEvent.change(screen.getByLabelText('Harness'), { target: { value: 'claude' } });
     fireEvent.submit(screen.getByRole('form', { name: 'Launch a companion package' }));
-    expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { package: '/souls/helper' }, harness: 'claude', name: '', comms: true });
+    expect(launcher.launch).toHaveBeenCalledWith({ account: 'user', target: { package: '/souls/helper' }, harness: 'claude', name: '', comms: true, parent: null });
     const refused: LaunchApi = { ...launcher, state: { phase: 'error', requestId: null, text: 'GeniusBar can’t reach the agents on account user. Make sure setup has finished, then try again.' } };
     rerender(<App census={sampleCensus} connection={sampleConnection} launcher={refused} isStatic />);
     expect(screen.getByRole('alert').textContent).toMatch(/can’t reach the agents/i);
@@ -272,6 +272,11 @@ describe('App setup', () => {
     expect(launcher.launch).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText('Path to soul, ending with .soul'), { target: { value: '/souls/helper' } });
     expect((screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement).disabled).toBe(false);
+    // No harness yet: the design's list says so before anything is sent (#261).
+    fireEvent.submit(form);
+    expect(launcher.launch).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toContain('Pick a harness, or set a GeniusBar default.');
+    fireEvent.change(screen.getByRole('combobox', { name: 'Harness' }), { target: { value: 'codex' } });
     fireEvent.submit(form);
     expect(launcher.launch).toHaveBeenCalledOnce();
   });
@@ -677,6 +682,7 @@ describe('App window mode', () => {
     fireEvent.click(within(desktop()).getByRole('button', { name: 'Launch companion' }));
     const dialog = screen.getByRole('dialog', { name: 'Launch a new companion' });
     fireEvent.change(within(dialog).getByLabelText('Path to soul, ending with .soul'), { target: { value: '/souls/helper.soul/' } });
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'Harness' }), { target: { value: 'codex' } });
     fireEvent.submit(within(dialog).getByRole('form'));
     expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ target: { package: '/souls/helper.soul' } }));
     const launched: LaunchApi = { ...launcher, state: { phase: 'launched', requestId: 'r1', agentId: 'agent_c' } };
@@ -721,7 +727,7 @@ describe('App window mode', () => {
     fireEvent.change(within(dialog).getByLabelText('Path to soul, ending with .soul'), { target: { value: '/souls/helper.soul' } });
     fireEvent.change(within(dialog).getByLabelText('Harness'), { target: { value: 'claude' } });
     fireEvent.submit(within(dialog).getByRole('form'));
-    expect(launcher.launch).toHaveBeenCalledWith({ account: 'gb-agent', target: { package: '/souls/helper.soul' }, harness: 'claude', name: '', comms: true });
+    expect(launcher.launch).toHaveBeenCalledWith({ account: 'gb-agent', target: { package: '/souls/helper.soul' }, harness: 'claude', name: '', comms: true, parent: null });
   });
 
   it('has no Launch button without a launcher', () => {

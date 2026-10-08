@@ -25,9 +25,11 @@ export const METHODS = {
   ack: (client, { ids }) => client.ack(ids),
   // `brief` (#120) goes through only as a string; older agent-comms ignore it.
   // `role` (agent-bot-identity #535) likewise; older agent-comms refuse unknown fields, so only a string goes through.
-  launch: (client, { account, soul, package: packagePath, harness, name, comms, model, brief, role }) =>
+  // `parent` (#261): null is an independent soul, a string the companion it joins under; anything else is dropped.
+  launch: (client, { account, soul, package: packagePath, harness, name, comms, model, brief, role, parent }) =>
     client.launch({ account, soul, package: packagePath, harness, name, comms, ...(model === undefined ? {} : { model }),
-      ...(typeof brief === 'string' ? { brief } : {}), ...(typeof role === 'string' ? { role } : {}) }),
+      ...(typeof brief === 'string' ? { brief } : {}), ...(typeof role === 'string' ? { role } : {}),
+      ...(parent === null || typeof parent === 'string' ? { parent } : {}) }),
   launchStatus: (client, { requestId }) => client.launchStatus(requestId),
   // Local glue, no agent-comms: saves the audit log the view already holds.
   auditExport: (_client, { contents }) => auditExport(contents),
