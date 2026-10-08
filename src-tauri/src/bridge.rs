@@ -5540,6 +5540,69 @@ fn parse_soul_env_import(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeEr
     )
 }
 
+/// The soul's past runs and revisions for the Memory tab (#268; agent-bot
+/// `soul env history <agentId> [--limit N] --json`, capability
+/// `env-history`): what the history mirror in the soul holds, printed as
+/// `{schemaVersion, agentId, soulDir, mirror, mirrored, turns {total,
+/// listed, limit, skipped, truncated, records[{id, kind, startedAt,
+/// endedAt, harness, outcome}]}, revisions {the same, records[{id, parent,
+/// reason, at}]}}` and passed through as printed: facts only, never a
+/// transcript, no message counts. Read-only and ungated. The engine's
+/// default page (50) applies when no limit is asked. An older bundle
+/// without the verb answers a usage line, which maps to
+/// `soul-env-history-unsupported`.
+#[tauri::command]
+pub async fn soul_env_history<R: Runtime>(
+    app: AppHandle<R>,
+    agent: String,
+    limit: Option<u32>,
+) -> Result<Value, BridgeError> {
+    let args = soul_env_history_args(&agent, limit)?;
+    let output = run_agent_bot(&app, args, "soul-env-history-unavailable").await?;
+    parse_soul_env_history(&output.stdout, &output.stderr)
+}
+
+fn soul_env_history_args(
+    agent: &str,
+    limit: Option<u32>,
+) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    if !plain_argument(agent) {
+        return Err(BridgeError::new(
+            "soul-env-history-invalid",
+            "agent must be an agent id",
+        ));
+    }
+    let mut args: Vec<std::ffi::OsString> =
+        vec!["soul".into(), "env".into(), "history".into(), agent.into()];
+    // No limit, or zero, leaves the engine its own default page.
+    if let Some(limit) = limit.filter(|n| *n > 0) {
+        args.push("--limit".into());
+        args.push(limit.to_string().into());
+    }
+    args.push("--json".into());
+    Ok(args)
+}
+
+fn parse_soul_env_history(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    if soul_env_verb_missing(stdout, stderr, "history") {
+        return Err(BridgeError::new(
+            "soul-env-history-unsupported",
+            "this agent-bot cannot list a soul's past runs",
+        ));
+    }
+    parse_agent_bot_json(
+        stdout,
+        stderr,
+        "soul-env-history-failed",
+        "agent-bot soul env history: ",
+        "agent-bot gave no soul history",
+        |value| {
+            value.get("agentId").is_some_and(Value::is_string)
+                && value.get("turns").is_some_and(Value::is_object)
+        },
+    )
+}
+
 #[cfg(test)]
 mod soul_env_operations_tests {
     use super::*;
@@ -6105,6 +6168,85 @@ mod soul_env_operations_tests {
             .unwrap_err()
             .code,
             "soul-env-export-failed"
+        );
+    }
+
+    #[test]
+    fn builds_the_history_arguments_with_an_optional_page() {
+        assert_eq!(
+            soul_env_history_args("agent_p", None).unwrap(),
+            vec!["soul", "env", "history", "agent_p", "--json"]
+        );
+        assert_eq!(
+            soul_env_history_args("agent_p", Some(20)).unwrap(),
+            vec!["soul", "env", "history", "agent_p", "--limit", "20", "--json"]
+        );
+        // Zero is no page at all: the engine keeps its default.
+        assert_eq!(
+            soul_env_history_args("agent_p", Some(0)).unwrap(),
+            vec!["soul", "env", "history", "agent_p", "--json"]
+        );
+        for agent in ["", "--json", "agent\np"] {
+            assert_eq!(
+                soul_env_history_args(agent, None).unwrap_err().code,
+                "soul-env-history-invalid",
+                "{agent:?}"
+            );
+        }
+    }
+
+    /// agent-bot's `soul env history agent_p --json`: two runs and one revision, as printed.
+    const HISTORY: &[u8] = br#"{"schemaVersion":1,"agentId":"agent_p","soulDir":"/s","mirror":".soul-state/runs","mirrored":true,"turns":{"total":2,"listed":2,"limit":50,"skipped":0,"truncated":false,"records":[{"id":"t2","kind":"turn","startedAt":"2026-10-08T09:12:00.000Z","endedAt":"2026-10-08T09:15:42.000Z","harness":"codex","outcome":"ok"},{"id":"t1","kind":"wake","startedAt":"2026-10-08T07:30:00.000Z","endedAt":null,"harness":"codex","outcome":"cancelled"}]},"revisions":{"total":1,"listed":1,"limit":50,"skipped":0,"truncated":false,"records":[{"id":"2026.10.1","parent":null,"reason":"created","at":"2026-10-07T12:00:00.000Z"}]}}
+"#;
+
+    #[test]
+    fn passes_the_history_as_printed_or_maps_an_older_bundle() {
+        let history = parse_soul_env_history(HISTORY, b"").unwrap();
+        assert_eq!(history["turns"]["total"], 2);
+        assert_eq!(history["turns"]["records"][1]["outcome"], "cancelled");
+        assert_eq!(history["revisions"]["records"][0]["reason"], "created");
+        assert_eq!(history, serde_json::from_slice::<Value>(HISTORY).unwrap());
+        // The engine's refusal, or its stderr line, travels as it came.
+        assert_eq!(
+            parse_soul_env_history(
+                b"{\"error\":{\"code\":\"soul-not-found\",\"message\":\"Soul not found.\"}}\n",
+                b""
+            )
+            .unwrap_err(),
+            BridgeError::new("soul-not-found", "Soul not found.")
+        );
+        assert_eq!(
+            parse_soul_env_history(
+                b"",
+                b"agent-bot soul env history: the mirror could not be read\n"
+            )
+            .unwrap_err(),
+            BridgeError::new("soul-env-history-failed", "the mirror could not be read")
+        );
+        // An older bundle: the `soul` usage line, or `soul env`'s own, which
+        // took `history` for a soul name and does not list the verb.
+        assert_eq!(
+            parse_soul_env_history(b"", OLD_USAGE).unwrap_err().code,
+            "soul-env-history-unsupported"
+        );
+        assert_eq!(
+            parse_soul_env_history(
+                b"{\"error\":{\"code\":\"soul-env-failed\",\"message\":\"usage: agent-bot soul env <agentId|name> [--json] | soul env export <agentId|name> --to FILE [--plan] [--json] | soul env import FILE [--fork] [--replace] [--plan] [--json]\"}}\n",
+                b""
+            )
+            .unwrap_err()
+            .code,
+            "soul-env-history-unsupported"
+        );
+        // The current bundle refusing its arguments names the verb: a plain failure.
+        assert_eq!(
+            parse_soul_env_history(
+                b"{\"error\":{\"code\":\"soul-env-history-failed\",\"message\":\"usage: agent-bot soul env history <agentId|name> [--limit N] [--json]\"}}\n",
+                b""
+            )
+            .unwrap_err()
+            .code,
+            "soul-env-history-failed"
         );
     }
 

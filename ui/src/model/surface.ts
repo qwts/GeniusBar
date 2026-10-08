@@ -7,7 +7,7 @@ export type Surface = 'tray' | 'window' | 'team' | 'session' | 'audit' | 'custom
 /** The surfaces the popup and the team cards open with `open_surface`. */
 export type WindowSurface = 'session' | 'audit' | 'customize' | 'launch';
 /** A session tab as the URL names it: the delegation tree is `delegation`. */
-export type QueryTab = 'chat' | 'delegation' | 'audit' | 'details';
+export type QueryTab = 'chat' | 'delegation' | 'memory' | 'audit' | 'details';
 
 export interface SurfaceQuery {
   /** Null when absent or unknown: today's behaviour. */
@@ -26,7 +26,7 @@ const SURFACES: readonly Surface[] = ['tray', 'window', 'team', 'session', 'audi
 /** The URL's tab to the session's own name for it; null for anything else. */
 export function sessionTabOf(tab: string | null): SessionTab | null {
   switch (tab) {
-    case 'chat': case 'audit': case 'details': return tab;
+    case 'chat': case 'memory': case 'audit': case 'details': return tab;
     // The design's tab is "Delegation"; CompanionSession calls it the tree.
     case 'delegation': case 'tree': return 'tree';
     default: return null;

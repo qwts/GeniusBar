@@ -32,7 +32,10 @@
 // agent-bot answers unclearly, then re-read);
 // &surface=team|session|audit|customize|launch (with &soul=user/agent_p,
 // and &tab= / &action=archive for a session) shows that native window's
-// page (#223), and what it opens opens in a new tab:
+// page (#223), and what it opens opens in a new tab;
+// the Memory tab (#268) lists luna's sampleEnvHistory, and
+// &history=unsupported|unavailable|empty shows an engine without `soul env
+// history`, an unreadable memory folder, or a mirror with no runs:
 // &host=windows|macos shows the first launch (#46) on an empty roster with
 // a Platform switch and, on Windows, each bundled tool's state (Starting…,
 // Ready, Missing, Couldn't start) and the build note; Retry "probes" again:
@@ -54,13 +57,13 @@ import { SoulSourceContext, type SoulSource } from './components/SoulNotices';
 import { EnvironmentSourceContext, type EnvironmentSource } from './components/EnvironmentSection';
 import type { CensusRow } from './model/census';
 import { emptyChat, emptyComposer, mergeIncoming, type ChatState } from './model/chat';
-import { inboxMessage, sampleApprovals, sampleAudit, sampleBadges, sampleCensus, sampleColdWake, sampleConnection, sampleEnvironments, sampleFloating, sampleLifeExport, sampleLifeImport, sampleHosts, sampleModels, sampleModes, sampleOpenedPackages, samplePaused, samplePopulation, samplePreparedRevision, sampleProfile, sampleProfileFiles, sampleRemovalPlan, sampleSandbox, sampleSandboxSteps, sampleSessionEntries, sampleTemplates } from './model/fixtures';
+import { inboxMessage, sampleApprovals, sampleAudit, sampleBadges, sampleCensus, sampleColdWake, sampleConnection, sampleEnvHistory, sampleEnvironments, sampleFloating, sampleLifeExport, sampleLifeImport, sampleHosts, sampleModels, sampleModes, sampleOpenedPackages, samplePaused, samplePopulation, samplePreparedRevision, sampleProfile, sampleProfileFiles, sampleRemovalPlan, sampleSandbox, sampleSandboxSteps, sampleSessionEntries, sampleTemplates } from './model/fixtures';
 import type { SandboxSource, SandboxStatus } from './components/Sandbox';
 import { HOST_TOOLS, checkingHost, type HostCapabilities, type HostToolId, type HostToolState } from './model/host';
 import type { Starter } from './components/FirstLaunch';
 import type { Pauser } from './usePause';
 import type { TemplateLister } from './useSoulTemplates';
-import { BridgeError, type SoulEnvironment } from './bridge';
+import { BridgeError, engineCan, type SoulEnvironment } from './bridge';
 import { ProfileSourceContext, type ProfileSource } from './useSoulProfile';
 import { CustomizeDialog } from './components/CustomizeDialog';
 import { I18nProvider } from './lib/i18n';
@@ -141,11 +144,18 @@ const computerUseSwitch: ComputerUseSwitch = {
 // and the archived soul as an engine without `soul env`.
 const environments: Record<string, SoulEnvironment> = { ...sampleEnvironments };
 const lunaSoulDir = sampleEnvironments.agent_p.root.soulDir ?? '/Users/user/Souls/Luna.soul';
+// The Memory tab's scenario (#268): &history=unsupported takes `env-history`
+// from the engine, &history=unavailable makes the memory folder unreadable
+// (continuity unavailable), &history=empty lists no runs.
+const historyScenario = () => new URLSearchParams(location.search).get('history');
 const environmentSource: EnvironmentSource = {
   environment: async (agentId) => {
     const env = environments[agentId];
-    if (env) return env;
-    throw new BridgeError(agentId === 'agent_gone' ? 'soul-env-unsupported' : 'soul-env-unavailable', 'no environment in the preview');
+    if (!env) throw new BridgeError(agentId === 'agent_gone' ? 'soul-env-unsupported' : 'soul-env-unavailable', 'no environment in the preview');
+    const scenario = historyScenario();
+    if (scenario === 'unsupported') return { ...env, engine: { ...env.engine, capabilities: env.engine.capabilities.filter((c) => c !== 'env-history') } };
+    if (scenario === 'unavailable') return { ...env, errors: [...env.errors, { area: 'memory', message: 'the Agent Space could not be read' }] };
+    return env;
   },
   installRuntime: async (agentId, runtime) => {
     const env = environments[agentId];
@@ -253,6 +263,20 @@ const environmentSource: EnvironmentSource = {
     if (identity === 'fork') return { ...planned, applied: true, decision: 'forked', identity: { ...planned.identity, agentId: 'agent_f' }, soulDir: '/Users/user/Souls/luna-6e3a9c1d.soul', name: 'luna-6e3a9c1d', journal: 'adopted' };
     if (identity === 'replace') return { ...planned, applied: true, decision: 'replaced', replaced: `${lunaSoulDir}.replaced-2026-10-08T10-00-00-000Z`, journal: 'kept-local' };
     return { ...planned, applied: true, decision: 'imported', journal: 'restored' };
+  },
+  // The Memory tab's past runs (#268) as agent-bot `soul env history` lists
+  // luna's (sampleEnvHistory), the newest `limit` of them; scout's older
+  // engine has no verb, and the tab never asks it.
+  history: async (agentId, limit) => {
+    const env = environments[agentId];
+    if (!env) throw new BridgeError('soul-not-found', 'Soul not found.');
+    if (!engineCan(env, 'env-history') || historyScenario() === 'unsupported') throw new BridgeError('soul-env-history-unsupported', "this agent-bot cannot list a soul's past runs");
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const scenario = historyScenario();
+    const none = { total: 0, listed: 0, limit, skipped: 0, truncated: false, records: [] };
+    if (scenario === 'empty' || scenario === 'unavailable') return { ...sampleEnvHistory, agentId, soulDir: env.root.soulDir, turns: none, revisions: none };
+    const records = sampleEnvHistory.turns.records.slice(0, limit ?? undefined);
+    return { ...sampleEnvHistory, agentId, soulDir: env.root.soulDir, turns: { ...sampleEnvHistory.turns, limit, listed: records.length, truncated: records.length < sampleEnvHistory.turns.total, records } };
   },
 };
 

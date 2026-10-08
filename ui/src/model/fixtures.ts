@@ -1,6 +1,6 @@
 // The fixed fake census and health from R1's snapshot test, for tests and
 // for previewing the popup before the bridge (#7) supplies real rows.
-import type { PreparedRevision, RemovalPlan, RemovalPlanEntry, RemovalScope, SoulColdWake, SoulMode, SoulModel, SoulPopulation, SoulProfile, SoulTemplateList, SoulEnvironment, SoulEnvironmentExport, SoulEnvironmentImport } from '../bridge';
+import type { PreparedRevision, RemovalPlan, RemovalPlanEntry, RemovalScope, SoulColdWake, SoulEnvHistory, SoulMode, SoulModel, SoulPopulation, SoulProfile, SoulTemplateList, SoulEnvironment, SoulEnvironmentExport, SoulEnvironmentImport } from '../bridge';
 import type { SandboxStatus } from '../components/Sandbox';
 import type { AuditRecord } from './audit';
 import type { CensusRow } from './census';
@@ -335,7 +335,7 @@ const lunaRoot = '/Users/user/Souls/Luna.soul';
 export const sampleEnvironments: Readonly<Record<string, SoulEnvironment>> = {
   agent_p: {
     schemaVersion: 1,
-    engine: { version: '0.10.55', contractVersion: 1, capabilities: ['env', 'revision-prepare', 'runtimes', 'providers', 'tool-homes', 'memory', 'history', 'migrate-complete', 'env-clean', 'env-export', 'env-import'] },
+    engine: { version: '0.10.55', contractVersion: 1, capabilities: ['env', 'revision-prepare', 'runtimes', 'providers', 'tool-homes', 'memory', 'history', 'migrate-complete', 'env-clean', 'env-export', 'env-import', 'env-history'] },
     identity: { agentId: 'agent_p', name: 'luna', displayName: 'Luna', status: 'active', harness: 'codex', revision: '2026.10.1', parentRevision: null, template: false, formatVersion: 2 },
     root: { soulDir: lunaRoot, soulsRoot: '/Users/user/Souls', source: 'environment', registered: true, marker: 'ok', copies: [], device: 16777229 },
     components: [
@@ -434,6 +434,34 @@ export const sampleEnvironments: Readonly<Record<string, SoulEnvironment>> = {
  * two untracked files; the Agent Space is still linked, read through its
  * link. Counts and hashes only, never a file's contents.
  */
+/**
+ * agent-bot's `soul env history agent_p --json` (#268, `env-history`):
+ * luna's mirror, six runs newest first and three revisions. Facts only:
+ * no message counts, no titles, no transcript.
+ */
+export const sampleEnvHistory: SoulEnvHistory = {
+  agentId: 'agent_p', soulDir: lunaRoot, mirror: '.soul-state/runs', mirrored: true,
+  turns: {
+    total: 6, listed: 6, limit: 50, skipped: 0, truncated: false,
+    records: [
+      { id: 'turn-2026-10-08T09-12-00', kind: 'turn', startedAt: '2026-10-08T09:12:00.000Z', endedAt: '2026-10-08T09:15:42.000Z', harness: 'codex', outcome: 'ok' },
+      { id: 'wake-2026-10-08T07-30-00', kind: 'wake', startedAt: '2026-10-08T07:30:00.000Z', endedAt: '2026-10-08T07:30:09.000Z', harness: 'codex', outcome: 'ok' },
+      { id: 'task-2026-10-07T18-02-00', kind: 'task', startedAt: '2026-10-07T18:02:00.000Z', endedAt: '2026-10-07T19:10:30.000Z', harness: 'codex', outcome: 'failed' },
+      { id: 'turn-2026-10-07T15-40-00', kind: 'turn', startedAt: '2026-10-07T15:40:00.000Z', endedAt: null, harness: 'codex', outcome: 'cancelled' },
+      { id: 'session-2026-10-06T10-00-00', kind: 'session', startedAt: '2026-10-06T10:00:00.000Z', endedAt: '2026-10-06T10:48:00.000Z', harness: 'claude', outcome: 'ok' },
+      { id: 'launch-2026-10-06T09-58-00', kind: 'launch', startedAt: '2026-10-06T09:58:00.000Z', endedAt: '2026-10-06T09:58:03.000Z', harness: 'codex', outcome: 'ok' },
+    ],
+  },
+  revisions: {
+    total: 3, listed: 3, limit: 50, skipped: 0, truncated: false,
+    records: [
+      { id: '2026.10.1', parent: '2026.9.4', reason: 'Customize: AGENTS.md', at: '2026-10-07T12:00:00.000Z' },
+      { id: '2026.9.4', parent: '2026.9.3', reason: 'skill added: triage', at: '2026-09-28T16:20:00.000Z' },
+      { id: '2026.9.3', parent: null, reason: 'created from the starter template', at: '2026-09-20T08:00:00.000Z' },
+    ],
+  },
+};
+
 export const sampleLifeExport: SoulEnvironmentExport = {
   agentId: 'agent_p', soulDir: lunaRoot, applied: false, decision: 'planned', file: null,
   manifest: {

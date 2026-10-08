@@ -10,8 +10,8 @@ import { createContext, useCallback, useContext, useEffect, useId, useRef, useSt
 import { createPortal } from 'react-dom';
 import { AlertTriangle, CheckCircle2, CircleSlash, Info, WifiOff, X } from 'lucide-react';
 import {
-  installSoulRuntime, migrateSoulEnvironment, soulEnvClean, soulEnvExport, soulEnvImport, soulEnvironment,
-  type EnvironmentMigration, type EnvironmentMigrationStep, type ImportIdentity, type MigrationKind, type RuntimeInstall, type SoulCleanRow, type SoulEnvironment, type SoulEnvironmentClean,
+  installSoulRuntime, migrateSoulEnvironment, soulEnvClean, soulEnvExport, soulEnvHistory, soulEnvImport, soulEnvironment,
+  type EnvironmentMigration, type EnvironmentMigrationStep, type ImportIdentity, type MigrationKind, type RuntimeInstall, type SoulCleanRow, type SoulEnvHistory, type SoulEnvironment, type SoulEnvironmentClean,
   type SoulEnvironmentExport, type SoulEnvironmentImport, type SoulLifeWorkspace,
 } from '../bridge';
 import { displayName, type CensusRow } from '../model/census';
@@ -39,6 +39,8 @@ export interface EnvironmentSource {
   exportLife: (agentId: string, options: { plan: boolean; to: string | null }) => Promise<SoulEnvironmentExport>;
   /** `soul env import FILE [--replace | --fork] [--name NAME] [--plan] --json`: the plan reads the manifest only; the apply is owner-gated by the engine. */
   importLife: (archive: string, options: { plan: boolean; identity: ImportIdentity; name: string | null }) => Promise<SoulEnvironmentImport>;
+  /** `soul env history <soul> [--limit N] --json` (the Memory tab, #268): the mirror's runs and revisions, read-only, behind `env-history`. */
+  history: (agentId: string, limit: number | null) => Promise<SoulEnvHistory>;
 }
 
 // A source that throws instead of rejecting still settles as a rejection.
@@ -51,6 +53,7 @@ export const EnvironmentSourceContext = createContext<EnvironmentSource>({
   clean: (agentId, options) => settled(() => soulEnvClean(agentId, options)),
   exportLife: (agentId, options) => settled(() => soulEnvExport(agentId, options)),
   importLife: (archive, options) => settled(() => soulEnvImport(archive, options)),
+  history: (agentId, limit) => settled(() => soulEnvHistory(agentId, limit)),
 });
 
 const messageOf = (failure: unknown): string => {
@@ -81,13 +84,15 @@ export function useSoulEnvironment(agentId: string, refresh = 0): { read: Enviro
 }
 
 const SIGN_IN_TEXT = { 'signed-in': 'env.signIn.signedIn', expired: 'env.signIn.expired', 'not-signed-in': 'env.signIn.notSignedIn', unknown: 'env.signIn.unknown' } as const;
-const CONTINUITY_TEXT = { ready: 'env.continuity.ready', 'needs-migration': 'env.continuity.needsMigration', unavailable: 'env.continuity.unavailable', unsupported: 'env.continuity.unsupported' } as const;
+/** The continuity words, shared with the Memory tab, which adds the design's hint under each. */
+export const CONTINUITY_TEXT = { ready: 'env.continuity.ready', 'needs-migration': 'env.continuity.needsMigration', unavailable: 'env.continuity.unavailable', unsupported: 'env.continuity.unsupported' } as const;
 const STATUS_TEXT = { installed: 'env.status.installed', missing: 'env.status.missing', unsupported: 'env.status.unsupported' } as const;
 const STEP_TEXT = { 'not-started': 'env.step.notStarted', running: 'env.step.running', completed: 'env.step.completed', failed: 'env.step.failed', unknown: 'env.step.unknown' } as const;
 const MIGRATION_STEP_TEXT = { 'not-started': 'env.step.notStarted', completed: 'env.step.completed', failed: 'env.step.failed', skipped: 'env.step.skipped' } as const;
 
 const severityClass = (severity: 'error' | 'warning') => (severity === 'error' ? 'border-destructive text-destructive' : 'border-border text-muted-foreground');
-const button = 'inline-flex min-h-8 items-center gap-2 rounded-md border border-border px-3 text-sm font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50';
+/** The section's secondary button (Re-check environment and the plan buttons); the Memory tab's Refresh takes it too. */
+export const button = 'inline-flex min-h-8 items-center gap-2 rounded-md border border-border px-3 text-sm font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50';
 const primary = 'inline-flex min-h-8 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50';
 const heading = 'm-0 text-xs font-semibold tracking-wide text-muted-foreground uppercase';
 const mono = 'font-mono text-xs [overflow-wrap:anywhere]';

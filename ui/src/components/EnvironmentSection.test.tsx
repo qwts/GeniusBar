@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BridgeError, type EnvironmentMigration, type ImportIdentity, type RuntimeInstall, type SoulCleanRow, type SoulEnvironment, type SoulEnvironmentClean, type SoulEnvironmentImport } from '../bridge';
-import { sampleCensus, sampleEnvironments, sampleLifeExport, sampleLifeImport } from '../model/fixtures';
+import { sampleCensus, sampleEnvHistory, sampleEnvironments, sampleLifeExport, sampleLifeImport } from '../model/fixtures';
 import { EnvironmentSection, EnvironmentSourceContext, type EnvironmentSource } from './EnvironmentSection';
 
 afterEach(cleanup);
@@ -40,6 +40,7 @@ function source(overrides: Partial<EnvironmentSource> = {}): EnvironmentSource {
     clean: vi.fn(async (_agentId: string, { plan }: { plan: boolean }) => (plan ? cleanPlan : cleaned)),
     exportLife: vi.fn(async (_agentId: string, { plan, to }: { plan: boolean; to: string | null }) => (plan ? sampleLifeExport : { ...sampleLifeExport, applied: true, decision: 'exported', file: to })),
     importLife: vi.fn(async (archive: string, { plan }: { plan: boolean; identity: ImportIdentity; name: string | null }) => (plan ? { ...sampleLifeImport, archive } : { ...sampleLifeImport, archive, applied: true, decision: 'imported', journal: 'restored' })),
+    history: vi.fn(async () => sampleEnvHistory),
     ...overrides,
   };
 }
