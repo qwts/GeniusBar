@@ -448,8 +448,9 @@ describe('App setup', () => {
     expect(screen.getByRole('status', { name: 'Update' }).textContent).toContain('GeniusBar 0.1.1 is available.');
     fireEvent.click(screen.getByRole('button', { name: 'Install and restart' }));
     expect(act).toHaveBeenCalledOnce();
-    // While the update needs action, the footer check hides (and so does an empty ⋯).
-    expect(screen.queryByRole('button', { name: 'More' })).toBeNull();
+    // While the update needs action, the footer check hides; the ⋯ keeps only About (#290).
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['About GeniusBar…']);
     cleanup();
     render(<App connection={sampleConnection} updates={{ ...updates, status: { state: 'idle', version: null } }} isStatic />);
     fireEvent.click(screen.getByRole('button', { name: 'More' }));

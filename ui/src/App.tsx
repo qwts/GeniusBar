@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ExternalLink, History, Plus, Volume2, VolumeX, X } from 'lucide-react';
+import { AboutDialog, focusReturnOf, liveAbout, type AboutSource } from './components/AboutDialog';
 import { ApprovalCounts, ApprovalsList } from './components/ApprovalsList';
 import { ArchiveDialog, ArchivedNotice, liveArchiver, type Archiver } from './components/ArchiveDialog';
 import { currentWindow, inApp, listSoulTemplates, liveComputerUse, openSurface, popupVisible, setPopupAutohide, soulStopSupported, stopSoul, syncPerimeter, syncTeamWindows, type ComputerUseSwitch, type RemovedSoul, type SurfaceRequest, type TeamWindowSpec, shellLog } from './bridge';
@@ -155,6 +156,8 @@ interface AppProps {
   sandboxSource?: SandboxSource | null;
   /** GitHub identities (agent-bot `identity apps`, #67); the app uses agent-bot when absent, null hides them. */
   identityAppsSource?: IdentityAppsSource | null;
+  /** About GeniusBar's versions and links (#290); the app reads the shell when absent, null hides About. */
+  about?: AboutSource | null;
 }
 
 /**
@@ -230,7 +233,7 @@ function LanguageSelect() {
 
 // The GeniusBar menu (the tray popup's content, and the toolbar popover in
 // window mode) and, from it, one companion's session.
-function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onOpenDesktop, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, floatingButton = false, archiver, stopper, pauser, computerUseSwitch, templateLister, popupShowing, surfaces, rosterSettled = true }: AppProps) {
+function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, onRefresh, isStatic = false, select = null, setup, onSetup, chat, launcher, openedPackage, onOpenDesktop, onRemoveServices, starter, harnessAuth, devTools, updates, existingServices, cliTools, badges, floatingButton = false, archiver, stopper, pauser, computerUseSwitch, templateLister, popupShowing, surfaces, rosterSettled = true, about }: AppProps) {
   const { t, lang } = useI18n();
   // Only the live tray popup opens native windows (#223); --window and snapshots keep theirs.
   const native = mode !== 'tray' ? null : surfaces === undefined ? (inApp() && !isStatic ? liveSurfaces : null) : surfaces;
@@ -397,6 +400,22 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
       {archivedText && <ArchivedNotice text={archivedText} onDone={clearArchived} />}
     </>
   );
+  // About GeniusBar (#290): from the footer ⋯ in both modes, and from the
+  // setup and first-launch screens, so a version can be reported before
+  // setup is done or while the broker is unreachable. Focus goes back to
+  // what opened it (the ⋯ for a menu item) when it closes.
+  const aboutWith = about === undefined ? liveAbout : about;
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const aboutReturn = useRef<HTMLElement | null>(null);
+  const openAbout = aboutWith ? () => { aboutReturn.current = focusReturnOf(document.activeElement); setAboutOpen(true); } : undefined;
+  const closeAbout = () => {
+    setAboutOpen(false);
+    aboutReturn.current?.focus();
+    aboutReturn.current = null;
+  };
+  const aboutUi = aboutOpen && aboutWith && (
+    <AboutDialog source={aboutWith} brokerReachable={connection.bridgeConnected && !connection.brokerUnreachable} onClose={closeAbout} />
+  );
 
   const open = (soul: CensusRow) => {
     const key = soulKey(soul);
@@ -468,10 +487,11 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
           {refresh && <button type="button" className={setupLink} onClick={refresh}>{t('refresh')}</button>}
           <span className="flex shrink-0 items-center gap-0.5">
             <LanguageSelect />
-            {(openDesktop || cliTools) && (
+            {(openDesktop || cliTools || openAbout) && (
               <FooterMenu items={[
                 openDesktop && { label: t('openDesktop'), run: openDesktop },
                 cliTools && { label: t('cli.action'), run: () => setPanel('cli') },
+                openAbout && { label: t('about.menu'), run: openAbout },
               ]} />
             )}
           </span>
@@ -495,13 +515,14 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
               <Plus className="size-3.5" aria-hidden />
             </button>
           )}
-          {(openDesktop || native || canLaunchPackage || cliTools || canCheckUpdates || onRemoveServices || onRefresh) && (
+          {(openDesktop || native || canLaunchPackage || cliTools || canCheckUpdates || onRemoveServices || onRefresh || openAbout) && (
             <FooterMenu items={[
               openDesktop && { label: t('openDesktop'), run: openDesktop },
               native && { label: t('desktopWindows'), checked: desktopOn, run: () => layoutActions.setDesktopWindows(!desktopOn) },
               native && { label: t('ownWindows'), checked: prefs.ownWindows, run: () => preferenceActions.setOwnWindows(!prefs.ownWindows) },
               native && { label: t('closeOnClickOut'), checked: prefs.closeOnClickOut, run: () => preferenceActions.setCloseOnClickOut(!prefs.closeOnClickOut) },
               canCheckUpdates && { label: t('checkUpdates'), run: checkUpdates },
+              openAbout && { label: t('about.menu'), run: openAbout },
               canLaunchPackage && { label: t('launchPackage'), run: launchPackage },
               cliTools && { label: t('cli.action'), run: () => setPanel('cli') },
               (refresh || (onRemoveServices && !setup?.running)) && 'separator',
@@ -542,7 +563,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
   const setupMenu = setup && onSetup && (
     <>
       <SetupHeader connection={connection} running={setup.running} error={footer?.isError ? footer.text : null} />
-      <SetupPanel setup={setup} onSetup={onSetup} existing={existingServices} />
+      <SetupPanel setup={setup} onSetup={onSetup} existing={existingServices} onAbout={openAbout} />
       {updates && setupUpdateShows(updates.status, checkedUpdates) && <UpdateNotice status={updates.status} onAction={updates.act} checked={checkedUpdates} />}
       {iconFooter(true)}
     </>
@@ -555,7 +576,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
       {showStarter && starter && launcher && (
         // The menu's card look (as the sandbox and default-harness cards); no Lovable screen.
         <section className="grid gap-2 border-b border-border p-3 text-xs" aria-label={t('firstCompanion')}>
-          <FirstLaunch starter={starter} launcher={launcher} auth={harnessAuth} devTools={devTools} onStart={() => setStarterOpen(true)} />
+          <FirstLaunch starter={starter} launcher={launcher} auth={harnessAuth} devTools={devTools} onStart={() => setStarterOpen(true)} onAbout={openAbout} />
           {starterOpen && launcher.state.phase !== 'requesting' && launcher.state.phase !== 'pending' && (
             <div className={actions}>
               <button type="button" className={secondaryButton} onClick={() => setStarterOpen(false)}>{t('close')}</button>
@@ -622,6 +643,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
           {session ? <>{updates && <UpdateNotice status={updates.status} onAction={updates.act} />}{session}</> : menu()}
           {launchModal}
           {archiveUi}
+          {aboutUi}
         </main>
       </SurfaceOpenerContext.Provider>
     );
@@ -676,6 +698,7 @@ function Shell({ mode = 'tray', census = NO_CENSUS, connection = disconnected, o
         onPrompt={prompt} onHistory={(soul) => openOn(soul, 'audit')} />
       {launchModal}
       {archiveUi}
+      {aboutUi}
     </div>
   );
 }

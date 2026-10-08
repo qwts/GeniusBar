@@ -3,7 +3,7 @@ import { useI18n } from '../lib/i18n';
 import { canLaunch } from '../model/launch';
 import type { LaunchApi } from '../useLaunch';
 import { LaunchStatus } from './LaunchForm';
-import { actions, errorLine, mutedLine, primaryButton } from './ui';
+import { actions, errorLine, mutedLine, primaryButton, textLink } from './ui';
 
 /** The starter soul the app ships, from the shell's `starter_soul`. */
 export interface Starter {
@@ -145,8 +145,10 @@ function DevToolsNeeded({ devTools, installing }: { devTools?: DevTools; install
  * The empty roster's one-click start (R4): launches the bundled starter
  * soul with its default harness, which the owner may change first.
  */
-export function FirstLaunch({ starter, launcher, auth, devTools, onStart }:
-  { starter: Starter; launcher: LaunchApi; auth?: HarnessAuth; devTools?: DevTools; onStart?: () => void }) {
+export function FirstLaunch({ starter, launcher, auth, devTools, onStart, onAbout }:
+  { starter: Starter; launcher: LaunchApi; auth?: HarnessAuth; devTools?: DevTools; onStart?: () => void;
+    /** Opens About GeniusBar (#290), reachable before the first companion exists. */
+    onAbout?: () => void }) {
   const { t } = useI18n();
   const [harness, setHarness] = useState(starter.harnesses[0] ?? '');
   // Agent comms is on by default and can be turned off only before start (#71).
@@ -186,6 +188,7 @@ export function FirstLaunch({ starter, launcher, auth, devTools, onStart }:
       )}
       {!started && (
         <div className={actions}>
+          {onAbout && <button type="button" className={`${textLink} mr-auto`} onClick={onAbout}>{t('about.link')}</button>}
           <button type="submit" className={primaryButton} disabled={!ready}>{t('starter.start')}</button>
         </div>
       )}

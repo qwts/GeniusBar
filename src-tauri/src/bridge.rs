@@ -937,7 +937,7 @@ pub async fn locate_soul_package<R: Runtime>(
     parse_soul_locate(&output.stdout, &output.stderr)
 }
 
-fn last_line(bytes: &[u8]) -> String {
+pub(crate) fn last_line(bytes: &[u8]) -> String {
     String::from_utf8_lossy(
         bytes
             .split(|b| *b == b'\n')
@@ -1059,7 +1059,7 @@ fn parse_harness_auth(stdout: &[u8]) -> Result<Value, BridgeError> {
 }
 
 /// Runs the bundled agent-bot with `args` in GeniusBar's host environment.
-async fn run_agent_bot<R: Runtime>(
+pub(crate) async fn run_agent_bot<R: Runtime>(
     app: &AppHandle<R>,
     args: Vec<std::ffi::OsString>,
     unavailable_code: &str,
@@ -2193,7 +2193,7 @@ fn pairing_code(code: &str) -> Result<String, BridgeError> {
 
 /// Runs the bundled agent-comms (`bin/agent-comms.mjs`) as `run_agent_bot`
 /// runs agent-bot: GeniusBar's host env names its broker.
-async fn run_agent_comms<R: Runtime>(
+pub(crate) async fn run_agent_comms<R: Runtime>(
     app: &AppHandle<R>,
     args: Vec<std::ffi::OsString>,
     unavailable_code: &str,
@@ -3218,7 +3218,7 @@ pub async fn daemon_status<R: Runtime>(app: AppHandle<R>) -> Result<Value, Bridg
     }
 }
 
-fn parse_daemon_status(stdout: &[u8]) -> Value {
+pub(crate) fn parse_daemon_status(stdout: &[u8]) -> Value {
     match serde_json::from_str::<Value>(&last_line(stdout)) {
         Ok(value) if value.get("running").and_then(Value::as_bool).is_some() => value,
         _ => Value::Null,

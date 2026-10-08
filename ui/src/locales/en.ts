@@ -536,6 +536,27 @@ export const en = {
   'edit.reload': 'Reload',
   'edit.ownerRequired': 'Not saved: only you can approve this change, and agent-bot could not confirm it was you ({message}).',
   'edit.saveFailed': 'Not saved: {message}',
+  // About GeniusBar (#290).
+  'about.menu': 'About GeniusBar…',
+  'about.link': 'About GeniusBar',
+  'about.title': 'About GeniusBar',
+  'about.version': 'Version',
+  'about.build': 'Build',
+  'about.components': 'Component details',
+  'about.bundled': 'Bundled version',
+  'about.running': 'Running version',
+  'about.unknown': 'Unknown / not connected',
+  'about.checking': 'Checking…',
+  'about.system': 'System',
+  'about.summary': 'Version info (selectable text)',
+  'about.copy': 'Copy version info',
+  'about.select': 'Select text',
+  'about.copied': 'Version info copied.',
+  'about.failed': 'Could not copy. Select the version text and copy it manually.',
+  'about.links': 'Help',
+  'about.releases': 'Release notes',
+  'about.report': 'Report a problem',
+  'about.openFailed': 'Could not open the browser: {message}',
 } as const;
 
 export type MessageKey = keyof typeof en;
