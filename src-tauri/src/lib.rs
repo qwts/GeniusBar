@@ -497,6 +497,7 @@ pub fn run() {
             bridge::soul_revision_discard,
             bridge::soul_revision_edit,
             bridge::soul_remove,
+            bridge::soul_remove_plan,
             bridge::daemon_status,
             bridge::services_installed,
             bridge::population_list,

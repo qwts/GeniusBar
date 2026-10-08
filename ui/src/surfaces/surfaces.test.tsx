@@ -174,6 +174,7 @@ describe('native windows never scroll as a document (#260)', () => {
 describe('SessionSurface (#223)', () => {
   const archiver: Archiver = {
     running: async () => false,
+    plan: async () => null,
     remove: vi.fn(async (agentId: string) => ({ agentId, name: 'luna', comms: 'left', archived: [] })),
   };
 
@@ -212,11 +213,11 @@ describe('SessionSurface (#223)', () => {
     const { win } = fakeWindow();
     render(<SessionSurface {...data} soul="user/agent_p" tab={null} action="archive" win={win} open={null} archiver={archiver} />);
     const dialog = screen.getByRole('alertdialog');
-    const archive = within(dialog).getByRole('button', { name: 'Archive' });
+    const archive = within(dialog).getByRole('button', { name: 'Archive luna' });
     await waitFor(() => expect((archive as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(archive);
     await waitFor(() => expect(win.close).toHaveBeenCalled());
-    expect(archiver.remove).toHaveBeenCalledWith('agent_p');
+    expect(archiver.remove).toHaveBeenCalledWith('agent_p', undefined);
   });
 
   it('opens the delegation tree\'s companions in their own windows', async () => {
