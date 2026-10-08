@@ -113,6 +113,8 @@ commit of this document.
 | Launch `model`, `brief`, `role`, `parent` | agent-comms accepts them from v0.3.13/14 | The bridge only forwards strings and drops the rest so an older broker never sees an unknown field (`bridge/bridge.mjs:27-31`). |
 | `soul revision … --json` spelling | agent-bot ≥ v0.10.37 | Older pins print JSON anyway and reject the flag with a usage error (seen in E-B3/E-B4). |
 | `soul env`, `.soul-state` migration journal | agent-bot ≥ v0.10.50 (#583) | Absent command on older pins; files untouched. GeniusBar #268 adopts the contract. |
+| `soul env clean`, `soul env migrate --complete` | agent-bot ≥ v0.10.54 (capabilities `env-clean`, `migrate-complete`) | The Environment section keeps **Clean up cache** / **Complete setup** disabled with a note unless the descriptor lists the capability; an older engine's usage line maps to `*-unsupported`. |
+| `soul env export`, `soul env import` | agent-bot ≥ v0.10.55 (capabilities `env-export`, `env-import`) | **Export life…** / **Import life…** disabled with a note unless listed; same usage-line mapping. |
 | Bundled git on `AGENT_BOT_TOOL_PATH` | GeniusBar ≥ 0.1.53 | Older apps use whatever git the system has. |
 
 ## 3. Pairs exercised

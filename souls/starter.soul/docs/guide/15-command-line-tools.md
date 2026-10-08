@@ -14,7 +14,7 @@ observed: With them installed, the same engine GeniusBar uses is yours in a term
 
 observed: An agent started outside GeniusBar (a harness you ran yourself with `agent-bot join`) appears in the fleet as **Unmanaged** once it joins the broker; GeniusBar shows it and chats with it but did not start it and cannot restart it. **Managed** companions are the daemon's.
 
-observed: Useful reads that change nothing: `agent-bot soul show <agentId|name>`, `agent-bot soul env <agentId> --json`, `agent-bot soul profile <agentId> --json`, `agent-bot soul templates --json`, `agent-bot population list --json`, `agent-bot audit list`, `agent-comms peers`, `agent-comms inbox read`, `agent-comms task list`. Writes such as `agent-bot soul spawn`, `agent-comms send` and `agent-comms launch` do what the app's controls do, and the owner-gated ones ask you the same way.
+observed: Useful reads that change nothing: `agent-bot soul show <agentId|name>`, `agent-bot soul env <agentId> --json`, `agent-bot soul env export <agentId> --plan --json`, `agent-bot soul env import FILE --plan --json`, `agent-bot soul profile <agentId> --json`, `agent-bot soul templates --json`, `agent-bot population list --json`, `agent-bot audit list`, `agent-comms peers`, `agent-comms inbox read`, `agent-comms task list`. Writes such as `agent-bot soul spawn`, `agent-comms send` and `agent-comms launch` do what the app's controls do, and the owner-gated ones ask you the same way.
 
 ## Technical details
 - Headless launch: `agent-comms launch --account <a> --soul <name>|--package <path> --harness <h> --name <n> [--comms on|off] [--model M] [--brief …]`.

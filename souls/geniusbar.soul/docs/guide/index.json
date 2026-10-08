@@ -273,7 +273,14 @@
         "home",
         "durable",
         "retention",
-        "soul env"
+        "soul env",
+        "export",
+        "import",
+        "clean",
+        "cache",
+        "backup",
+        "move",
+        "fork"
       ],
       "file": "12-environment-memory-history.md"
     },

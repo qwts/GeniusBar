@@ -18,7 +18,7 @@ observed: **"Launch failed: …"** repeats the daemon's reason (a harness not in
 
 observed: Where to look: agent-bot's audit log (in the app, or `agent-bot audit tail`), `agent-bot doctor`, `agent-comms health`, and GeniusBar's own `shell.log` in the app's log folder, which records launches, service refreshes, guide refreshes and web view errors. "Report a problem" in About GeniusBar opens the issue form; paste the version info from About.
 
-observed: **Not shipped today** (the guide marks each as *design* where it comes up): a Memory tab and the Environment & memory section (#268); a parent or provider choice at launch (#261, #284); Approve for session; the team scope and archived-souls browser for archiving (#283); provisioning the sandbox account from the app (#66). A control the app does not show is not available through Genius either: a soul cannot do what agent-bot refuses it.
+observed: **Not shipped today** (the guide marks each as *design* where it comes up): the Memory tab (#268; the Environment section in Details is in the app) and Approve for session. A control the app does not show is not available through Genius either: a soul cannot do what agent-bot refuses it.
 
 ## Technical details
 - An older bundled agent-bot hides what it lacks: no `soul stop` means no Stop button, no `sandbox` means no Sandboxing card, no `audit` means "The audit log arrives with the next agent-bot update."
