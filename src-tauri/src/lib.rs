@@ -2,6 +2,7 @@
 //! anchored to it, and platform calls. Agent logic stays out of Rust; it
 //! reaches agent-comms through the Node bridge (#7).
 
+mod about;
 mod bridge;
 mod snapshot;
 mod soul_package;
@@ -453,6 +454,8 @@ pub fn run() {
             windows::sync_team_windows,
             windows::sync_perimeter,
             windows::shell_log,
+            about::about_info,
+            about::about_running,
             bridge::bridge,
             bridge::setup,
             bridge::remove_services,

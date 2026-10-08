@@ -1,16 +1,22 @@
 import { ArrowRightLeft, Check, Circle, Loader2 } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { describeExisting, SETUP_STEPS, type ExistingServices, type SetupState } from '../model/setup';
+import { textLink } from './ui';
 
 const MARK = { pending: Circle, running: Loader2, done: Check } as const;
 // The design's Set up button (Lovable SetupPanel): secondary, no border.
 const setupButton = 'inline-flex items-center justify-center gap-1.5 rounded-md bg-secondary px-3 py-1 text-sm text-secondary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-accent disabled:opacity-50';
 
-/** Setup can keep another install's services or move them to GeniusBar. */
-export function SetupPanel({ setup, onSetup, existing }: {
+/**
+ * Setup can keep another install's services or move them to GeniusBar.
+ * About GeniusBar (#290) is reachable from here too, as the design's
+ * SetupPanel has it, so a version can be reported before setup is done.
+ */
+export function SetupPanel({ setup, onSetup, existing, onAbout }: {
   setup: SetupState;
   onSetup: (migrate?: boolean) => void;
   existing?: ExistingServices | null;
+  onAbout?: () => void;
 }) {
   const { t } = useI18n();
   const found = describeExisting(existing, t);
@@ -50,6 +56,7 @@ export function SetupPanel({ setup, onSetup, existing }: {
           {setup.running ? t('setup.settingUp') : setup.error ? t('setup.retry') : t('setup.go')}
         </button>
       )}
+      {onAbout && <p className="m-0"><button type="button" className={textLink} onClick={onAbout}>{t('about.link')}</button></p>}
     </section>
   );
 }

@@ -582,6 +582,90 @@ export async function daemonStatus(invokeImpl: typeof invoke = invoke): Promise<
   }
 }
 
+/** What the shell says about the app and its bundle (`about_info`, #290). */
+export interface AboutInfo {
+  app: { name: string; version: string; build: string };
+  /** Each bundled engine's package version and short pinned commit; null where the bundle has none. */
+  bundled: Record<string, { version: string | null; ref: string | null }>;
+  os: { name: string; version: string | null };
+}
+
+const textOrNull = (value: unknown): string | null => (typeof value === 'string' && value !== '' ? value : null);
+
+export function normalizeAboutInfo(raw: unknown): AboutInfo | null {
+  if (!isRecord(raw) || !isRecord(raw.app)) return null;
+  const version = textOrNull(raw.app.version);
+  if (version === null) return null;
+  const bundled: AboutInfo['bundled'] = {};
+  if (isRecord(raw.bundled)) {
+    for (const [name, pin] of Object.entries(raw.bundled)) {
+      if (isRecord(pin)) bundled[name] = { version: textOrNull(pin.version), ref: textOrNull(pin.ref) };
+    }
+  }
+  const os = isRecord(raw.os) ? raw.os : {};
+  return {
+    app: { name: textOrNull(raw.app.name) ?? 'GeniusBar', version, build: textOrNull(raw.app.build) ?? version },
+    bundled,
+    os: { name: textOrNull(os.name) ?? 'Unknown OS', version: textOrNull(os.version) },
+  };
+}
+
+/** The app's version, build, bundled engines and OS; null when the shell cannot say (outside the app, a failed call). */
+export async function aboutInfo(invokeImpl: typeof invoke = invoke): Promise<AboutInfo | null> {
+  if (!inApp() && invokeImpl === invoke) return null;
+  try {
+    return normalizeAboutInfo(await invokeImpl<unknown>('about_info'));
+  } catch {
+    return null;
+  }
+}
+
+/** What the live engines answer (`about_running`, #290): agent-bot's version while its daemon runs, agent-comms's from the engine. */
+export interface AboutRunning {
+  'agent-bot': { running: boolean; version: string | null };
+  'agent-comms': { version: string | null };
+}
+
+export function normalizeAboutRunning(raw: unknown): AboutRunning | null {
+  if (!isRecord(raw)) return null;
+  const bot = isRecord(raw['agent-bot']) ? raw['agent-bot'] : {};
+  const comms = isRecord(raw['agent-comms']) ? raw['agent-comms'] : {};
+  return {
+    'agent-bot': { running: bot.running === true, version: textOrNull(bot.version) },
+    'agent-comms': { version: textOrNull(comms.version) },
+  };
+}
+
+/** The engines' running versions; null when the shell cannot say. */
+export async function aboutRunning(invokeImpl: typeof invoke = invoke): Promise<AboutRunning | null> {
+  if (!inApp() && invokeImpl === invoke) return null;
+  try {
+    return normalizeAboutRunning(await invokeImpl<unknown>('about_running'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Opens a github.com page in the owner's browser through the shell's
+ * allow-listed opener (`identity_app_open`: github.com and the App create
+ * flow's loopback page, nothing else); outside the app, a new tab.
+ * Rejects with the shell's BridgeError when it would not open the URL.
+ */
+export async function openInBrowser(url: string, invokeImpl: typeof invoke = invoke): Promise<void> {
+  if (!inApp() && invokeImpl === invoke) {
+    window.open(url, '_blank', 'noopener');
+    return;
+  }
+  try {
+    await invokeImpl('identity_app_open', { url });
+  } catch (failure) {
+    const e = failure as { code?: unknown; message?: unknown };
+    throw new BridgeError(typeof e?.code === 'string' ? e.code : 'open-failed',
+      typeof e?.message === 'string' ? e.message : String(failure));
+  }
+}
+
 /** Which of GeniusBar's login services are registered (#118), from `services_installed`. */
 export interface ServicesInstalled {
   broker: boolean;
