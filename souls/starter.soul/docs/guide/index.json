@@ -1,6 +1,6 @@
 {
   "draft": "2026-10-07",
-  "appVersion": "0.1.67",
+  "appVersion": "0.1.68",
   "components": {
     "agent-bot": "0.10.57",
     "agent-comms": "0.3.15"
