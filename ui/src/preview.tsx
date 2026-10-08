@@ -33,6 +33,9 @@
 // &surface=team|session|audit|customize|launch (with &soul=user/agent_p,
 // and &tab= / &action=archive for a session) shows that native window's
 // page (#223), and what it opens opens in a new tab:
+// &host=windows|macos shows the first launch (#46) on an empty roster with
+// a Platform switch and, on Windows, each bundled tool's state (Starting…,
+// Ready, Missing, Couldn't start) and the build note; Retry "probes" again:
 // the app on the fixed fixtures, without Tauri. Not part of the build.
 import { StrictMode, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -51,8 +54,10 @@ import { SoulSourceContext, type SoulSource } from './components/SoulNotices';
 import { EnvironmentSourceContext, type EnvironmentSource } from './components/EnvironmentSection';
 import type { CensusRow } from './model/census';
 import { emptyChat, emptyComposer, mergeIncoming, type ChatState } from './model/chat';
-import { inboxMessage, sampleApprovals, sampleAudit, sampleBadges, sampleCensus, sampleColdWake, sampleConnection, sampleFloating, sampleModels, sampleModes, sampleOpenedPackages, samplePaused, samplePopulation, sampleRemovalPlan, sampleSandbox, sampleSandboxSteps, sampleSessionEntries, samplePreparedRevision, sampleProfile, sampleProfileFiles, sampleTemplates, sampleEnvironments } from './model/fixtures';
+import { inboxMessage, sampleApprovals, sampleAudit, sampleBadges, sampleCensus, sampleColdWake, sampleConnection, sampleEnvironments, sampleFloating, sampleHosts, sampleModels, sampleModes, sampleOpenedPackages, samplePaused, samplePopulation, samplePreparedRevision, sampleProfile, sampleProfileFiles, sampleRemovalPlan, sampleSandbox, sampleSandboxSteps, sampleSessionEntries, sampleTemplates } from './model/fixtures';
 import type { SandboxSource, SandboxStatus } from './components/Sandbox';
+import { HOST_TOOLS, checkingHost, type HostCapabilities, type HostToolId, type HostToolState } from './model/host';
+import type { Starter } from './components/FirstLaunch';
 import type { Pauser } from './usePause';
 import type { TemplateLister } from './useSoulTemplates';
 import { BridgeError, type SoulEnvironment } from './bridge';
@@ -227,9 +232,57 @@ const profileSource: ProfileSource = {
   discard: async () => {},
 };
 
+// The first launch (#46) on an empty roster: the starter soul as the
+// shell reports it, and the host as the scenario's switches say.
+const previewStarter: Starter = { package: '/App/souls/starter.soul', account: 'friend', name: 'Genius', harnesses: ['claude', 'codex'], devTools: true };
+const TOOL_STATES: readonly HostToolState[] = ['checking', 'ready', 'missing', 'failed'];
+interface HostScenario { platform: 'macos' | 'windows'; states: Record<HostToolId, HostToolState>; signed: boolean }
+function scenarioHost(s: HostScenario): HostCapabilities {
+  if (s.platform === 'macos') return sampleHosts.macos;
+  return {
+    platform: 'windows',
+    tools: HOST_TOOLS.map((id) => ({ id, bundled: true, state: s.states[id], message: s.states[id] === 'failed' ? 'access denied (example host message)' : null })),
+    build: { signed: s.signed, updater: s.signed },
+  };
+}
+
+/** The scenario's switches, under the popup: Platform, each tool's state, signing. */
+function HostControls({ scenario, onChange }: { scenario: HostScenario; onChange: (next: HostScenario) => void }) {
+  const chip = (on: boolean) => `rounded border px-2 py-0.5 text-xs ${on ? 'border-amber-500 bg-amber-500/20' : 'border-neutral-600'}`;
+  return (
+    <div className="grid gap-2 text-xs" style={{ width: 384, margin: '0 16px 16px' }}>
+      <div className="flex items-center gap-2">
+        <span>Platform:</span>
+        {(['macos', 'windows'] as const).map((platform) => (
+          <button key={platform} type="button" className={chip(scenario.platform === platform)} onClick={() => onChange({ ...scenario, platform })}>{platform === 'macos' ? 'macOS' : 'Windows'}</button>
+        ))}
+        {scenario.platform === 'windows' && (
+          <label className="ml-auto flex items-center gap-1"><input type="checkbox" checked={scenario.signed} onChange={(e) => onChange({ ...scenario, signed: e.target.checked })} />signed + updater</label>
+        )}
+      </div>
+      {scenario.platform === 'windows' && HOST_TOOLS.map((id) => (
+        <div key={id} className="flex items-center gap-2">
+          <span className="w-10">{id}</span>
+          {TOOL_STATES.map((state) => (
+            <button key={state} type="button" className={chip(scenario.states[id] === state)} onClick={() => onChange({ ...scenario, states: { ...scenario.states, [id]: state } })}>{state}</button>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Preview() {
   const params = new URLSearchParams(location.search);
   const mode = (params.get('mode') === 'window' ? 'window' : 'tray') as AppMode;
+  // &host=windows|macos: the first launch (#46) with the scenario's switches.
+  const hostParam = params.get('host');
+  const [scenario, setScenario] = useState<HostScenario | null>(hostParam === 'windows' || hostParam === 'macos'
+    ? { platform: hostParam, states: { git: 'ready', node: 'missing', cli: 'failed' }, signed: false } : null);
+  // Retry: every row says Starting… for a moment, then the switches' states again.
+  const [probing, setProbing] = useState(false);
+  const previewHost = scenario ? (probing ? checkingHost(scenarioHost(scenario)) : scenarioHost(scenario)) : undefined;
+  const recheckHost = () => { setProbing(true); setTimeout(() => setProbing(false), 900); };
   const [composers, setComposers] = useState<ChatApi['composers']>({});
   const [chatState, setChatState] = useState(state);
   // The menu's approval list (#85): two pending proposals, decided locally.
@@ -301,8 +354,9 @@ function Preview() {
   const opened = params.get('open');
   const fixture = opened === 'copy' || opened === 'described' ? sampleOpenedPackages[opened] : null;
   const openedPackage = opened ? { id: 1, checking: false, error: null, path: opened, ...fixture } : undefined;
-  const app = <App mode={mode} select={params.get('select')} openedPackage={openedPackage} census={souls} badges={floating ? { ...sampleBadges, computerUse: driving ?? floating.computerUse, busy: floating.busy } : sampleBadges} stopper={stopper} pauser={pauser} computerUseSwitch={computerUseSwitch} templateLister={templateLister} profileSource={profileSource} sandboxSource={sandboxSource} floatingButton={floating !== null} archiver={archiver} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}
+  const app = <App mode={mode} select={params.get('select')} openedPackage={openedPackage} census={scenario ? [] : souls} badges={floating ? { ...sampleBadges, computerUse: driving ?? floating.computerUse, busy: floating.busy } : sampleBadges} stopper={stopper} pauser={pauser} computerUseSwitch={computerUseSwitch} templateLister={templateLister} profileSource={profileSource} sandboxSource={sandboxSource} floatingButton={floating !== null} archiver={archiver} connection={{ ...sampleConnection, lastRefresh: new Date() }} chat={chat}
     onRefresh={() => {}} onRemoveServices={async () => {}} updates={{ status: { state: 'idle', version: null }, act: () => {} }}
+    starter={scenario ? previewStarter : undefined} host={previewHost} onRecheckHost={recheckHost} devTools={{ install: async () => {}, recheck: () => {} }}
     launcher={{ state: { phase: 'idle' }, launch: async () => {}, reset: () => {} }} />;
   // &customize=1: the Customize dialog open on load, for the selected companion (or luna).
   const [customizing, setCustomizing] = useState(params.get('customize') === '1');
@@ -332,7 +386,8 @@ function Preview() {
     );
   }
   // The tray popup is a fixed 384×560 window (tauri.conf.json).
-  return <>{mode === 'tray' ? <div style={{ width: 384, height: 560, margin: 16, outline: '1px solid #444' }}>{app}</div> : app}{dialog}</>;
+  const controls = scenario && <HostControls scenario={scenario} onChange={(next) => { setProbing(false); setScenario(next); }} />;
+  return <>{mode === 'tray' ? <div style={{ width: 384, height: 560, margin: 16, outline: '1px solid #444' }}>{app}</div> : app}{controls}{dialog}</>;
 }
 
 createRoot(document.getElementById('root')!).render(<StrictMode><AuditSourceContext.Provider value={audit}><SoulSourceContext.Provider value={soulSource}><EnvironmentSourceContext.Provider value={environmentSource}><Preview /></EnvironmentSourceContext.Provider></SoulSourceContext.Provider></AuditSourceContext.Provider></StrictMode>);

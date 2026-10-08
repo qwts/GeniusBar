@@ -4,7 +4,7 @@ import { App } from './App';
 import { AuditSourceContext } from './components/AuditLog';
 import { emptyComposer, mergeIncoming, emptyChat } from './model/chat';
 import type { CensusRow } from './model/census';
-import { inboxMessage, sampleCensus, sampleConnection, sampleTemplates } from './model/fixtures';
+import { inboxMessage, sampleCensus, sampleConnection, sampleHosts, sampleTemplates } from './model/fixtures';
 import { noBadges } from './model/refresh';
 import { idleSetup } from './model/setup';
 import { disconnected, formatTime } from './model/status';
@@ -932,5 +932,45 @@ describe('CLI tools and migration in the rebuilt shell', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Herramientas de línea de comandos…' }));
     await screen.findByRole('button', { name: 'Instalar' });
     expect(cliTools.status).toHaveBeenCalledOnce();
+  });
+});
+
+describe('App on a Windows host (#46)', () => {
+  const launcher: LaunchApi = { state: { phase: 'idle' }, launch: vi.fn(async () => {}), reset: vi.fn() };
+  const starter = { package: 'C:\\Program Files\\GeniusBar\\souls\\starter.soul', account: 'friend', name: 'Genius', harnesses: ['claude'], devTools: false };
+  const devTools = { install: vi.fn(async () => {}), recheck: vi.fn() };
+
+  it('holds the starter until the host has answered, then follows the host’s platform', () => {
+    const { rerender } = render(<App census={[]} connection={sampleConnection} launcher={launcher} starter={starter} devTools={devTools} host={null} isStatic />);
+    expect(screen.queryByRole('region', { name: 'Your first companion' })).toBeNull();
+    expect(screen.queryByText(/Apple/)).toBeNull();
+    rerender(<App census={[]} connection={sampleConnection} launcher={launcher} starter={starter} devTools={devTools} host={sampleHosts.windowsMissing} isStatic />);
+    const region = screen.getByRole('region', { name: 'Your first companion' });
+    expect(within(region).getByText('Let’s get GeniusBar ready on this PC.')).toBeTruthy();
+    expect(within(region).getByText("Git (bundled) wasn't found in this install. Reinstall GeniusBar, then Retry.")).toBeTruthy();
+    expect(screen.queryByText(/Apple|xcode-select/)).toBeNull();
+    // Sandboxing offers no provider on Windows, so its card is not there.
+    expect(screen.queryByRole('region', { name: 'Sandboxing' })).toBeNull();
+    // A Mac keeps its step.
+    rerender(<App census={[]} connection={sampleConnection} launcher={launcher} starter={starter} devTools={devTools} host={sampleHosts.macos} isStatic />);
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeTruthy();
+  });
+
+  it('runs the usual start once the host’s tools are ready, with the build note', () => {
+    render(<App census={[]} connection={sampleConnection} launcher={launcher} starter={{ ...starter, devTools: true }} host={sampleHosts.windows} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'Start with Genius' }));
+    expect(launcher.launch).toHaveBeenCalledWith({ account: 'friend', target: { package: starter.package }, harness: 'claude', name: 'Genius', comms: true });
+  });
+
+  it('never offers Check for Updates on a build the host calls unsigned', () => {
+    const updates = { status: { state: 'idle' as const, version: null }, act: vi.fn() };
+    render(<App connection={sampleConnection} updates={updates} host={sampleHosts.windows} onRefresh={() => {}} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    expect(screen.queryByRole('menuitem', { name: 'Check for Updates…' })).toBeNull();
+    expect(screen.getByRole('menuitem', { name: 'Refresh' })).toBeTruthy();
+    cleanup();
+    render(<App connection={sampleConnection} updates={updates} host={{ ...sampleHosts.windows, build: { signed: true, updater: true } }} isStatic />);
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    expect(screen.getByRole('menuitem', { name: 'Check for Updates…' })).toBeTruthy();
   });
 });

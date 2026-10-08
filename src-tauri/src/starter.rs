@@ -80,26 +80,39 @@ fn dev_tools_installed(resources: &Path) -> bool {
     if !cfg!(target_os = "macos") {
         return true;
     }
-    bundled_git_works(resources)
-        || std::process::Command::new("/usr/bin/xcode-select")
-            .arg("-p")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok_and(|status| status.success())
+    bundled_git_works(resources) || apple_tools_installed()
+}
+
+/// Whether Apple's command line tools (or Xcode) are installed on this Mac:
+/// `xcode-select -p` names a developer directory only then. False elsewhere.
+pub fn apple_tools_installed() -> bool {
+    if !cfg!(target_os = "macos") {
+        return false;
+    }
+    std::process::Command::new("/usr/bin/xcode-select")
+        .arg("-p")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+/// The bundled git the probe starts. `bin\git.cmd` only forwards to
+/// MinGit's `git\cmd\git.exe`, and a `.cmd` cannot be started without
+/// `cmd`, so Windows asks git itself; elsewhere it is the shim the souls get.
+pub fn bundled_git_path(resources: &Path) -> std::path::PathBuf {
+    if cfg!(windows) {
+        resources.join("git").join("cmd").join("git.exe")
+    } else {
+        resources.join("bin").join("git")
+    }
 }
 
 /// `bin/git --version` through the shim the souls get: the sidecar and the
 /// helper path it names must both be there. A development build without
 /// them (no `build-git.mjs` run) falls back to the command line tools.
 pub fn bundled_git_works(resources: &Path) -> bool {
-    // `bin\git.cmd` only forwards to MinGit's `git\cmd\git.exe`, and a
-    // `.cmd` cannot be started without `cmd`, so Windows asks git itself.
-    let git = if cfg!(windows) {
-        resources.join("git").join("cmd").join("git.exe")
-    } else {
-        resources.join("bin").join("git")
-    };
+    let git = bundled_git_path(resources);
     std::process::Command::new(git)
         .arg("--version")
         .stdin(std::process::Stdio::null())
