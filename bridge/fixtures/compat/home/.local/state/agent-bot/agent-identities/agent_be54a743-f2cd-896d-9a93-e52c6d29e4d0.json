@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "agent_be54a743-f2cd-896d-9a93-e52c6d29e4d0",
+  "genesis": {
+    "revision": "sha256:86f6cfb7184c3f4eba8b1b49ee568bc0be0c354919ca0e059793ebf8d724605a",
+    "parentSoul": null
+  },
+  "team": null,
+  "squad": null,
+  "type": "agent",
+  "level": null,
+  "parentId": null,
+  "harness": null,
+  "transcript": null,
+  "status": "active",
+  "subjects": [],
+  "artifacts": [],
+  "createdAt": "2026-10-07T12:00:00.000Z",
+  "updatedAt": "2026-10-07T12:00:00.000Z",
+  "finalizedAt": null
+}

@@ -1,0 +1,8 @@
+{"t":"pair-request","account":"user","hash":"a23c68c1108ecf14c302c574d02415f0fe5f40c956b4df49541552d6f6912412","uid":502,"code":"FTUP7K","at":1791429210120}
+{"t":"pair-approve","account":"user","at":1791429210444}
+{"t":"join","verification":"claimed","account":"user","agentId":"agent_1f3c6a0e-5b2d-4c8e-9a71-0000000000a1","name":"alice","harness":"claude","parent":null,"allow":null,"at":1791429211113}
+{"t":"join","verification":"claimed","account":"user","agentId":"agent_1f3c6a0e-5b2d-4c8e-9a71-0000000000b2","name":"bob","harness":"codex","parent":null,"allow":null,"at":1791429211535}
+{"t":"message","message":{"id":"msg_ec7c4610-c0fa-4473-8e5b-d7806567618d","seq":1,"at":1791429211892,"from":{"account":"user","agentId":"agent_1f3c6a0e-5b2d-4c8e-9a71-0000000000a1","verification":"claimed"},"to":{"account":"user","agentId":"agent_1f3c6a0e-5b2d-4c8e-9a71-0000000000b2"},"kind":"message","body":"hello from the compatibility fixture","refs":[],"correlation":null,"replyTo":null,"depth":0},"key":"de1f053f-cb97-4f38-b5b8-f13cb84bbba7","fingerprint":"cd46e8f99a770d3a5e6aba02bc3afd0d3c3af400d8a008b58454ff135238680c","wake":"waiting"}
+{"t":"ack","agentId":"agent_1f3c6a0e-5b2d-4c8e-9a71-0000000000b2","ids":["msg_ec7c4610-c0fa-4473-8e5b-d7806567618d"],"at":1791429212519}
+{"t":"principal-request","principal":"principal_4a17d638-212a-46cc-a807-03587af7d4ae","account":"user","name":"GeniusBar","hash":"c3a517fee0dfb556bc5d60c24240eb0bd146a2f2fcc12622ed571d66f7dbeca3","code":"Z8TZHR","at":1791429212804}
+{"t":"principal-approve","principal":"principal_4a17d638-212a-46cc-a807-03587af7d4ae","grant":null,"at":1791429213063}

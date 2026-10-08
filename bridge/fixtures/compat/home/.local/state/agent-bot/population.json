@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "souls": {
+    "agent_be54a743-f2cd-896d-9a93-e52c6d29e4d0": {
+      "id": "agent_be54a743-f2cd-896d-9a93-e52c6d29e4d0",
+      "name": "compat-probe",
+      "soulDir": "__HOME__/souls/compat-probe.soul",
+      "appSlug": "compat-probe",
+      "parentId": null,
+      "status": "active",
+      "spacePath": "__HOME__/souls/compat-probe.soul/.soul-state/space",
+      "worktree": null,
+      "worktrees": [],
+      "transcriptLocator": {
+        "provider": "claude",
+        "id": "session-1"
+      },
+      "lastSeen": "2026-10-07T12:00:00.000Z",
+      "managed": true,
+      "comms": true,
+      "brief": "Compatibility probe",
+      "paused": false,
+      "computerUse": true,
+      "sandbox": "sandboxed",
+      "displayName": "Compat Probe",
+      "harnessAuth": {
+        "status": "expired",
+        "harness": "claude",
+        "since": "2026-10-07T12:00:00.000Z"
+      }
+    }
+  }
+}

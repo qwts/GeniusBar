@@ -15,3 +15,4 @@ Records are never rewritten after acceptance; supersede them instead.
 | --- | --- | --- |
 | [ADR-0004](ADR-0004-tauri-menubar-app-with-a-node-sidecar.md) | GeniusBar is a Tauri menubar app with a bundled Node sidecar | Proposed |
 | [ADR-0046](ADR-0046-windows-pipe-transport-dpapi-store-and-logon-tasks.md) | Windows runs the same services over a named pipe, a DPAPI store, and logon tasks | Proposed |
+| [ADR-0282](ADR-0282-component-compatibility-and-recovery.md) | Bundled components are compatible by evidence, and the host holds what it cannot prove | Proposed |

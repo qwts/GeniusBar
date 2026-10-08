@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { describeUnit, inspectServices, MIGRATED, migrateServices, programArgs, refreshServices, removeServices, runsCopy } from './services.mjs';
+import { compareVersions, describeUnit, inspectServices, MIGRATED, migrateServices, programArgs, refreshServices, removeServices, runsCopy } from './services.mjs';
 
 const node = '/Applications/Genius Bar.app/Contents/MacOS/node';
 const entry = '/Applications/Genius Bar.app/Contents/Resources/components/agent-comms/bin/agent-comms.mjs';
@@ -325,4 +325,68 @@ test('failed migration leaves stopped foreign units unloaded', async () => {
   await assert.rejects(migrateServices({ foreign, ...host, cli: cli.run, bot: bot.run, ...fast }), { code: 'denied' });
   assert.deepEqual(host.log, []);
   assert.deepEqual(files, { [foreign.broker.plist]: brewBroker });
+});
+
+test('compareVersions orders releases numerically, pre-releases first', () => {
+  assert.ok(compareVersions('0.1.9', '0.1.10') < 0);
+  assert.ok(compareVersions('0.1.60', '0.1.55') > 0);
+  assert.equal(compareVersions('v0.10.51', '0.10.51'), 0);
+  assert.ok(compareVersions('0.1.1-test', '0.1.1') < 0);
+  assert.ok(compareVersions('0.2.0', '0.1.99') > 0);
+});
+
+test('refresh holds every service when the running app is older than the stamp (ADR-0282)', async () => {
+  const stamp = { read: async () => '0.1.60', write: async () => { throw new Error('must not stamp a downgrade'); } };
+  const kickstart = async () => { throw new Error('must not restart onto older files'); };
+  const none = fake({});
+  const current = { B: plist(node, entry), D: '<plist/>' };
+  assert.deepEqual(await refreshServices({ units, read: (f) => current[f], node, commsEntry: entry,
+    cli: none.run, bot: none.run, version: '0.1.55', stamp, kickstart, keyd }),
+    { broker: 'held', daemon: 'held', keyd: 'held', downgrade: { from: '0.1.60', to: '0.1.55' } });
+  assert.deepEqual(none.calls, []);
+  // Absent units have nothing to hold, and keyd follows the daemon.
+  assert.deepEqual(await refreshServices({ units, read: (f) => (f === 'B' ? current.B : null), node, commsEntry: entry,
+    cli: none.run, bot: none.run, version: '0.1.55', stamp, kickstart, keyd }),
+    { broker: 'held', daemon: 'absent', keyd: 'absent', downgrade: { from: '0.1.60', to: '0.1.55' } });
+  // A moved copy of an older app is held too: nothing is re-registered.
+  const moved = { B: plist('/Users/me/Downloads/GeniusBar.app/Contents/MacOS/node', entry), D: '<plist/>' };
+  assert.deepEqual(await refreshServices({ units, read: (f) => moved[f], node, commsEntry: entry,
+    cli: none.run, bot: none.run, version: '0.1.55', stamp, kickstart }),
+    { broker: 'held', daemon: 'held', downgrade: { from: '0.1.60', to: '0.1.55' } });
+  assert.deepEqual(none.calls, []);
+});
+
+test('an accepted downgrade restarts the services and moves the stamp down', async () => {
+  const kicks = [];
+  const stamp = { version: '0.1.60', read: async () => stamp.version, write: async (v) => { stamp.version = v; } };
+  const bot = fake({ 'daemon install --json': { label: 'app.geniusbar.agent-bot', changed: false, loaded: true } });
+  const current = { B: plist(node, entry), D: '<plist/>' };
+  assert.deepEqual(await refreshServices({ units, read: (f) => current[f], node, commsEntry: entry, cli: fake({}).run, bot: bot.run,
+    version: '0.1.55', stamp, kickstart: async (which) => { kicks.push(which); return true; }, allowDowngrade: true }),
+    { broker: 'restarted', daemon: 'restarted' });
+  assert.deepEqual(kicks, ['broker', 'daemon']);
+  assert.equal(stamp.version, '0.1.55');
+});
+
+test('migrate refuses another install newer than the bundled engines before stopping anything', async () => {
+  const newer = brewBroker.replace('/Cellar/agent-comms/0.3.1/', '/Cellar/agent-comms/0.3.99/');
+  const host = launchd({ [foreign.broker.plist]: newer, [foreign.daemon.plist]: brewDaemon });
+  const none = fake({});
+  await assert.rejects(migrateServices({ foreign, ...host, cli: none.run, bot: none.run, bundled: { broker: '0.3.14', daemon: '0.10.51' }, ...fast }), (error) => {
+    assert.equal(error.code, 'migrate-downgrade');
+    assert.match(error.message, /broker 0\.3\.99 \(GeniusBar bundles 0\.3\.14\)/);
+    assert.match(error.message, /update GeniusBar first/);
+    return true;
+  });
+  assert.deepEqual(host.log, []);
+  assert.deepEqual(none.calls, []);
+});
+
+test('migrate moves an older install, and one whose version it cannot read', async () => {
+  const host = launchd({ [foreign.broker.plist]: brewBroker, [foreign.daemon.plist]: brewDaemon });
+  const cli = fake({ 'broker install': { installed: true }, 'broker pairings': { ok: true } });
+  const bot = fake({ 'daemon install --json': { label: 'l' }, 'daemon status --json': { running: true } });
+  // brewBroker is 0.3.1 and brewDaemon names no version: both move.
+  assert.deepEqual(await migrateServices({ foreign, ...host, cli: cli.run, bot: bot.run, bundled: { broker: '0.3.14', daemon: '0.10.51' }, ...fast }),
+    { broker: 'migrated', daemon: 'migrated' });
 });
