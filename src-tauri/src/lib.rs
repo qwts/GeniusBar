@@ -499,6 +499,7 @@ pub fn run() {
             bridge::soul_env,
             bridge::soul_runtimes_install,
             bridge::soul_env_migrate,
+            bridge::soul_env_clean,
             bridge::soul_revision_prepare,
             bridge::soul_revision_discard,
             bridge::soul_revision_edit,

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { RuntimeInstall, SoulEnvironment } from '../bridge';
+import type { RuntimeInstall, SoulCleanRow, SoulEnvironment } from '../bridge';
 import { sampleEnvironments } from './fixtures';
 import {
-  componentRows, environmentActions, environmentState, failedStep, harnessRows, historySummary, installOutcome, installProgress, installReducer, installSummary,
-  memoryContinuity, migrationRequired, missingRuntimes, nextStep, planInstall, providerRows, runtimeRows, secretRows, toolSignIns, type InstallRun,
+  cleanGroups, componentRows, environmentActions, environmentState, failedStep, formatBytes, harnessRows, historySummary, installOutcome, installProgress, installReducer, installSummary,
+  memoryContinuity, migrationRequired, migrationStepStatus, missingRuntimes, nextStep, pendingMigrationSteps, planInstall, providerRows, refusalOf, runtimeRows, secretRows, toolSignIns, type InstallRun,
 } from './environment';
 
 const luna = sampleEnvironments.agent_p;
@@ -88,19 +88,60 @@ describe('rows from the descriptor', () => {
 });
 
 describe('capability-gated actions', () => {
+  const none = { install: null, adopt: null, migrateSpace: false, clean: false, complete: false };
+
   it('offers install, adopt and migrate only with the capability and the engine-listed action', () => {
-    expect(environmentActions(luna)).toEqual({ install: [{ name: 'node', version: '24.11.1', reason: 'not provisioned' }], adopt: 'codex', migrateSpace: true });
+    expect(environmentActions(luna)).toEqual({ install: [{ name: 'node', version: '24.11.1', reason: 'not provisioned' }], adopt: 'codex', migrateSpace: true, clean: true, complete: true });
     // The older engine lists the same missing runtime but no capability: nothing is offered.
-    expect(environmentActions(scout)).toEqual({ install: null, adopt: null, migrateSpace: false });
-    expect(environmentActions(withCaps(luna, ['env', 'runtimes']))).toEqual({ install: [{ name: 'node', version: '24.11.1', reason: 'not provisioned' }], adopt: null, migrateSpace: false });
+    expect(environmentActions(scout)).toEqual(none);
+    expect(environmentActions(withCaps(luna, ['env', 'runtimes']))).toEqual({ ...none, install: [{ name: 'node', version: '24.11.1', reason: 'not provisioned' }] });
     // A capability without the problem listing its action offers nothing either.
-    expect(environmentActions({ ...luna, readiness: { ready: true, problems: [] } })).toEqual({ install: null, adopt: null, migrateSpace: false });
-    const noAction = { ...luna, readiness: { ...luna.readiness, problems: luna.readiness.problems.map((p) => ({ ...p, action: null })) } };
-    expect(environmentActions(noAction)).toEqual({ install: null, adopt: null, migrateSpace: false });
+    expect(environmentActions({ ...withCaps(luna, ['env', 'runtimes', 'tool-homes', 'memory']), readiness: { ready: true, problems: [] } })).toEqual(none);
+    const noAction = { ...withCaps(luna, ['env', 'runtimes', 'tool-homes', 'memory']), readiness: { ...luna.readiness, problems: luna.readiness.problems.map((p) => ({ ...p, action: null })) } };
+    expect(environmentActions(noAction)).toEqual(none);
+  });
+
+  it('offers the clean on its capability alone, and the completion only with a step still to finish', () => {
+    expect(environmentActions(withCaps(luna, ['env-clean']))).toEqual({ ...none, clean: true });
+    expect(environmentActions(withCaps(luna, ['migrate-complete']))).toEqual({ ...none, complete: true });
+    const finished = { ...withCaps(luna, ['migrate-complete']), migration: { ...luna.migration, steps: luna.migration.steps.map((s) => ({ ...s, status: s.id === 'space-into-soul' ? 'done' : 'skipped' })) } };
+    expect(environmentActions(finished)).toEqual(none);
+    expect(pendingMigrationSteps(luna).map((s) => s.id)).toEqual(['space-into-soul', 'adopt-host-signin:codex']);
+    expect(pendingMigrationSteps(finished)).toEqual([]);
+    // An interrupted phase is still pending.
+    expect(pendingMigrationSteps({ ...luna, migration: { ...luna.migration, steps: [{ id: 'space-into-soul', status: 'copying', from: null, to: null }] } }).length).toBe(1);
   });
 
   it('never gates on the engine version', () => {
-    expect(environmentActions({ ...withCaps(luna, []), engine: { ...luna.engine, version: '99.0.0', capabilities: [] } })).toEqual({ install: null, adopt: null, migrateSpace: false });
+    expect(environmentActions({ ...withCaps(luna, []), engine: { ...luna.engine, version: '99.0.0', capabilities: [] } })).toEqual(none);
+  });
+});
+
+describe('the clean and completion helpers', () => {
+  const row = (component: string, relative: string, files: number | null, bytes: number | null): SoulCleanRow =>
+    ({ component, relative, path: `/s/${relative}`, classification: 'cache', retention: 'reconstructible', kind: 'cache-entry', files, bytes, reason: null, error: null });
+
+  it('groups the rows by component with the counts summed from the rows, in the engine order', () => {
+    const groups = cleanGroups([row('cache', 'a', 1, 12), row('runtimes', 'r', 3, 900), row('cache', 'b', 2, 30), row('temp', 't', null, null)]);
+    expect(groups.map((g) => [g.component, g.files, g.bytes, g.rows.map((r) => r.relative)])).toEqual([
+      ['cache', 3, 42, ['a', 'b']], ['runtimes', 3, 900, ['r']], ['temp', 0, 0, ['t']],
+    ]);
+    expect(cleanGroups([])).toEqual([]);
+  });
+
+  it('formats sizes for a line of text, never inventing one', () => {
+    expect([formatBytes(null), formatBytes(0), formatBytes(1023), formatBytes(1024), formatBytes(1_572_864), formatBytes(48_234_496), formatBytes(5 * 1024 ** 3)])
+      .toEqual(['—', '0 B', '1023 B', '1.0 KB', '1.5 MB', '46 MB', '5.0 GB']);
+  });
+
+  it("keeps the engine's refusal with its action, and leaves the action out when the engine named none", () => {
+    expect(refusalOf({ code: 'soul-running', message: 'agent_p is running', action: 'agent-bot soul stop agent_p' })).toEqual({ code: 'soul-running', message: 'agent_p is running', action: 'agent-bot soul stop agent_p' });
+    expect(refusalOf({ code: 'clean-component-durable', message: 'memory is durable', action: '' })).toEqual({ code: 'clean-component-durable', message: 'memory is durable', action: null });
+    expect(refusalOf(new Error('boom'))).toEqual({ code: 'failed', message: 'boom', action: null });
+  });
+
+  it("maps a migration step's status to the handoff's four states, anything else shown as the engine said", () => {
+    expect(['done', 'failed', 'skipped', 'pending', 'copying', null].map(migrationStepStatus)).toEqual(['completed', 'failed', 'skipped', 'not-started', 'other', 'other']);
   });
 });
 

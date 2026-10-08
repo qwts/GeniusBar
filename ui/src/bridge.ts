@@ -12,10 +12,13 @@ export type BridgeMethod = 'census' | 'send' | 'inbox' | 'ack' | 'launch' | 'lau
 /** An error from the bridge, the shell, or agent-comms, with its stable code. */
 export class BridgeError extends Error {
   readonly code: string;
-  constructor(code: string, message: string) {
+  /** The command the engine names to recover (`agent-bot soul stop <id>` for `soul-running`), shown as text and never run here. */
+  readonly action: string | null;
+  constructor(code: string, message: string, action: string | null = null) {
     super(message);
     this.name = 'BridgeError';
     this.code = code;
+    this.action = action;
   }
 }
 
@@ -1479,9 +1482,10 @@ export function normalizeSoulProfile(raw: unknown): SoulProfile | null {
 
 /** The shell's error as a BridgeError, with `fallback` for a code it did not give. */
 function failureAs(error: unknown, fallback: string): BridgeError {
-  const e = error as { code?: unknown; message?: unknown };
+  const e = error as { code?: unknown; message?: unknown; action?: unknown };
   return new BridgeError(typeof e?.code === 'string' ? e.code : fallback,
-    typeof e?.message === 'string' ? e.message : String(error));
+    typeof e?.message === 'string' ? e.message : String(error),
+    typeof e?.action === 'string' && e.action.trim() !== '' ? e.action : null);
 }
 
 const profileFailure = (error: unknown): BridgeError => failureAs(error, 'soul-profile-failed');
@@ -1814,8 +1818,12 @@ export async function installSoulRuntime(agentId: string, runtime: string, invok
   return result;
 }
 
-/** The two `soul env migrate` operations (agent-bot-identity #583 slices 2 and 5). */
-export type MigrationKind = 'adopt-host-signin' | 'space-into-soul';
+/**
+ * The `soul env migrate` operations the app runs (agent-bot-identity #583
+ * slices 2, 5 and 6): the two single steps, and `complete`, which finishes
+ * every step the descriptor lists as pending or stopped short.
+ */
+export type MigrationKind = 'adopt-host-signin' | 'space-into-soul' | 'complete';
 
 export interface EnvironmentMigrationStep {
   id: string;
@@ -1854,19 +1862,117 @@ export function normalizeEnvironmentMigration(raw: unknown): EnvironmentMigratio
 
 /**
  * Runs one migration for the soul: adopting the host's sign-in for a
- * harness into its tool home, or moving its Agent Space inside. Owner-gated
- * by the engine itself. Rejects with a BridgeError (`space-migrate-busy`
- * while the soul runs).
+ * harness into its tool home, moving its Agent Space inside, or `complete`
+ * for every pending step at once (`decision` `planned` with `plan`, which
+ * is read-only and asks nobody, else `completed` / `skipped` / `failed`).
+ * Owner-gated by the engine itself. Rejects with a BridgeError
+ * (`space-migrate-busy` or `soul-running` while the soul runs, the
+ * engine's action on it).
  */
-export async function migrateSoulEnvironment(agentId: string, kind: MigrationKind, harness: string | null = null, invokeImpl: typeof invoke = invoke): Promise<EnvironmentMigration> {
+export async function migrateSoulEnvironment(agentId: string, kind: MigrationKind, harness: string | null = null, invokeImpl: typeof invoke = invoke, plan = false): Promise<EnvironmentMigration> {
   if (!inApp() && invokeImpl === invoke) throw new BridgeError('soul-env-migrate-unavailable', 'not in the app');
   let raw: unknown;
   try {
-    raw = await invokeImpl<unknown>('soul_env_migrate', { agent: agentId, kind, harness });
+    raw = await invokeImpl<unknown>('soul_env_migrate', { agent: agentId, kind, harness, plan });
   } catch (error) {
     throw failureAs(error, 'soul-env-migrate-failed');
   }
   const result = normalizeEnvironmentMigration(raw);
   if (!result) throw new BridgeError('soul-env-migrate-failed', 'agent-bot did not report the migration');
+  return result;
+}
+
+/** One path a clean lists (`soul env clean`): where it is, what the contract says of it, how much it holds. */
+export interface SoulCleanRow {
+  /** The descriptor component it belongs to (`cache`, `temp`, `runtimes`; `memory` for a kept space staging). */
+  component: string;
+  /** Root-relative, as the engine names it. */
+  relative: string;
+  path: string | null;
+  classification: string | null;
+  retention: SoulRetention | null;
+  /** `cache-entry`, `temp-entry`, `revision-staging`, `runtime-cache`, `install-staging`, `link`, `space-staging`. */
+  kind: string | null;
+  files: number | null;
+  bytes: number | null;
+  /** Why a kept row stays; null on a removable or removed one. */
+  reason: string | null;
+  /** The error code a failed removal hit; null otherwise. */
+  error: string | null;
+}
+
+/**
+ * The engine's report of a clean (#268; agent-bot-identity #583 slice 6):
+ * with `--plan`, `applied` false and what would go (`removable`) against
+ * what stays and why (`kept`); after the owner-gated apply, `applied` true
+ * with `decision` `cleaned` / `nothing` / `failed`, what went (`removed`)
+ * and what could not (`failed`, with its error). Paths, counts and sizes
+ * only, never a file's contents, and nothing durable is ever listed as
+ * removable: the engine classifies each path and the app repeats it.
+ */
+export interface SoulEnvironmentClean {
+  agentId: string;
+  soulDir: string | null;
+  applied: boolean;
+  decision: string;
+  components: string[];
+  removable: SoulCleanRow[];
+  removed: SoulCleanRow[];
+  failed: SoulCleanRow[];
+  kept: SoulCleanRow[];
+  files: number | null;
+  bytes: number | null;
+}
+
+function cleanRows(value: unknown): SoulCleanRow[] {
+  return records(value).flatMap((row): SoulCleanRow[] => {
+    const component = text(row.component);
+    const relative = text(row.relative);
+    if (!component || !relative) return [];
+    const retention = row.retention;
+    return [{
+      component, relative, path: text(row.path), classification: text(row.classification),
+      retention: RETENTIONS.includes(retention as SoulRetention) ? retention as SoulRetention : null,
+      kind: text(row.kind), files: count(row.files), bytes: count(row.bytes), reason: text(row.reason), error: text(row.error),
+    }];
+  });
+}
+
+/** The clean report with its shape checked; null when the answer is not one. */
+export function normalizeSoulEnvironmentClean(raw: unknown): SoulEnvironmentClean | null {
+  if (!isRecord(raw) || typeof raw.agentId !== 'string' || typeof raw.applied !== 'boolean' || typeof raw.decision !== 'string' || !Array.isArray(raw.removable)) return null;
+  return {
+    agentId: raw.agentId,
+    soulDir: text(raw.soulDir),
+    applied: raw.applied,
+    decision: raw.decision,
+    components: strings(raw.components),
+    removable: cleanRows(raw.removable),
+    removed: cleanRows(raw.removed),
+    failed: cleanRows(raw.failed),
+    kept: cleanRows(raw.kept),
+    files: count(raw.files),
+    bytes: count(raw.bytes),
+  };
+}
+
+/**
+ * Plans or applies a clean of the soul's reconstructible and disposable
+ * files (`soul env clean`). `plan` is read-only; the apply is owner-gated
+ * by the engine itself and refused `soul-running` while the soul runs (the
+ * engine's action on the error). `components` narrows it to `cache`,
+ * `temp` or `runtimes`; the engine refuses anything else. Rejects with a
+ * BridgeError; `soul-env-clean-unsupported` is a bundle without the command.
+ */
+export async function soulEnvClean(agentId: string, { plan = false, components = null }: { plan?: boolean; components?: string[] | null } = {}, invokeImpl: typeof invoke = invoke): Promise<SoulEnvironmentClean> {
+  if (!inApp() && invokeImpl === invoke) throw new BridgeError('soul-env-clean-unavailable', 'not in the app');
+  let raw: unknown;
+  try {
+    raw = await invokeImpl<unknown>('soul_env_clean', { agent: agentId, plan, components });
+  } catch (error) {
+    throw failureAs(error, 'soul-env-clean-failed');
+  }
+  const result = normalizeSoulEnvironmentClean(raw);
+  if (!result) throw new BridgeError('soul-env-clean-failed', 'agent-bot did not report the clean');
   return result;
 }

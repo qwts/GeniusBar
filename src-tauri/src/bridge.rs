@@ -72,6 +72,11 @@ const HEALTHY_RUN: Duration = Duration::from_secs(10);
 pub struct BridgeError {
     pub code: String,
     pub message: String,
+    /// The command the engine names to recover (`agent-bot soul stop <id>`
+    /// for `soul-running`), as its coded refusal carries it. The page shows
+    /// it as text and never runs it; absent for every other failure.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
 }
 
 impl BridgeError {
@@ -79,7 +84,13 @@ impl BridgeError {
         Self {
             code: code.into(),
             message: message.into(),
+            action: None,
         }
+    }
+
+    fn with_action(mut self, action: &str) -> Self {
+        self.action = Some(action.into());
+        self
     }
 }
 
@@ -133,6 +144,7 @@ pub fn parse_reply(line: &[u8]) -> Option<(u64, Reply)> {
         Err(BridgeError {
             code,
             message: field("message"),
+            action: None,
         }),
     ))
 }
@@ -1711,7 +1723,13 @@ fn parse_agent_bot_json(
                 .get("message")
                 .and_then(Value::as_str)
                 .unwrap_or(fallback);
-            return Err(BridgeError::new(code, message));
+            let refusal = BridgeError::new(code, message);
+            // The engine's recovery command travels with its refusal (an
+            // empty one is no command), so the page can show it as text.
+            return Err(match error.get("action").and_then(Value::as_str) {
+                Some(action) if !action.trim().is_empty() => refusal.with_action(action),
+                _ => refusal,
+            });
         }
     }
     let message = last_line(stderr);
@@ -5111,18 +5129,25 @@ fn parse_soul_runtimes_install(stdout: &[u8], stderr: &[u8]) -> Result<Value, Br
 /// Space inside the soul (copied, verified, source retired, never deleted;
 /// refused while the soul runs, `space-migrate-busy`). Answered as printed
 /// (`{schemaVersion, agentId, soulDir, operation, decision, steps[], root}`).
+/// `--complete --json` (agent-bot 0.10.54, slice 6) finishes every step the
+/// descriptor's `migration.steps` lists as not done or skipped, through the
+/// mechanism each step's own verb uses, and `--complete --plan --json` is the
+/// read-only list of those steps with a note each (no gate, nothing
+/// written); refused `soul-running` while the soul runs, with the engine's
+/// action (`agent-bot soul stop <id>`) carried on the error.
 /// Owner-gated by the engine itself, as `soul remove`. The section offers
-/// each only behind its capability (`tool-homes`, `memory`) and the
-/// problem the engine lists; an older bundle without `soul env migrate`
-/// maps to `soul-env-migrate-unsupported`.
+/// each only behind its capability (`tool-homes`, `memory`,
+/// `migrate-complete`) and the problem or step the engine lists; an older
+/// bundle without `soul env migrate` maps to `soul-env-migrate-unsupported`.
 #[tauri::command]
 pub async fn soul_env_migrate<R: Runtime>(
     app: AppHandle<R>,
     agent: String,
     kind: String,
     harness: Option<String>,
+    plan: Option<bool>,
 ) -> Result<Value, BridgeError> {
-    let args = soul_env_migrate_args(&agent, &kind, harness.as_deref())?;
+    let args = soul_env_migrate_args(&agent, &kind, harness.as_deref(), plan.unwrap_or(false))?;
     let output = run_agent_bot(&app, args, "soul-env-migrate-unavailable").await?;
     parse_soul_env_migrate(&output.stdout, &output.stderr)
 }
@@ -5131,14 +5156,29 @@ fn soul_env_migrate_args(
     agent: &str,
     kind: &str,
     harness: Option<&str>,
+    plan: bool,
 ) -> Result<Vec<std::ffi::OsString>, BridgeError> {
     let invalid = |message: &str| BridgeError::new("soul-env-migrate-invalid", message);
     if !plain_argument(agent) {
         return Err(invalid("agent must be an agent id"));
     }
+    // Only `--complete` has a read-only plan in the engine; the two older
+    // operations run at once, so a plan asked of them is a caller's mistake.
+    if plan && kind != "complete" {
+        return Err(invalid("only complete takes a plan"));
+    }
     let mut args: Vec<std::ffi::OsString> =
         vec!["soul".into(), "env".into(), "migrate".into(), agent.into()];
     match kind {
+        "complete" => {
+            if harness.is_some() {
+                return Err(invalid("completing the migration takes no harness"));
+            }
+            args.push("--complete".into());
+            if plan {
+                args.push("--plan".into());
+            }
+        }
         "adopt-host-signin" => {
             args.push("--adopt-host-signin".into());
             if let Some(harness) = harness {
@@ -5159,7 +5199,11 @@ fn soul_env_migrate_args(
             }
             args.push("--space-into-soul".into());
         }
-        _ => return Err(invalid("kind must be adopt-host-signin or space-into-soul")),
+        _ => {
+            return Err(invalid(
+                "kind must be adopt-host-signin, space-into-soul or complete",
+            ))
+        }
     }
     args.push("--json".into());
     Ok(args)
@@ -5181,6 +5225,110 @@ fn parse_soul_env_migrate(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeE
         |value| {
             value.get("operation").is_some_and(Value::is_string)
                 && value.get("steps").is_some_and(Value::is_array)
+        },
+    )
+}
+
+/// Cleans the soul's reconstructible and disposable files (#268; agent-bot
+/// 0.10.54, agent-bot-identity #583 slice 6): `soul env clean <agentId>
+/// [--plan] [--component cache|temp|runtimes]... --json`. With `plan` the
+/// engine lists what would go, read-only, with sizes (`applied: false`,
+/// `decision: planned`, no gate, nothing written); without it the engine
+/// owner-gates the removal itself (its consent dialog, Touch ID) as `soul
+/// remove`, refuses `soul-running` while the soul runs (the action
+/// `agent-bot soul stop <id>` rides on the error), and answers `applied:
+/// true` with `decision` `cleaned | nothing | failed`. Both are printed as
+/// `{schemaVersion, agentId, soulDir, applied, decision, components[],
+/// removable[], removed[], failed[], kept[], files, bytes, journal}`, passed
+/// through as printed: paths, counts and reasons, never a file's contents.
+/// Nothing durable is ever named removable by the engine, and this command
+/// decides nothing of that itself. The section offers it only when the
+/// descriptor lists the `env-clean` capability. An older bundle without
+/// `soul env clean` answers its `soul env` usage line (a JSON refusal with
+/// `--json`), which maps to `soul-env-clean-unsupported`.
+#[tauri::command]
+pub async fn soul_env_clean<R: Runtime>(
+    app: AppHandle<R>,
+    agent: String,
+    plan: bool,
+    components: Option<Vec<String>>,
+) -> Result<Value, BridgeError> {
+    let args = soul_env_clean_args(&agent, plan, components.as_deref().unwrap_or(&[]))?;
+    let output = run_agent_bot(&app, args, "soul-env-clean-unavailable").await?;
+    parse_soul_env_clean(&output.stdout, &output.stderr)
+}
+
+fn soul_env_clean_args(
+    agent: &str,
+    plan: bool,
+    components: &[String],
+) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    let invalid = |message: &str| BridgeError::new("soul-env-clean-invalid", message);
+    if !plain_argument(agent) {
+        return Err(invalid("agent must be an agent id"));
+    }
+    let mut args: Vec<std::ffi::OsString> =
+        vec!["soul".into(), "env".into(), "clean".into(), agent.into()];
+    if plan {
+        args.push("--plan".into());
+    }
+    for component in components {
+        // The engine accepts `cache`, `temp` or `runtimes` and refuses the
+        // rest itself (`clean-component-durable`); here only the shape.
+        if !plain_argument(component)
+            || !component
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+        {
+            return Err(invalid("component must be a component id"));
+        }
+        args.push("--component".into());
+        args.push(component.into());
+    }
+    args.push("--json".into());
+    Ok(args)
+}
+
+/// True when the answer is an older agent-bot's usage line that does not
+/// list `soul env clean`: the `soul` line on stderr, or, since the bundle
+/// has `soul env` and that command took `clean` for a soul name, its own
+/// usage line as a JSON refusal on stdout.
+fn soul_env_clean_missing(stdout: &[u8], stderr: &[u8]) -> bool {
+    if soul_subcommand_missing(stdout, stderr, "soul env clean") {
+        return true;
+    }
+    serde_json::from_str::<Value>(&last_line(stdout))
+        .ok()
+        .and_then(|value| {
+            value
+                .get("error")
+                .and_then(|error| error.get("message"))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .is_some_and(|message| {
+            message.contains("usage: agent-bot soul env ") && !message.contains("soul env clean")
+        })
+}
+
+fn parse_soul_env_clean(stdout: &[u8], stderr: &[u8]) -> Result<Value, BridgeError> {
+    if soul_env_clean_missing(stdout, stderr) {
+        return Err(BridgeError::new(
+            "soul-env-clean-unsupported",
+            "this agent-bot cannot clean a soul environment",
+        ));
+    }
+    parse_agent_bot_json(
+        stdout,
+        stderr,
+        "soul-env-clean-failed",
+        "agent-bot soul env clean: ",
+        "agent-bot did not report the clean",
+        |value| {
+            value.get("applied").is_some_and(Value::is_boolean)
+                && value.get("decision").is_some_and(Value::is_string)
+                && value.get("removable").is_some_and(Value::is_array)
+                && value.get("kept").is_some_and(Value::is_array)
         },
     )
 }
@@ -5249,6 +5397,7 @@ mod soul_env_operations_tests {
                 "runtime-download-failed",
                 "agent_p node: could not download https://nodejs.org/x (ENOTFOUND); check the network and retry"
             )
+            .with_action("agent-bot soul runtimes install agent_p --runtime node")
         );
         assert_eq!(
             parse_soul_runtimes_install(
@@ -5281,7 +5430,7 @@ mod soul_env_operations_tests {
     #[test]
     fn builds_the_migrate_arguments_for_each_operation() {
         assert_eq!(
-            soul_env_migrate_args("agent_p", "adopt-host-signin", Some("codex")).unwrap(),
+            soul_env_migrate_args("agent_p", "adopt-host-signin", Some("codex"), false).unwrap(),
             vec![
                 "soul",
                 "env",
@@ -5294,7 +5443,7 @@ mod soul_env_operations_tests {
             ]
         );
         assert_eq!(
-            soul_env_migrate_args("agent_p", "adopt-host-signin", None).unwrap(),
+            soul_env_migrate_args("agent_p", "adopt-host-signin", None, false).unwrap(),
             vec![
                 "soul",
                 "env",
@@ -5305,7 +5454,7 @@ mod soul_env_operations_tests {
             ]
         );
         assert_eq!(
-            soul_env_migrate_args("agent_p", "space-into-soul", None).unwrap(),
+            soul_env_migrate_args("agent_p", "space-into-soul", None, false).unwrap(),
             vec![
                 "soul",
                 "env",
@@ -5325,7 +5474,40 @@ mod soul_env_operations_tests {
             ("agent_p", "adopt-host-signin", Some("co dex")),
         ] {
             assert_eq!(
-                soul_env_migrate_args(agent, kind, harness)
+                soul_env_migrate_args(agent, kind, harness, false)
+                    .unwrap_err()
+                    .code,
+                "soul-env-migrate-invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn builds_the_complete_arguments_with_and_without_a_plan() {
+        assert_eq!(
+            soul_env_migrate_args("agent_p", "complete", None, true).unwrap(),
+            vec![
+                "soul",
+                "env",
+                "migrate",
+                "agent_p",
+                "--complete",
+                "--plan",
+                "--json"
+            ]
+        );
+        assert_eq!(
+            soul_env_migrate_args("agent_p", "complete", None, false).unwrap(),
+            vec!["soul", "env", "migrate", "agent_p", "--complete", "--json"]
+        );
+        // No harness with complete; no plan for the operations that run at once.
+        for (kind, harness, plan) in [
+            ("complete", Some("codex"), false),
+            ("space-into-soul", None, true),
+            ("adopt-host-signin", Some("codex"), true),
+        ] {
+            assert_eq!(
+                soul_env_migrate_args("agent_p", kind, harness, plan)
                     .unwrap_err()
                     .code,
                 "soul-env-migrate-invalid"
@@ -5360,6 +5542,7 @@ mod soul_env_operations_tests {
                 "space-migrate-busy",
                 "agent_p is running (a turn in flight or a warm harness); stop it before moving its Agent Space"
             )
+            .with_action("agent-bot soul stop agent_p")
         );
         assert_eq!(
             parse_soul_env_migrate(
@@ -5382,6 +5565,192 @@ mod soul_env_operations_tests {
             .unwrap_err()
             .code,
             "soul-env-migrate-failed"
+        );
+    }
+
+    /// agent-bot 0.10.54's `soul env migrate agent_p --complete --plan
+    /// --json` with a space move interrupted and a sign-in adoption pending.
+    const COMPLETE_PLAN: &[u8] = br#"{"schemaVersion":1,"agentId":"agent_p","soulDir":"/s","operation":"complete","decision":"planned","steps":[{"id":"space-into-soul","status":"copying","from":"/Users/me/space/luna","to":"/s/.soul-state/space","at":"2026-10-07T10:00:00.000Z","note":"interrupted while copying; resumed"},{"id":"adopt-host-signin:codex","status":"pending","from":"/Users/me/.codex","to":"/s/.soul-state/tools/codex","note":"not started"}],"root":"/s"}
+"#;
+
+    #[test]
+    fn passes_the_complete_plan_and_report_through_as_printed() {
+        let planned = parse_soul_env_migrate(COMPLETE_PLAN, b"").unwrap();
+        assert_eq!(planned["operation"], "complete");
+        assert_eq!(planned["decision"], "planned");
+        assert_eq!(
+            planned["steps"][0]["note"],
+            "interrupted while copying; resumed"
+        );
+        assert_eq!(
+            planned,
+            serde_json::from_slice::<Value>(COMPLETE_PLAN).unwrap()
+        );
+        let done = parse_soul_env_migrate(
+            br#"{"schemaVersion":1,"agentId":"agent_p","soulDir":"/s","operation":"complete","decision":"completed","steps":[{"id":"space-into-soul","status":"done","note":"copied 2 file(s), 0 link(s); source retired to /Users/me/space/luna.retired-2026-10-07"},{"id":"adopt-host-signin:codex","status":"done","note":"copied auth.json"}],"root":"/s"}
+"#,
+            b"",
+        )
+        .unwrap();
+        assert_eq!(done["decision"], "completed");
+        assert_eq!(done["steps"][1]["status"], "done");
+        // Refused while the soul runs: the engine's action rides along, as text.
+        assert_eq!(
+            parse_soul_env_migrate(
+                b"{\"error\":{\"code\":\"soul-running\",\"message\":\"agent_p is running (a turn in flight or a warm harness); stop it before completing its migration\",\"action\":\"agent-bot soul stop agent_p\"}}\n",
+                b""
+            )
+            .unwrap_err(),
+            BridgeError::new(
+                "soul-running",
+                "agent_p is running (a turn in flight or a warm harness); stop it before completing its migration"
+            )
+            .with_action("agent-bot soul stop agent_p")
+        );
+        // A bundle with `soul env migrate` but no `--complete` (before
+        // 0.10.54) refuses the flag with its usage line; the page never
+        // asks without the `migrate-complete` capability, so this stays a
+        // plain failure rather than an unsupported.
+        assert_eq!(
+            parse_soul_env_migrate(
+                b"{\"error\":{\"code\":\"soul-env-migrate-failed\",\"message\":\"usage: agent-bot soul env migrate <agentId|name> --adopt-host-signin [--harness NAME] | --space-into-soul | --template-name [--plan] [--json] [--principal-stdin]\"}}\n",
+                b""
+            )
+            .unwrap_err()
+            .code,
+            "soul-env-migrate-failed"
+        );
+    }
+
+    #[test]
+    fn builds_the_clean_arguments_for_a_plan_and_an_apply() {
+        assert_eq!(
+            soul_env_clean_args("agent_p", true, &[]).unwrap(),
+            vec!["soul", "env", "clean", "agent_p", "--plan", "--json"]
+        );
+        assert_eq!(
+            soul_env_clean_args("agent_p", false, &["cache".to_string(), "temp".to_string()])
+                .unwrap(),
+            vec![
+                "soul",
+                "env",
+                "clean",
+                "agent_p",
+                "--component",
+                "cache",
+                "--component",
+                "temp",
+                "--json"
+            ]
+        );
+        for (agent, components) in [
+            ("", vec![]),
+            ("--plan", vec![]),
+            ("a\nb", vec![]),
+            ("agent_p", vec!["".to_string()]),
+            ("agent_p", vec!["--principal-stdin".to_string()]),
+            ("agent_p", vec!["cache temp".to_string()]),
+            ("agent_p", vec!["../memory".to_string()]),
+        ] {
+            assert_eq!(
+                soul_env_clean_args(agent, false, &components)
+                    .unwrap_err()
+                    .code,
+                "soul-env-clean-invalid"
+            );
+        }
+    }
+
+    /// agent-bot 0.10.54's `soul env clean agent_p --plan --json` (paths
+    /// shortened): two cache entries removable, a fresh revision staging kept.
+    const CLEAN_PLAN: &[u8] = br#"{"schemaVersion":1,"agentId":"agent_p","soulDir":"/s","applied":false,"decision":"planned","components":["cache","temp","runtimes"],"removable":[{"component":"cache","path":"/s/.soul-state/cache/index.db","relative":".soul-state/cache/index.db","classification":"cache","retention":"reconstructible","kind":"cache-entry","files":1,"bytes":12},{"component":"runtimes","path":"/s/.soul-state/runtimes/node/npm-cache","relative":".soul-state/runtimes/node/npm-cache","classification":"runtime","retention":"reconstructible","kind":"runtime-cache","files":1,"bytes":9}],"removed":[],"failed":[],"kept":[{"component":"temp","path":"/s/.soul-state/tmp/revision-00000000-0000-4000-8000-000000000001","relative":".soul-state/tmp/revision-00000000-0000-4000-8000-000000000001","classification":"temp","retention":"disposable","kind":"revision-staging","reason":"a revision staging within its 24-hour window may be a host's edit in progress; agent-bot soul revision prepare --discard removes it"}],"files":2,"bytes":21,"journal":".soul-state/clean.json"}
+"#;
+    /// agent-bot 0.10.52's `soul env` usage line, which `soul env clean`
+    /// falls through to on that bundle (it has no `clean`): a JSON refusal
+    /// on stdout, since `--json` was asked.
+    const OLD_ENV_USAGE_JSON: &[u8] = b"{\"error\":{\"code\":\"soul-env-failed\",\"message\":\"usage: agent-bot soul env <agentId|name> [--json] | soul env migrate <agentId|name> --adopt-host-signin [--harness NAME] | --space-into-soul | --template-name [--plan] [--json] [--principal-stdin]\"}}\n";
+
+    #[test]
+    fn passes_the_clean_plan_and_report_or_the_engines_refusal() {
+        let plan = parse_soul_env_clean(CLEAN_PLAN, b"").unwrap();
+        assert_eq!(plan["applied"], false);
+        assert_eq!(plan["decision"], "planned");
+        assert_eq!(plan["removable"][1]["kind"], "runtime-cache");
+        assert_eq!(plan["kept"][0]["kind"], "revision-staging");
+        assert_eq!(plan, serde_json::from_slice::<Value>(CLEAN_PLAN).unwrap());
+        let cleaned = parse_soul_env_clean(
+            br#"{"schemaVersion":1,"agentId":"agent_p","soulDir":"/s","applied":true,"decision":"failed","components":["cache"],"removable":[{"component":"cache","path":"/s/.soul-state/cache/index.db","relative":".soul-state/cache/index.db","classification":"cache","retention":"reconstructible","kind":"cache-entry","files":1,"bytes":12}],"removed":[],"failed":[{"component":"cache","path":"/s/.soul-state/cache/index.db","relative":".soul-state/cache/index.db","classification":"cache","retention":"reconstructible","kind":"cache-entry","files":1,"bytes":12,"error":"EACCES"}],"kept":[],"files":0,"bytes":0,"journal":".soul-state/clean.json"}
+"#,
+            b"",
+        )
+        .unwrap();
+        assert_eq!(cleaned["applied"], true);
+        assert_eq!(cleaned["failed"][0]["error"], "EACCES");
+        // The engine's coded refusals, with the action the page shows as text.
+        assert_eq!(
+            parse_soul_env_clean(
+                b"{\"error\":{\"code\":\"soul-running\",\"message\":\"agent_p is running (a turn in flight or a warm harness); stop it before cleaning its environment\",\"action\":\"agent-bot soul stop agent_p\"}}\n",
+                b""
+            )
+            .unwrap_err(),
+            BridgeError::new(
+                "soul-running",
+                "agent_p is running (a turn in flight or a warm harness); stop it before cleaning its environment"
+            )
+            .with_action("agent-bot soul stop agent_p")
+        );
+        assert_eq!(
+            parse_soul_env_clean(
+                b"{\"error\":{\"code\":\"clean-component-durable\",\"message\":\"memory is not a component a clean may remove\",\"action\":null}}\n",
+                b""
+            )
+            .unwrap_err(),
+            BridgeError::new(
+                "clean-component-durable",
+                "memory is not a component a clean may remove"
+            )
+        );
+        assert_eq!(
+            parse_soul_env_clean(
+                b"",
+                b"agent-bot soul env clean: the owner did not approve\n"
+            )
+            .unwrap_err(),
+            BridgeError::new("soul-env-clean-failed", "the owner did not approve")
+        );
+        // A descriptor is not a clean report.
+        assert_eq!(
+            parse_soul_env_clean(
+                b"{\"schemaVersion\":1,\"agentId\":\"agent_p\",\"engine\":{},\"components\":[]}\n",
+                b""
+            )
+            .unwrap_err(),
+            BridgeError::new(
+                "soul-env-clean-failed",
+                "agent-bot did not report the clean"
+            )
+        );
+        // Older bundles: the `soul` line on stderr, or `soul env`'s own
+        // line as a JSON refusal; both mean no `clean`.
+        assert_eq!(
+            parse_soul_env_clean(b"", OLD_USAGE).unwrap_err().code,
+            "soul-env-clean-unsupported"
+        );
+        assert_eq!(
+            parse_soul_env_clean(OLD_ENV_USAGE_JSON, b"")
+                .unwrap_err()
+                .code,
+            "soul-env-clean-unsupported"
+        );
+        // A bundle that has the command but refuses its arguments still has it.
+        assert_eq!(
+            parse_soul_env_clean(
+                b"{\"error\":{\"code\":\"soul-env-clean-failed\",\"message\":\"usage: agent-bot soul env clean <agentId|name> [--plan] [--component cache|temp|runtimes] [--json] [--principal-stdin]\"}}\n",
+                b""
+            )
+            .unwrap_err()
+            .code,
+            "soul-env-clean-failed"
         );
     }
 }

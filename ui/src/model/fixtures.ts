@@ -335,7 +335,7 @@ const lunaRoot = '/Users/user/Souls/Luna.soul';
 export const sampleEnvironments: Readonly<Record<string, SoulEnvironment>> = {
   agent_p: {
     schemaVersion: 1,
-    engine: { version: '0.10.52', contractVersion: 1, capabilities: ['env', 'revision-prepare', 'runtimes', 'providers', 'tool-homes', 'memory', 'history'] },
+    engine: { version: '0.10.54', contractVersion: 1, capabilities: ['env', 'revision-prepare', 'runtimes', 'providers', 'tool-homes', 'memory', 'history', 'migrate-complete', 'env-clean'] },
     identity: { agentId: 'agent_p', name: 'luna', displayName: 'Luna', status: 'active', harness: 'codex', revision: '2026.10.1', parentRevision: null, template: false, formatVersion: 2 },
     root: { soulDir: lunaRoot, soulsRoot: '/Users/user/Souls', source: 'environment', registered: true, marker: 'ok', copies: [], device: 16777229 },
     components: [

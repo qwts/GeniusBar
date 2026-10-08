@@ -161,10 +161,23 @@ const environmentSource: EnvironmentSource = {
     return { agentId, ready: environments[agentId].readiness.ready, installed: [runtime], skipped: [], harnesses: [],
       runtimes: [{ name: runtime, status: 'installed', version: typeof row.version === 'string' ? row.version : null, lastError: null }] };
   },
-  migrate: async (agentId, kind, harness) => {
+  migrate: async (agentId, kind, harness, plan = false) => {
     const env = environments[agentId];
     if (!env) throw new BridgeError('soul-not-found', 'Soul not found.');
     await new Promise((resolve) => setTimeout(resolve, 800));
+    if (kind === 'complete') {
+      // Every step still pending, as `--complete --plan` lists them with a note; the apply marks them done.
+      const pending = env.migration.steps.filter((s) => s.status !== 'done' && s.status !== 'skipped');
+      if (plan) return { agentId, operation: 'complete', decision: 'planned', steps: pending.map((s) => ({ ...s, note: s.status === 'pending' ? 'not started' : `interrupted while ${s.status}; resumed` })) };
+      if (pending.length === 0) return { agentId, operation: 'complete', decision: 'skipped', steps: [] };
+      environments[agentId] = {
+        ...env,
+        components: env.components.map((c) => (c.id === 'memory' ? { ...c, location: 'inside', contained: true, target: null } : c)),
+        readiness: { ...env.readiness, problems: env.readiness.problems.filter((p) => p.code !== 'memory-not-contained' && p.code !== 'tool-signin-missing') },
+        migration: { ...env.migration, status: 'none', steps: env.migration.steps.map((s) => ({ ...s, status: 'done' })) },
+      };
+      return { agentId, operation: 'complete', decision: 'completed', steps: pending.map((s) => ({ ...s, status: 'done', note: s.id === 'space-into-soul' ? 'copied 2 file(s), 0 link(s); source retired' : 'copied auth.json' })) };
+    }
     const id = kind === 'space-into-soul' ? 'space-into-soul' : `adopt-host-signin:${harness ?? env.harnesses.selected ?? ''}`;
     const code = kind === 'space-into-soul' ? 'memory-not-contained' : 'tool-signin-missing';
     const steps = env.migration.steps.map((s) => (s.id === id ? { ...s, status: 'done' } : s));
@@ -178,6 +191,27 @@ const environmentSource: EnvironmentSource = {
     };
     return { agentId, operation: kind, decision: kind === 'space-into-soul' ? 'migrated' : 'adopted',
       steps: steps.filter((s) => s.id === id).map((s) => ({ ...s, note: kind === 'space-into-soul' ? null : 'copied auth.json' })) };
+  },
+  // A clean as agent-bot 0.10.54 plans one: two cache entries and a runtime
+  // cache removable, a fresh revision staging kept; the apply "removes" them.
+  clean: async (agentId, { plan }) => {
+    const env = environments[agentId];
+    if (!env) throw new BridgeError('soul-not-found', 'Soul not found.');
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    const root = env.root.soulDir ?? '';
+    const row = (component: string, relative: string, classification: string, retention: 'reconstructible' | 'disposable', kind: string, files: number, bytes: number) =>
+      ({ component, relative, path: `${root}/${relative}`, classification, retention, kind, files, bytes, reason: null, error: null });
+    const removable = [
+      row('cache', '.soul-state/cache/index.db', 'cache', 'reconstructible', 'cache-entry', 1, 12288),
+      row('cache', '.soul-state/cache/skills', 'cache', 'reconstructible', 'cache-entry', 14, 1_572_864),
+      row('runtimes', '.soul-state/runtimes/node/npm-cache', 'runtime', 'reconstructible', 'runtime-cache', 212, 48_234_496),
+    ];
+    const kept = [{ ...row('temp', '.soul-state/tmp/revision-00000000-0000-4000-8000-000000000001', 'temp', 'disposable', 'revision-staging', 0, 0), files: null, bytes: null,
+      reason: "a revision staging within its 24-hour window may be a host's edit in progress; agent-bot soul revision prepare --discard removes it" }];
+    const files = removable.reduce((sum, r) => sum + r.files, 0);
+    const bytes = removable.reduce((sum, r) => sum + r.bytes, 0);
+    const base = { agentId, soulDir: root, components: ['cache', 'temp', 'runtimes'], removable, removed: [], failed: [], kept, files, bytes };
+    return plan ? { ...base, applied: false, decision: 'planned' } : { ...base, applied: true, decision: 'cleaned', removed: removable };
   },
 };
 
