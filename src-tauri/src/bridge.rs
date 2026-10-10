@@ -80,8 +80,7 @@ mod soul_dream_bridge_tests {
             parse_soul_dream_status(&status(), b"", AGENT).unwrap()["agentId"],
             AGENT
         );
-        let wrong_soul = status().iter().map(|b| *b).collect::<Vec<_>>();
-        let wrong_soul = String::from_utf8(wrong_soul)
+        let wrong_soul = String::from_utf8(status())
             .unwrap()
             .replace(AGENT, "agent_other");
         assert_eq!(
