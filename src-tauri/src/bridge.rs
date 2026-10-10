@@ -124,8 +124,10 @@ mod direct_agent_bot_env_tests {
 
     #[test]
     fn direct_agent_bot_environment_includes_bundled_tools_and_host_identity() {
-        let resources = std::path::Path::new("/Applications/GeniusBar.app/Contents/Resources");
-        let env = direct_agent_bot_env(resources);
+        let resources =
+            std::env::temp_dir().join(format!("geniusbar-resources-{}", std::process::id()));
+        let expected_tool_path = tool_path(&resources);
+        let env = direct_agent_bot_env(&resources);
 
         let value = |key: &str| {
             env.iter()
@@ -135,9 +137,7 @@ mod direct_agent_bot_env_tests {
 
         assert_eq!(
             value("AGENT_BOT_TOOL_PATH"),
-            Some(std::ffi::OsStr::new(
-                "/Applications/GeniusBar.app/Contents/Resources/bin"
-            ))
+            Some(expected_tool_path.as_os_str())
         );
         assert!(std::path::Path::new(value("AGENT_BOT_TOOL_PATH").unwrap()).is_absolute());
         assert_eq!(
