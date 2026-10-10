@@ -13,9 +13,11 @@ export interface AuditRecord {
   operation?: string;
   decision?: string;
   detail?: string;
+  appSlug?: string;
+  reason?: string;
 }
 
-const OPTIONAL = ['principalId', 'transport', 'agentId', 'operation', 'decision', 'detail'] as const;
+const OPTIONAL = ['principalId', 'transport', 'agentId', 'operation', 'decision', 'detail', 'appSlug', 'reason'] as const;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);

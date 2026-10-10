@@ -117,6 +117,8 @@ export const en = {
   'audit.who': 'Companion',
   'audit.event': 'Event',
   'audit.detail': 'Detail',
+  'audit.app': 'App',
+  'audit.reason': 'Reason',
   'audit.loading': 'Reading the audit log…',
   'audit.unavailable': 'The audit log arrives with the next agent-bot update.',
   'audit.saved': 'Saved to Downloads',

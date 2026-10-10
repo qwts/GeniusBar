@@ -4,6 +4,7 @@ import { exportAudit, listAudit, runtimeMetrics, soulComms } from '../bridge';
 import { buildSoulForest } from '../model/census';
 import { emptyComposer } from '../model/chat';
 import { sampleAudit, sampleCensus } from '../model/fixtures';
+import { I18nProvider } from '../lib/i18n';
 import { AUDIT_REFRESH_MS, AuditLog, AuditSourceContext, type AuditSource } from './AuditLog';
 import { CompanionSession } from './CompanionSession';
 
@@ -14,7 +15,7 @@ beforeEach(() => {
   vi.mocked(runtimeMetrics).mockReset().mockResolvedValue({ unavailable: true });
   vi.mocked(soulComms).mockReset().mockResolvedValue(null);
 });
-afterEach(() => { cleanup(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); localStorage.removeItem('gb.lang'); });
 
 const withSource = (source: AuditSource, agentId: string | null = 'agent_p') => render(
   <AuditSourceContext.Provider value={source}><AuditLog agentId={agentId} roster={sampleCensus} /></AuditSourceContext.Provider>);
@@ -80,6 +81,39 @@ describe('AuditLog', () => {
     writeText.mockRejectedValueOnce(new Error('denied'));
     fireEvent.click(screen.getByRole('button', { name: 'Copy JSON' }));
     expect(await screen.findByText('Couldn’t copy the audit log.')).toBeTruthy();
+  });
+
+  it('shows localized App and reason in Detail and preserves both in copy and export for owner and daemon receipts', async () => {
+    localStorage.setItem('gb.lang', 'es');
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const receipts = [
+      { at: '2026-10-05T10:00:00Z', event: 'credential-decision', principalId: 'principal_owner', detail: 'Grant approved', appSlug: 'github', reason: 'Approved by owner' },
+      { at: '2026-10-05T10:01:00Z', event: 'credential-decision', transport: 'daemon', operation: 'deny', appSlug: 'slack', reason: 'Policy denied request' },
+    ];
+    render(<I18nProvider><AuditSourceContext.Provider value={async () => receipts}><AuditLog agentId={null} /></AuditSourceContext.Provider></I18nProvider>);
+    const table = await screen.findByRole('table', { name: 'Registro de auditoría' });
+    const detailCells = within(table).getAllByRole('cell').filter((_, index) => index % 4 === 3);
+    expect(detailCells.map((cell) => cell.textContent)).toEqual([
+      'deny · Aplicación: slack · Motivo: Policy denied request',
+      'Grant approved · Aplicación: github · Motivo: Approved by owner',
+    ]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copiar JSON' }));
+    await screen.findByText('Copiado');
+    const copied = JSON.parse(writeText.mock.calls[0][0]) as Array<{ appSlug: string; reason: string }>;
+    expect(copied.map(({ appSlug, reason }) => ({ appSlug, reason }))).toEqual([
+      { appSlug: 'slack', reason: 'Policy denied request' },
+      { appSlug: 'github', reason: 'Approved by owner' },
+    ]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Exportar JSON' }));
+    await screen.findByText('Guardado en Descargas');
+    const exported = JSON.parse(vi.mocked(exportAudit).mock.calls[0][0]) as Array<{ appSlug: string; reason: string }>;
+    expect(exported.map(({ appSlug, reason }) => ({ appSlug, reason }))).toEqual([
+      { appSlug: 'slack', reason: 'Policy denied request' },
+      { appSlug: 'github', reason: 'Approved by owner' },
+    ]);
   });
 
   it('refreshes every 10 s while shown, keeps the last list on a failed read, and stops once unmounted', async () => {

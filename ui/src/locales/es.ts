@@ -116,6 +116,8 @@ export const es: Catalog = {
   'audit.who': 'Compañero',
   'audit.event': 'Evento',
   'audit.detail': 'Detalle',
+  'audit.app': 'Aplicación',
+  'audit.reason': 'Motivo',
   'audit.loading': 'Leyendo el registro de auditoría…',
   'audit.unavailable': 'El registro de auditoría llega con la próxima actualización de agent-bot.',
   'audit.saved': 'Guardado en Descargas',
