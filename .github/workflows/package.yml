@@ -14,24 +14,6 @@
 name: Package
 
 on:
-  workflow_dispatch:
-    inputs:
-      ref:
-        description: Branch, tag, or SHA to package; must already be on main (defaults to the triggering ref)
-        required: false
-        type: string
-        default: ''
-      platform:
-        description: Which packages to build
-        required: false
-        type: choice
-        options: [all, macos, windows]
-        default: all
-      unsigned:
-        description: Windows only - package without signing secrets, which allows a ref that is not on main
-        required: false
-        type: boolean
-        default: false
   workflow_call:
     inputs:
       ref:
