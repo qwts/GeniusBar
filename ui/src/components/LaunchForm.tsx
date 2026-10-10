@@ -1,8 +1,8 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useContext, useEffect, useId, useRef, useState } from 'react';
 import { Check, ChevronDown, Circle, Loader2, Shield, ShieldOff } from 'lucide-react';
 import { displayName, roleAndHarness, type CensusRow } from '../model/census';
 import { declaredProvider, engineCan, savedBrief, soulEnvironment, type SoulEnvironment } from '../bridge';
-import { canLaunch, harnessLabel, harnessOptions, launchDraftErrors, MAX_BRIEF, MAX_HARNESS, MAX_ROLE, normalPackagePath, parentChoices, preferredHarness, prefillHarness, soulHarnessLabel, suggestedName, type LaunchSandbox, type LaunchStage, type LaunchState } from '../model/launch';
+import { canLaunch, harnessLabel, harnessOptions, launchDraftErrors, launchNeedsHarnessSignIn, MAX_BRIEF, MAX_HARNESS, MAX_ROLE, normalPackagePath, parentChoices, preferredHarness, prefillHarness, soulHarnessLabel, suggestedName, type LaunchSandbox, type LaunchStage, type LaunchState } from '../model/launch';
 import { useI18n, type Translate } from '../lib/i18n';
 import { radioGroupKeys } from '../lib/radioGroup';
 import { chosenTemplate, CUSTOM_SOUL, initialChoice } from '../model/templates';
@@ -10,6 +10,7 @@ import type { LaunchApi } from '../useLaunch';
 import { useSoulTemplates, type TemplateLister } from '../useSoulTemplates';
 import { ModelField } from './ModelField';
 import { Select } from './Select';
+import { HarnessSignInNotice, SoulSourceContext } from './SoulNotices';
 
 interface LaunchFormProps {
   launcher: LaunchApi;
@@ -204,6 +205,7 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
   packageDescription, copyOf: openedCopyOf, checkingPackage: checkingOpened = false, packageError: initialPackageError = null, initialComms, onCancel, onLaunched,
   roster = [], listTemplates, loadBrief, loadEnvironment, parentCarried = false }: LaunchFormProps) {
   const { t } = useI18n();
+  const soulSource = useContext(SoulSourceContext);
   // The design's soul choices (#65): agent-bot's templates, then "Custom
   // soul", which is the package path field. Asked once; never waited on.
   const { templates, supported: templatesListed, error: templateError } = useSoulTemplates(soul ? undefined : listTemplates);
@@ -299,6 +301,8 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
   const comms = chosenComms ?? initialComms ?? (soul ? undefined : true);
   // The launcher is shared: show its result only in the form that started it.
   const [started, setStarted] = useState(false);
+  const [submittedSoul, setSubmittedSoul] = useState<{ attempt: number; agentId: string; harness: string; name: string } | null>(null);
+  const launchAttempt = useRef(0);
   // A dialog's launch that succeeded is finished (#116): Launch never arms
   // again in the same dialog, so a second click cannot start a duplicate.
   const launched = started && launcher.state.phase === 'launched';
@@ -346,6 +350,8 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
         setTried(true);
         if (errors.length > 0) { errorList.current?.focus(); return; }
         setStarted(true);
+        const attempt = ++launchAttempt.current;
+        setSubmittedSoul(soul ? { attempt, agentId: soul.agentId, harness: harness.trim(), name: displayName(soul) } : null);
         const path = normalPackagePath(packagePath);
         if (!soul && custom) setPackagePath(path);
         void launcher.launch({
@@ -532,7 +538,14 @@ export function LaunchForm({ launcher, accounts, harnesses, soul, defaultHarness
       </>}
       {checkingPackage && <p className="m-0 text-xs text-muted-foreground" role="status">{t('launch.checking')}</p>}
       {pathError && <p className="m-0 text-[11px] text-destructive" role="alert">{pathError}</p>}
-      {started ? !busy && <LaunchStatus state={launcher.state} />
+      {started ? !busy && <>
+        <LaunchStatus state={launcher.state} />
+        {submittedSoul && launchNeedsHarnessSignIn(launcher.state) && (
+          <HarnessSignInNotice key={`${submittedSoul.attempt}:${launcher.state.phase === 'failed' ? launcher.state.requestId : ''}`}
+            harness={submittedSoul.harness} name={submittedSoul.name} status="signed-out"
+            signIn={() => soulSource.signIn(submittedSoul.harness, submittedSoul.agentId)} showSuccess />
+        )}
+      </>
         : !ready && <p className="m-0 text-xs text-muted-foreground">{t('launch.busy')}</p>}
       {!busy && <div className="flex items-center justify-end gap-2 pt-1">
         {onCancel && (

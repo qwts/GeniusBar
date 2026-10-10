@@ -2,11 +2,12 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { I18nProvider } from '../lib/i18n';
 import type { CensusRow } from '../model/census';
-import { BridgeError, type SoulEnvironment, type SoulTemplateList } from '../bridge';
+import { BridgeError, type SoulEnvironment, type SoulMode, type SoulTemplateList } from '../bridge';
 import { sampleCensus, sampleTemplates } from '../model/fixtures';
 import type { LaunchState } from '../model/launch';
 import type { LaunchApi } from '../useLaunch';
 import { LaunchForm } from './LaunchForm';
+import { SoulSourceContext, type SoulSource } from './SoulNotices';
 
 afterEach(cleanup);
 
@@ -18,6 +19,20 @@ function form(launcher: LaunchApi, extra: Partial<Parameters<typeof LaunchForm>[
       <LaunchForm launcher={launcher} accounts={['user']} harnesses={['claude']} defaultHarness="claude" onCancel={() => {}} {...extra} />
     </I18nProvider>
   );
+}
+
+function soulSource(signIn: SoulSource['signIn'] = async () => true): SoulSource {
+  return {
+    population: async () => null,
+    coldWake: async () => null,
+    setColdWake: async () => ({ on: false, lane: null }),
+    signedIn: async () => null,
+    signIn,
+    mode: async () => null,
+    setMode: async (_id: string, mode: SoulMode) => mode,
+    model: async () => null,
+    setModel: async () => { throw new Error('unused'); },
+  };
 }
 const launchButton = () => screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement;
 
@@ -125,6 +140,109 @@ describe('LaunchForm relaunching an existing companion (#79)', () => {
     render(form(launcher, { soul: starter, packageName: 'Scott - Starter', preferredHarnesses: ['opencode'] }));
     fireEvent.submit(screen.getByRole('form'));
     expect(launcher.launch).toHaveBeenCalledWith(expect.objectContaining({ name: '', harness: 'claude' }));
+  });
+});
+
+describe('LaunchForm pre-launch harness sign-in recovery (#338)', () => {
+  it.each([
+    ['structured code', { code: 'harness-signed-out', detail: 'harness-signed-out: codex is signed out for this soul; sign in and launch again' }],
+    ['legacy detail prefix', { detail: 'harness-signed-out: codex is signed out for this soul; sign in and launch again' }],
+  ])('offers the existing sign-in recovery for an existing soul with %s and leaves retry explicit', async (_label, failure) => {
+    const initial = launcherIn({ phase: 'idle' });
+    const signIn = vi.fn(async () => true);
+    const source = soulSource(signIn);
+    const extra = { soul: starter, harnesses: ['claude', 'codex', 'opencode'] };
+    const { rerender } = render(<SoulSourceContext.Provider value={source}>{form(initial, extra)}</SoulSourceContext.Provider>);
+    const harness = screen.getByLabelText('Harness') as HTMLInputElement;
+    fireEvent.change(harness, { target: { value: 'codex' } });
+    fireEvent.submit(screen.getByRole('form'));
+    expect(initial.launch).toHaveBeenCalledWith(expect.objectContaining({ harness: 'codex', target: { soul: starter.agentId } }));
+
+    const refused = launcherIn({ phase: 'failed', requestId: 'r1', agentId: null, ...failure });
+    rerender(<SoulSourceContext.Provider value={source}>{form(refused, extra)}</SoulSourceContext.Provider>);
+    const editableHarness = screen.getByLabelText('Harness') as HTMLSelectElement;
+    fireEvent.change(editableHarness, { target: { value: 'opencode' } });
+    expect(screen.getByText(/harness-signed-out: codex is signed out for this soul; sign in and launch again/)).toBeTruthy();
+    expect(screen.getByText('codex is signed out')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in again' }));
+    await screen.findByText('Signed in');
+    expect(signIn).toHaveBeenCalledWith('codex', starter.agentId);
+    expect(refused.launch).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Launch' }));
+    expect(refused.launch).toHaveBeenCalledOnce();
+    expect(refused.launch).toHaveBeenCalledWith(expect.objectContaining({ harness: 'opencode', target: { soul: starter.agentId } }));
+  });
+
+  it('does not offer sign-in for unknown probes or generic launch failures', () => {
+    for (const failure of [
+      { code: 'harness-unknown', detail: 'harness-unknown: status failed' },
+      { detail: 'could not join the soul' },
+      { code: 'other', detail: 'harness-signed-out: conflicting legacy detail' },
+    ]) {
+      cleanup();
+      const launcher = launcherIn({ phase: 'failed', requestId: 'r1', agentId: null, ...failure });
+      render(form(launcher, { soul: starter }));
+      fireEvent.submit(screen.getByRole('form'));
+      expect(screen.queryByRole('button', { name: 'Sign in again' })).toBeNull();
+    }
+
+    cleanup();
+    const launcher = launcherIn({ phase: 'failed', requestId: 'r1', agentId: null,
+      code: 'harness-signed-out', detail: 'harness-signed-out: new souls are not refused' });
+    render(form(launcher, { initialPackagePath: '/souls/new.soul' }));
+    fireEvent.submit(screen.getByRole('form'));
+    expect(screen.queryByRole('button', { name: 'Sign in again' })).toBeNull();
+  });
+
+  it('keeps a cancelled or failed sign-in visible and retryable without relaunching', async () => {
+    const attempts: { signIn: SoulSource['signIn']; message: string }[] = [
+      { signIn: vi.fn(async () => false), message: 'Signed out' },
+      { signIn: vi.fn(async () => { throw new Error('browser sign-in was cancelled'); }), message: 'browser sign-in was cancelled' },
+    ];
+    for (const { signIn, message } of attempts) {
+      cleanup();
+      const source = soulSource(signIn);
+      const initial = launcherIn({ phase: 'idle' });
+      const { rerender } = render(<SoulSourceContext.Provider value={source}>{form(initial, { soul: starter })}</SoulSourceContext.Provider>);
+      fireEvent.submit(screen.getByRole('form'));
+      expect(initial.launch).toHaveBeenCalledOnce();
+      const launcher = launcherIn({ phase: 'failed', requestId: 'r1', agentId: null, code: 'harness-signed-out',
+        detail: 'harness-signed-out: claude is signed out' });
+      rerender(<SoulSourceContext.Provider value={source}>{form(launcher, { soul: starter })}</SoulSourceContext.Provider>);
+      fireEvent.click(screen.getByRole('button', { name: 'Sign in again' }));
+      await screen.findByText(`Sign-in did not finish: ${message}`);
+      expect(screen.getByRole('button', { name: 'Sign in again' })).toBeTruthy();
+      expect(launcher.launch).not.toHaveBeenCalled();
+    }
+  });
+
+  it('keeps a later refusal visible when sign-in from an earlier attempt completes late', async () => {
+    let finish: (loggedIn: boolean) => void = () => {};
+    const signIn = vi.fn(() => new Promise<boolean>((resolve) => { finish = resolve; }));
+    const source = soulSource(signIn);
+    const extra = { soul: starter, harnesses: ['claude', 'codex', 'opencode'] };
+    const initial = launcherIn({ phase: 'idle' });
+    const { rerender } = render(<SoulSourceContext.Provider value={source}>{form(initial, extra)}</SoulSourceContext.Provider>);
+    fireEvent.change(screen.getByLabelText('Harness'), { target: { value: 'codex' } });
+    fireEvent.submit(screen.getByRole('form'));
+    const firstFailure = launcherIn({ phase: 'failed', requestId: 'r1', agentId: null, code: 'harness-signed-out',
+      detail: 'harness-signed-out: codex is signed out' });
+    rerender(<SoulSourceContext.Provider value={source}>{form(firstFailure, extra)}</SoulSourceContext.Provider>);
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in again' }));
+    expect((screen.getByRole('button', { name: 'Opening codex sign-in…' }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(screen.getByLabelText('Harness'), { target: { value: 'opencode' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Launch' }));
+    expect(firstFailure.launch).toHaveBeenCalledWith(expect.objectContaining({ harness: 'opencode' }));
+    rerender(<SoulSourceContext.Provider value={source}>{form(launcherIn({ phase: 'pending', requestId: 'r2', note: null, stage: null }), extra)}</SoulSourceContext.Provider>);
+    rerender(<SoulSourceContext.Provider value={source}>{form(launcherIn({ phase: 'failed', requestId: 'r2', agentId: null,
+      code: 'harness-signed-out', detail: 'harness-signed-out: opencode is signed out' }), extra)}</SoulSourceContext.Provider>);
+
+    finish(true);
+    expect(await screen.findByRole('button', { name: 'Sign in again' })).toBeTruthy();
+    expect(screen.queryByText('Signed in')).toBeNull();
+    expect(signIn).toHaveBeenCalledWith('codex', starter.agentId);
   });
 });
 

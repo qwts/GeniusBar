@@ -308,7 +308,7 @@ export type LaunchState =
   | { phase: 'pending'; requestId: string; note: string | null; stage: LaunchStage | null; sandbox?: LaunchSandbox }
   | { phase: 'launched'; requestId: string; agentId: string | null; sandbox?: LaunchSandbox }
   /** `stage` says where the daemon stopped, when it reported stages. */
-  | { phase: 'failed'; requestId: string; agentId: string | null; detail: string | null; stage?: LaunchStage | null; sandbox?: LaunchSandbox }
+  | { phase: 'failed'; requestId: string; agentId: string | null; detail: string | null; code?: string; stage?: LaunchStage | null; sandbox?: LaunchSandbox }
   /** The launch was refused, or its status can no longer be read. */
   | { phase: 'error'; requestId: string | null; text: string };
 
@@ -322,7 +322,7 @@ export function canLaunch(state: LaunchState): boolean {
 /** The state after one `launchStatus` result; unknown statuses stay pending. */
 export function applyStatus(state: LaunchState, result: unknown): LaunchState {
   if (state.phase !== 'pending') return state;
-  const r = (result ?? {}) as { status?: unknown; agentId?: unknown; detail?: unknown; stage?: unknown; sandbox?: unknown };
+  const r = (result ?? {}) as { status?: unknown; agentId?: unknown; detail?: unknown; code?: unknown; stage?: unknown; sandbox?: unknown };
   const agentId = typeof r.agentId === 'string' ? r.agentId : null;
   const stage = laterStage(state.stage, r.stage);
   // A result without one keeps what an earlier one said.
@@ -331,9 +331,17 @@ export function applyStatus(state: LaunchState, result: unknown): LaunchState {
   if (r.status === 'launched') return { phase: 'launched', requestId: state.requestId, agentId, ...runsAs };
   if (r.status === 'failed') {
     const detail = typeof r.detail === 'string' && r.detail.trim() !== '' ? r.detail : null;
-    return { phase: 'failed', requestId: state.requestId, agentId, detail, ...(stage ? { stage } : {}), ...runsAs };
+    const code = typeof r.code === 'string' && r.code.trim() !== '' ? r.code : undefined;
+    return { phase: 'failed', requestId: state.requestId, agentId, detail, ...(code ? { code } : {}), ...(stage ? { stage } : {}), ...runsAs };
   }
   return { ...state, note: null, stage, ...runsAs };
+}
+
+/** Only the engine's explicit sign-out refusal warrants launch sign-in recovery. */
+export function launchNeedsHarnessSignIn(state: LaunchState): boolean {
+  if (state.phase !== 'failed') return false;
+  if (state.code !== undefined) return state.code === 'harness-signed-out';
+  return state.detail?.startsWith('harness-signed-out: ') ?? false;
 }
 
 /** The longest sandbox account name shown; a longer one is taken as malformed. */
