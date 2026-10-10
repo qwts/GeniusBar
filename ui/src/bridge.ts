@@ -2279,3 +2279,13 @@ export async function soulEnvHistory(agentId: string, limit: number | null = nul
   if (!result) throw new BridgeError('soul-env-history-failed', 'agent-bot gave no soul history');
   return result;
 }
+
+/** Read-only per-soul dream status. The caller gates this on `dream-status`. */
+export async function soulDreamStatus(agentId: string, invokeImpl: typeof invoke = invoke): Promise<unknown> {
+  if (!inApp() && invokeImpl === invoke) throw new BridgeError('soul-dream-unavailable', 'not in the app');
+  try {
+    return await invokeImpl<unknown>('soul_dream_status', { agent: agentId });
+  } catch (error) {
+    throw failureAs(error, 'soul-dream-failed');
+  }
+}

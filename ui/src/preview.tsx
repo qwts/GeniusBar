@@ -278,6 +278,7 @@ const environmentSource: EnvironmentSource = {
     const records = sampleEnvHistory.turns.records.slice(0, limit ?? undefined);
     return { ...sampleEnvHistory, agentId, soulDir: env.root.soulDir, turns: { ...sampleEnvHistory.turns, limit, listed: records.length, truncated: records.length < sampleEnvHistory.turns.total, records } };
   },
+  dreamStatus: async () => { throw new BridgeError('soul-dream-unsupported', 'dream status is not available in the preview'); },
 };
 
 // The Sandboxing card and its account dialog (#66) on sampleSandbox, in the

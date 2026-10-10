@@ -22,6 +22,7 @@ import {
   type ClassificationRow, type EngineRun, type EnvironmentRead, type EnvironmentState, type InstallEvent, type InstallRun, type InstallableRow, type SignInState,
 } from '../model/environment';
 import { useI18n, type Translate } from '../lib/i18n';
+import { readSoulDream, type SoulDreamStatus } from '../model/soulDream';
 
 /** Where the descriptor and the engine's operations come from: agent-bot in the app, fixtures in the preview and tests. */
 export interface EnvironmentSource {
@@ -41,6 +42,8 @@ export interface EnvironmentSource {
   importLife: (archive: string, options: { plan: boolean; identity: ImportIdentity; name: string | null }) => Promise<SoulEnvironmentImport>;
   /** `soul env history <soul> [--limit N] --json` (the Memory tab, #268): the mirror's runs and revisions, read-only, behind `env-history`. */
   history: (agentId: string, limit: number | null) => Promise<SoulEnvHistory>;
+  /** `soul skill dream --soul ID --status --json`: per-soul status and notice ledger, read-only, behind `dream-status`. */
+  dreamStatus: (agentId: string) => Promise<SoulDreamStatus>;
 }
 
 // A source that throws instead of rejecting still settles as a rejection.
@@ -54,6 +57,7 @@ export const EnvironmentSourceContext = createContext<EnvironmentSource>({
   exportLife: (agentId, options) => settled(() => soulEnvExport(agentId, options)),
   importLife: (archive, options) => settled(() => soulEnvImport(archive, options)),
   history: (agentId, limit) => settled(() => soulEnvHistory(agentId, limit)),
+  dreamStatus: (agentId) => settled(() => readSoulDream(agentId)),
 });
 
 const messageOf = (failure: unknown): string => {

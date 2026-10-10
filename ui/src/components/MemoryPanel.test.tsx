@@ -1,7 +1,8 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BridgeError, type SoulEnvHistory, type SoulEnvironment } from '../bridge';
 import { sampleCensus, sampleEnvHistory, sampleEnvironments } from '../model/fixtures';
+import type { SoulDreamStatus } from '../model/soulDream';
 import { EnvironmentSourceContext, type EnvironmentSource } from './EnvironmentSection';
 import { HISTORY_LIMIT, MemoryPanel } from './MemoryPanel';
 
@@ -11,6 +12,19 @@ const [luna] = sampleCensus;
 const scout = { ...luna, agentId: 'agent_s', name: 'scout', harness: 'claude' };
 const env = sampleEnvironments.agent_p;
 const older = sampleEnvironments.agent_s;
+
+const dreamState = (acknowledged = false, agentId = 'agent_p'): SoulDreamStatus => ({
+  schemaVersion: 1, agentId, available: true, executorConfigured: false, started: true, closing: false,
+  orphanRecovery: 'process-group-or-quarantine', fault: null, maintenanceCoverage: 'unverified', registration: null,
+  flights: agentId === 'agent_p' ? [{ agentId, runId: '00000000-0000-4000-8000-000000000000', status: 'recovery-required' }] : [],
+  notices: { schemaVersion: 1, agentId, lastRunId: agentId === 'agent_p' ? '00000000-0000-4000-8000-000000000000' : null, suppressed: 0, notices: agentId === 'agent_p' ? [{
+    id: 'ntc_0123456789abcdef01234567', fingerprint: `sha256:${'a'.repeat(64)}`, kind: 'recovery', subject: {}, detail: 'recovery-required',
+    claim: 'host-observed', state: acknowledged ? 'acknowledged' : 'open', delivery: acknowledged ? 'host-acknowledged' : 'pending-host-read',
+    firstRunId: '00000000-0000-4000-8000-000000000000', lastRunId: '00000000-0000-4000-8000-000000000000',
+    firstSeenAt: '2026-10-08T09:12:00.000Z', lastSeenAt: '2026-10-08T09:12:00.000Z', occurrences: 3,
+    acknowledgedAt: acknowledged ? '2026-10-09T12:00:00.000Z' : null,
+  }] : [] },
+});
 
 const unused = () => vi.fn(async (): Promise<never> => { throw new Error('not used by the Memory tab'); });
 
@@ -23,6 +37,7 @@ function source(overrides: Partial<EnvironmentSource> = {}): EnvironmentSource {
     exportLife: unused(),
     importLife: unused(),
     history: vi.fn(async () => sampleEnvHistory),
+    dreamStatus: unused(),
     ...overrides,
   };
 }
@@ -149,5 +164,88 @@ describe('the Memory tab (#268)', () => {
     expect(screen.queryByText('Memory lives')).toBeNull();
     // The design's hint is the only mention of loss, and it denies it.
     expect(document.body.textContent?.match(/\blost\b/g)?.length).toBe((document.body.textContent?.match(/Nothing has been lost/g) ?? []).length);
+  });
+
+  it('gates dream status on its exact advertised capability and reports real per-soul quarantine and ledger claims', async () => {
+    const noDream = source();
+    show(noDream);
+    expect(await screen.findByText("The installed engine doesn't report maintenance notices, so none can be shown here.")).toBeTruthy();
+    expect(noDream.dreamStatus).not.toHaveBeenCalled();
+    cleanup();
+
+    const dreamEnv: SoulEnvironment = { ...env, engine: { ...env.engine, capabilities: [...env.engine.capabilities, 'dream-status'] } };
+    const s = source({ environment: vi.fn(async () => dreamEnv), dreamStatus: vi.fn(async () => dreamState()) });
+    show(s);
+    expect(await screen.findByText('Maintenance run quarantined — recovery required')).toBeTruthy();
+    expect(screen.getByText('Reported 3×')).toBeTruthy();
+    expect(screen.getByText('Observed by this Mac')).toBeTruthy();
+    expect(screen.getByText('Coverage unverified')).toBeTruthy();
+    expect(screen.getByText('No owner recovery procedure is available yet.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Acknowledge' })).toBeNull();
+    expect(s.dreamStatus).toHaveBeenCalledWith('agent_p');
+  });
+
+  it('keeps quarantine visible when the authoritative ledger already says acknowledged and distinguishes daemon unavailability', async () => {
+    const dreamEnv: SoulEnvironment = { ...env, engine: { ...env.engine, capabilities: [...env.engine.capabilities, 'dream-status'] } };
+    const s = source({ environment: vi.fn(async () => dreamEnv), dreamStatus: vi.fn(async () => dreamState(true)) });
+    show(s);
+    expect(await screen.findByText('Acknowledged')).toBeTruthy();
+    expect(screen.getByText('Maintenance run quarantined — recovery required')).toBeTruthy();
+    cleanup();
+
+    const down = source({ environment: vi.fn(async () => dreamEnv), dreamStatus: vi.fn(async () => { throw new BridgeError('dream-daemon-unavailable', 'daemon is down'); }) });
+    show(down);
+    expect(await screen.findByText("Can't reach the engine — maintenance status is unknown right now.")).toBeTruthy();
+    expect(screen.queryByText('No maintenance notices.')).toBeNull();
+  });
+
+  it('does not show an empty healthy ledger when the engine reports unavailable or faulted status', async () => {
+    const dreamEnv: SoulEnvironment = { ...env, engine: { ...env.engine, capabilities: [...env.engine.capabilities, 'dream-status'] } };
+    const unavailable = source({ environment: vi.fn(async () => dreamEnv), dreamStatus: vi.fn(async () => ({ ...dreamState(), available: false, fault: 'dream-service-unavailable', notices: null })) });
+    show(unavailable);
+    expect(await screen.findByText("Can't reach the engine — maintenance status is unknown right now.")).toBeTruthy();
+    expect(screen.getByText('Engine status: dream-service-unavailable')).toBeTruthy();
+    expect(screen.queryByText('No maintenance notices.')).toBeNull();
+    cleanup();
+
+    const faulted = source({ environment: vi.fn(async () => dreamEnv), dreamStatus: vi.fn(async () => ({ ...dreamState(), fault: 'dream-store-conflict', notices: null })) });
+    show(faulted);
+    expect(await screen.findByText("Can't reach the engine — maintenance status is unknown right now.")).toBeTruthy();
+    expect(screen.queryByText('No maintenance notices.')).toBeNull();
+  });
+
+  it('reflects the engine registration paused flag when describing whether a schedule is active', async () => {
+    const dreamEnv: SoulEnvironment = { ...env, engine: { ...env.engine, capabilities: [...env.engine.capabilities, 'dream-status'] } };
+    const registration = { agentId: 'agent_p', soulDir: '/souls/luna.soul', generation: '00000000-0000-4000-8000-000000000000',
+      intervalHours: 24, paused: false, nextDueAt: '2026-10-10T12:00:00.000Z', createdAt: '2026-10-08T09:12:00.000Z',
+      updatedAt: '2026-10-09T12:00:00.000Z', lastRun: null };
+    show(source({ environment: vi.fn(async () => dreamEnv), dreamStatus: vi.fn(async () => ({ ...dreamState(), registration })) }));
+    expect(await screen.findByText('Scheduled')).toBeTruthy();
+    cleanup();
+    show(source({ environment: vi.fn(async () => dreamEnv), dreamStatus: vi.fn(async () => ({ ...dreamState(), registration: { ...registration, paused: true, nextDueAt: null } })) }));
+    expect(await screen.findByText('Not scheduled')).toBeTruthy();
+  });
+
+  it('keys dream reads by soul and ignores a deferred result after switching souls', async () => {
+    const dreamEnv = (agentId: string): SoulEnvironment => ({
+      ...env, identity: { ...env.identity, agentId }, engine: { ...env.engine, capabilities: [...env.engine.capabilities, 'dream-status'] },
+    });
+    let resolveOld!: (status: SoulDreamStatus) => void;
+    const oldRead = new Promise<SoulDreamStatus>((resolve) => { resolveOld = resolve; });
+    const s = source({
+      environment: vi.fn(async (agentId: string) => dreamEnv(agentId)),
+      dreamStatus: vi.fn((agentId: string) => agentId === 'agent_p' ? oldRead : Promise.resolve(dreamState(false, agentId))),
+    });
+    const view = show(s, luna);
+    await waitFor(() => expect(s.dreamStatus).toHaveBeenCalledWith('agent_p'));
+
+    view.rerender(<EnvironmentSourceContext.Provider value={s}><MemoryPanel soul={scout} /></EnvironmentSourceContext.Provider>);
+    expect(screen.queryByText('Maintenance run quarantined — recovery required')).toBeNull();
+    expect(await screen.findByText('No maintenance notices.')).toBeTruthy();
+    expect(s.dreamStatus).toHaveBeenCalledWith('agent_s');
+
+    await act(async () => { resolveOld(dreamState()); await oldRead; });
+    expect(screen.queryByText('Maintenance run quarantined — recovery required')).toBeNull();
+    expect(screen.getByText('No maintenance notices.')).toBeTruthy();
   });
 });
