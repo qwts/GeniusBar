@@ -105,6 +105,49 @@ mod soul_dream_bridge_tests {
     }
 }
 
+/// The direct agent-bot CLI inherits GeniusBar's host identity and bundled
+/// tools, matching the environment used by setup and service installation.
+fn direct_agent_bot_env(resources: &std::path::Path) -> Vec<(String, std::ffi::OsString)> {
+    HOST_ENV
+        .iter()
+        .map(|(key, value)| ((*key).to_string(), (*value).into()))
+        .chain(std::iter::once((
+            "AGENT_BOT_TOOL_PATH".to_string(),
+            tool_path(resources).into_os_string(),
+        )))
+        .collect()
+}
+
+#[cfg(test)]
+mod direct_agent_bot_env_tests {
+    use super::*;
+
+    #[test]
+    fn direct_agent_bot_environment_includes_bundled_tools_and_host_identity() {
+        let resources =
+            std::env::temp_dir().join(format!("geniusbar-resources-{}", std::process::id()));
+        let expected_tool_path = tool_path(&resources);
+        let env = direct_agent_bot_env(&resources);
+
+        let value = |key: &str| {
+            env.iter()
+                .find(|(name, _)| name == key)
+                .map(|(_, value)| value.as_os_str())
+        };
+
+        assert_eq!(
+            value("AGENT_BOT_TOOL_PATH"),
+            Some(expected_tool_path.as_os_str())
+        );
+        assert!(std::path::Path::new(value("AGENT_BOT_TOOL_PATH").unwrap()).is_absolute());
+        assert_eq!(
+            value("AGENT_BOT_SERVICE_LABEL"),
+            Some(std::ffi::OsStr::new("app.geniusbar.agent-bot"))
+        );
+        assert_eq!(value("AGENT_BOT_EXECUTOR"), Some(std::ffi::OsStr::new("1")));
+    }
+}
+
 /// The bundled npm, which the daemon uses to install soul harnesses.
 pub fn npm_cli(resources: &std::path::Path) -> std::path::PathBuf {
     resources
@@ -1747,7 +1790,7 @@ pub(crate) async fn run_agent_bot<R: Runtime>(
     app.shell()
         .sidecar("node")
         .map_err(|e| unavailable(e.to_string()))?
-        .envs(HOST_ENV.iter().copied())
+        .envs(direct_agent_bot_env(&resources))
         .args(argv)
         .output()
         .await
