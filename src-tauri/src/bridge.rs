@@ -53,6 +53,59 @@ pub fn tool_path(resources: &std::path::Path) -> std::path::PathBuf {
     resources.join("bin")
 }
 
+#[cfg(test)]
+mod soul_dream_bridge_tests {
+    use super::*;
+
+    const AGENT: &str = "agent_00000000-0000-4000-8000-000000000000";
+    fn status() -> Vec<u8> {
+        format!(r#"{{"schemaVersion":1,"agentId":"{AGENT}","available":true,"executorConfigured":false,"started":true,"closing":false,"orphanRecovery":null,"fault":null,"maintenanceCoverage":"unverified","registration":null,"flights":[],"notices":null}}"#).into_bytes()
+    }
+
+    #[test]
+    fn status_command_is_narrow_and_validates_the_agent_id() {
+        assert_eq!(
+            soul_dream_status_args(AGENT).unwrap(),
+            vec!["soul", "skill", "dream", "--soul", AGENT, "--status", "--json"],
+        );
+        assert_eq!(
+            soul_dream_status_args("--help").unwrap_err().code,
+            "soul-dream-invalid"
+        );
+    }
+
+    #[test]
+    fn status_requires_the_requested_soul_and_preserves_unsupported_and_refusal_errors() {
+        assert_eq!(
+            parse_soul_dream_status(&status(), b"", AGENT).unwrap()["agentId"],
+            AGENT
+        );
+        let wrong_soul = status().iter().map(|b| *b).collect::<Vec<_>>();
+        let wrong_soul = String::from_utf8(wrong_soul)
+            .unwrap()
+            .replace(AGENT, "agent_other");
+        assert_eq!(
+            parse_soul_dream_status(wrong_soul.as_bytes(), b"", AGENT)
+                .unwrap_err()
+                .code,
+            "soul-dream-failed"
+        );
+        assert_eq!(
+            parse_soul_dream_status(b"", b"usage: agent-bot soul skill\n", AGENT)
+                .unwrap_err()
+                .code,
+            "soul-dream-unsupported",
+        );
+        assert_eq!(
+            parse_soul_dream_status(
+                b"{\"error\":{\"code\":\"dream-daemon-unavailable\",\"message\":\"daemon is down\"}}\n",
+                b"", AGENT,
+            ).unwrap_err().code,
+            "dream-daemon-unavailable"
+        );
+    }
+}
+
 /// The bundled npm, which the daemon uses to install soul harnesses.
 pub fn npm_cli(resources: &std::path::Path) -> std::path::PathBuf {
     resources
@@ -5560,6 +5613,89 @@ pub async fn soul_env_history<R: Runtime>(
     let args = soul_env_history_args(&agent, limit)?;
     let output = run_agent_bot(&app, args, "soul-env-history-unavailable").await?;
     parse_soul_env_history(&output.stdout, &output.stderr)
+}
+
+/// Read one soul's native dream status; the app gates this command on `dream-status`.
+#[tauri::command]
+pub async fn soul_dream_status<R: Runtime>(
+    app: AppHandle<R>,
+    agent: String,
+) -> Result<Value, BridgeError> {
+    let args = soul_dream_status_args(&agent)?;
+    let output = run_agent_bot(&app, args, "soul-dream-unavailable").await?;
+    parse_soul_dream_status(&output.stdout, &output.stderr, &agent)
+}
+
+fn soul_dream_status_args(agent: &str) -> Result<Vec<std::ffi::OsString>, BridgeError> {
+    if !plain_argument(agent) {
+        return Err(BridgeError::new(
+            "soul-dream-invalid",
+            "agent must be an agent id",
+        ));
+    }
+    Ok(vec![
+        "soul".into(),
+        "skill".into(),
+        "dream".into(),
+        "--soul".into(),
+        agent.into(),
+        "--status".into(),
+        "--json".into(),
+    ])
+}
+
+fn dream_verb_missing(stdout: &[u8], stderr: &[u8]) -> bool {
+    let listed = "soul skill dream";
+    if soul_subcommand_missing(stdout, stderr, listed) {
+        return true;
+    }
+    serde_json::from_str::<Value>(&last_line(stdout))
+        .ok()
+        .and_then(|value| {
+            value
+                .get("error")
+                .and_then(|error| error.get("message"))?
+                .as_str()
+                .map(str::to_owned)
+        })
+        .is_some_and(|message| {
+            message.contains("usage: agent-bot soul skill") && !message.contains(listed)
+        })
+}
+
+fn parse_soul_dream_status(
+    stdout: &[u8],
+    stderr: &[u8],
+    agent: &str,
+) -> Result<Value, BridgeError> {
+    if dream_verb_missing(stdout, stderr) {
+        return Err(BridgeError::new(
+            "soul-dream-unsupported",
+            "this agent-bot cannot report dream maintenance status",
+        ));
+    }
+    let status = parse_agent_bot_json(
+        stdout,
+        stderr,
+        "soul-dream-failed",
+        "agent-bot soul skill dream: ",
+        "agent-bot gave no dream status for this soul",
+        |value| {
+            value.get("schemaVersion").and_then(Value::as_u64) == Some(1)
+                && value.get("agentId").is_some_and(Value::is_string)
+                && value.get("maintenanceCoverage").and_then(Value::as_str) == Some("unverified")
+                && value.get("flights").is_some_and(Value::is_array)
+                && (value.get("notices").is_some_and(Value::is_null)
+                    || value.get("notices").is_some_and(Value::is_object))
+        },
+    )?;
+    if status.get("agentId").and_then(Value::as_str) != Some(agent) {
+        return Err(BridgeError::new(
+            "soul-dream-failed",
+            "agent-bot returned dream status for another soul",
+        ));
+    }
+    Ok(status)
 }
 
 fn soul_env_history_args(

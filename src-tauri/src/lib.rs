@@ -503,6 +503,7 @@ pub fn run() {
             bridge::soul_env_export,
             bridge::soul_env_import,
             bridge::soul_env_history,
+            bridge::soul_dream_status,
             bridge::soul_revision_prepare,
             bridge::soul_revision_discard,
             bridge::soul_revision_edit,

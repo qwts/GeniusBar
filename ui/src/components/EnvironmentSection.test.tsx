@@ -41,6 +41,7 @@ function source(overrides: Partial<EnvironmentSource> = {}): EnvironmentSource {
     exportLife: vi.fn(async (_agentId: string, { plan, to }: { plan: boolean; to: string | null }) => (plan ? sampleLifeExport : { ...sampleLifeExport, applied: true, decision: 'exported', file: to })),
     importLife: vi.fn(async (archive: string, { plan }: { plan: boolean; identity: ImportIdentity; name: string | null }) => (plan ? { ...sampleLifeImport, archive } : { ...sampleLifeImport, archive, applied: true, decision: 'imported', journal: 'restored' })),
     history: vi.fn(async () => sampleEnvHistory),
+    dreamStatus: vi.fn(async () => { throw new Error('unused by Environment section'); }),
     ...overrides,
   };
 }
