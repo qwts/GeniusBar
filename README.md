@@ -109,8 +109,10 @@ Pushing a `vX.Y.Z` tag on `main` (matching the version in
 `src-tauri/tauri.conf.json`, `package.json` and `Cargo.toml`) runs
 `.github/workflows/release.yml`. It calls `package.yml`, which builds a
 universal (Apple Silicon and Intel) `GeniusBar.app` and dmg, then publishes a
-GitHub release. `package.yml` can also be run by hand to build without
-releasing.
+GitHub release. The package workflow is reusable-only; it is not a manual
+build entry point. To run the existing secret-free branch CI, use
+`gh workflow run ci.yml --ref <branch>`. CI builds an unsigned macOS app and
+does not validate a Windows installer.
 
 Repository **secrets** (Settings › Secrets and variables › Actions):
 
@@ -175,15 +177,9 @@ publish job says so.
 
 The Windows job blocks a release like the macOS job does (since the Rust
 shell's Windows port, decision 7, and the first release that built the
-installer, 0.1.56). Dispatched for Windows alone it fails the same way, which
-is how a branch is validated before it reaches `main`:
-
-```sh
-gh workflow run package.yml --ref <branch> -f platform=windows -f unsigned=true
-```
-
-`unsigned=true` packages without the Azure secrets, which is what allows a
-ref that is not yet on `main`; the macOS job is skipped by `platform=windows`.
+installer, 0.1.56). There is no hosted unsigned Windows branch-build route:
+the branch-selectable CI command above builds macOS only, and the Windows
+installer is built by the tag-triggered release workflow.
 
 The updater key and endpoint are build-time configuration, not code
 (ADR-0004 decision 8). A build without them, such as `npm run
