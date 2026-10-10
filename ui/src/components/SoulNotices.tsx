@@ -286,35 +286,53 @@ export function AutopilotBanner({ soul, refresh = 0 }: { soul: CensusRow; refres
  * say a launched soul is a copy.
  */
 function SignInNotice({ soul, population }: { soul: CensusRow; population: SoulPopulationRead }) {
-  const { t } = useI18n();
   const source = useContext(SoulSourceContext);
   const { record, reload } = population;
-  const [signing, setSigning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const failure = record?.harnessAuth;
   if (!failure) return null;
-  const { harness } = failure;
-  const name = displayName(soul);
-  const signIn = () => {
+  const { harness, status } = failure;
+  return <HarnessSignInNotice key={`${soul.agentId}:${harness}`} harness={harness} name={displayName(soul)} status={status}
+    signIn={() => source.signIn(harness, soul.agentId)} onSettled={reload} />;
+}
+
+/** Existing sign-in recovery presentation, shared with a pre-launch refusal. */
+export function HarnessSignInNotice({ harness, name, status, signIn, onSettled, showSuccess = false }: {
+  harness: string;
+  name: string;
+  status: 'signed-out' | 'expired';
+  signIn: () => Promise<boolean>;
+  onSettled?: () => void;
+  /** The launch refusal has no census record to reread; its sign-in result is authoritative. */
+  showSuccess?: boolean;
+}) {
+  const { t } = useI18n();
+  const [signing, setSigning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [complete, setComplete] = useState(false);
+  const startSignIn = () => {
     setSigning(true);
     setError(null);
-    source.signIn(harness, soul.agentId)
-      .then((loggedIn) => { if (!loggedIn) setError(t('login.signedOut')); })
+    signIn()
+      .then((loggedIn) => {
+        if (!loggedIn) setError(t('login.signedOut'));
+        else if (showSuccess) setComplete(true);
+      })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => { setSigning(false); reload(); });
+      .finally(() => { setSigning(false); onSettled?.(); });
   };
+  if (complete) return <p className="m-0 text-xs text-foreground" role="status">{t('login.ok')}</p>;
   return (
     <div className="space-y-2 border-b border-border p-3 md:px-8">
       <div role="alert" className="flex items-start gap-3 rounded-md border border-destructive/50 bg-destructive/10 p-3">
         <LogIn className="mt-0.5 size-4 text-destructive" aria-hidden />
         <div className="min-w-0 flex-1">
           <p className="m-0 text-sm font-semibold">
-            {t(failure.status === 'expired' ? 'login.expiredTitle' : 'login.signedOutTitle', { harness })}
+            {t(status === 'expired' ? 'login.expiredTitle' : 'login.signedOutTitle', { harness })}
           </p>
           <p className="m-0 text-xs text-muted-foreground">{t('login.expiredBody', { name, harness })}</p>
           {error && <p className="m-0 text-[11px] text-destructive">{t('login.failed', { message: error })}</p>}
         </div>
-        <button type="button" disabled={signing} onClick={signIn}
+        <button type="button" disabled={signing} onClick={startSignIn}
           className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50">
           {signing ? <><Loader2 className="size-4 animate-spin" aria-hidden />{t('login.signingIn', { harness })}</> : t('login.signIn')}
         </button>

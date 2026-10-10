@@ -74,6 +74,15 @@ describe('SoulNotices (#122)', () => {
     expect(s.population).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps census failure authoritative when sign-in succeeds but it remains recorded', async () => {
+    const s = source();
+    show(s);
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in again' }));
+    await waitFor(() => expect(s.population).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole('alert').textContent).toContain('codex sign-in expired');
+    expect(screen.getByRole('button', { name: 'Sign in again' })).toBeTruthy();
+  });
+
   it('keeps the banner with the reason when sign-in fails', async () => {
     const s = source({ signIn: vi.fn(async () => { throw new Error('codex sign-in did not finish'); }) });
     show(s);

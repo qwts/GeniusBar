@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   harnessOptions,
+  launchNeedsHarnessSignIn,
   preferredHarness,
   prefillHarness,
   suggestedName,
@@ -111,6 +112,28 @@ describe('launch lifecycle', () => {
     expect(applyStatus(pending, { status: 'failed', agentId: null, detail: 'no GitHub identity' }))
       .toEqual({ phase: 'failed', requestId: 'launch_1', agentId: null, detail: 'no GitHub identity' });
     expect(applyStatus(pending, { status: 'failed' })).toMatchObject({ phase: 'failed', detail: null });
+  });
+
+  it('retains structured launch failure codes and recognizes only an explicit harness sign-out', () => {
+    const refused = applyStatus(pending, {
+      status: 'failed',
+      code: 'harness-signed-out',
+      detail: 'harness-signed-out: codex is signed out; launch again',
+    });
+    expect(refused).toMatchObject({ phase: 'failed', code: 'harness-signed-out', detail: 'harness-signed-out: codex is signed out; launch again' });
+    expect(launchNeedsHarnessSignIn(refused)).toBe(true);
+    expect(launchNeedsHarnessSignIn({
+      phase: 'failed', requestId: 'launch_1', agentId: null,
+      detail: 'harness-signed-out: codex is signed out; launch again',
+    })).toBe(true);
+
+    for (const state of [
+      { phase: 'failed', requestId: 'launch_1', agentId: null, code: 'harness-unknown', detail: 'harness-unknown: status unavailable' },
+      { phase: 'failed', requestId: 'launch_1', agentId: null, code: 'other-code', detail: 'harness-signed-out: stale or conflicting detail' },
+      { phase: 'failed', requestId: 'launch_1', agentId: null, detail: 'probe says harness-signed-out: prefix is not anchored' },
+      { phase: 'failed', requestId: 'launch_1', agentId: null, detail: 'could not join the soul' },
+      pending,
+    ] as LaunchState[]) expect(launchNeedsHarnessSignIn(state)).toBe(false);
   });
 
   it('keeps the daemon\'s latest stage, never going back, and names it on a failure', () => {
