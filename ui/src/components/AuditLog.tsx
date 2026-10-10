@@ -76,16 +76,23 @@ export function AuditLog({ agentId, roster = [] }: { agentId: string | null; ros
             </tr>
           </thead>
           <tbody className="[&_tr:last-child]:border-0">
-            {rows.map((row) => (
-              <tr key={row.key} className="border-b border-border transition-colors hover:bg-muted/50">
-                <td className="p-2 align-middle whitespace-nowrap font-mono text-xs text-muted-foreground">
-                  <time dateTime={row.at}>{auditTime(row.at, lang)}</time>
-                </td>
-                <td className="p-2 align-middle text-sm">{row.who}</td>
-                <td className="p-2 align-middle font-mono text-xs text-primary">{row.event}</td>
-                <td className="max-w-md truncate p-2 align-middle text-xs" title={row.detail || undefined}>{row.detail}</td>
-              </tr>
-            ))}
+            {rows.map((row) => {
+              const detail = [
+                row.detail,
+                row.record.appSlug ? `${t('audit.app')}: ${row.record.appSlug}` : '',
+                row.record.reason ? `${t('audit.reason')}: ${row.record.reason}` : '',
+              ].filter(Boolean).join(' · ');
+              return (
+                <tr key={row.key} className="border-b border-border transition-colors hover:bg-muted/50">
+                  <td className="p-2 align-middle whitespace-nowrap font-mono text-xs text-muted-foreground">
+                    <time dateTime={row.at}>{auditTime(row.at, lang)}</time>
+                  </td>
+                  <td className="p-2 align-middle text-sm">{row.who}</td>
+                  <td className="p-2 align-middle font-mono text-xs text-primary">{row.event}</td>
+                  <td className="max-w-md truncate p-2 align-middle text-xs" title={detail || undefined}>{detail}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

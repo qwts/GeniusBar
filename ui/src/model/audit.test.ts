@@ -5,16 +5,16 @@ import { sampleAudit, sampleCensus } from './fixtures';
 describe('audit records', () => {
   it('keeps the known string fields and drops malformed records', () => {
     expect(normalizeAudit({ records: [
-      { at: '2026-10-05T10:00:00Z', event: 'permission', agentId: 'agent_p', operation: 'Bash', decision: 'allow', detail: 'Bash: ls', extra: 'x', transport: 7 },
+      { at: '2026-10-05T10:00:00Z', event: 'permission', agentId: 'agent_p', operation: 'Bash', decision: 'allow', detail: 'Bash: ls', appSlug: 'github', reason: 'owner approved', extra: 'x', credential: 'must not pass through', transport: 7 },
       { at: '2026-10-05T10:01:00Z' },
       { event: 'permission' },
       { at: 1, event: 'permission' },
       { at: '2026-10-05T10:02:00Z', event: '' },
       null,
       'line',
-      { at: '2026-10-05T10:03:00Z', event: 'credential-mint', detail: '' },
+      { at: '2026-10-05T10:03:00Z', event: 'credential-mint', detail: '', appSlug: '', reason: { explanation: 'malformed' } },
     ] })).toEqual([
-      { at: '2026-10-05T10:00:00Z', event: 'permission', agentId: 'agent_p', operation: 'Bash', decision: 'allow', detail: 'Bash: ls' },
+      { at: '2026-10-05T10:00:00Z', event: 'permission', agentId: 'agent_p', operation: 'Bash', decision: 'allow', detail: 'Bash: ls', appSlug: 'github', reason: 'owner approved' },
       { at: '2026-10-05T10:03:00Z', event: 'credential-mint' },
     ]);
     expect(normalizeAudit({ records: [] })).toEqual([]);
@@ -46,6 +46,21 @@ describe('audit rows', () => {
       { who: AUDIT_HOST, event: 'cold-wake-setting', detail: '' },
       { who: 'agent_x', event: 'credential-grant', detail: 'grant' },
     ]);
+  });
+
+  it('keeps App and reason on the record exported alongside existing detail', () => {
+    const raw = {
+      at: '2026-10-05T10:00:00Z', event: 'permission', operation: 'credential grant',
+      detail: 'GitHub access', appSlug: 'github', reason: 'approved by owner', credentialValue: 'private-value',
+    };
+    const record = normalizeAuditRecord(raw)!;
+    const rows = auditRows([record]);
+    expect(rows[0].detail).toBe('GitHub access');
+    expect(JSON.parse(auditJson(rows))).toEqual([{
+      at: raw.at, event: raw.event, operation: raw.operation, detail: raw.detail,
+      appSlug: raw.appSlug, reason: raw.reason,
+    }]);
+    expect(auditJson(rows)).not.toContain('private-value');
   });
 
   it('sorts by time, keeping ties newest-last order reversed and unreadable times last', () => {
